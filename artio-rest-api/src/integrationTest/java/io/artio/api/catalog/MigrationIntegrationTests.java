@@ -45,8 +45,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(20);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("20");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(21);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("21");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('catalog_product_translations')")) {
             assertThat(result.next()).isTrue();

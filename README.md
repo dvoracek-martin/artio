@@ -82,6 +82,8 @@ Extension manifest preflight is available to administrators at `POST /api/v1/adm
 
 Create an active warehouse, receive stock for each variant and create an active price before testing checkout. Checkout refreshes all prices, calculates taxes, reserves stock, creates a pending order and requests a Stripe Checkout session. It requires an `Idempotency-Key`; replay returns the original order. Stripe session creation uses a stable order-scoped idempotency key and a 31-minute provider expiry. Immediately before session creation, the API extends all active stock holds through the session window plus a one-minute safety margin under the stock-row locks. Stripe's signed completion event marks the order paid; an expired session releases reservations early. Administrators can ship paid orders and record a tracking number through `/api/v1/admin/orders/{id}/ship`.
 
+If Stripe webhook delivery is delayed or lost, the API reconciles pending sessions after their expected 31-minute lifetime. The bounded worker claims work with PostgreSQL `SKIP LOCKED`, queries Stripe outside the database transaction, and applies paid/expired outcomes under the order lock. Transient failures retry with exponential backoff capped at one hour; `payments.reconciliation_last_error` stores only a bounded error type. Polling defaults to 60 seconds and can be tuned with `ARTIO_PAYMENTS_RECONCILIATION_INTERVAL_MS`.
+
 Orders preserve the checkout shipping country, market, tax jurisdiction and a versioned per-line tax snapshot including applied rate/effective period, discounts, tax-inclusive mode, currency and quote timestamp. Historical orders predating this snapshot are marked as having unknown policy provenance; their stored totals are not rewritten.
 
 ## Configurable bundles
