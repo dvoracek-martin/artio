@@ -18,10 +18,8 @@ public class EncryptionService {
     private final SecretKeySpec key;
     private final SecureRandom random = new SecureRandom();
 
-    public EncryptionService(@Value("${artio.security.encryption-key}") String configuredKey,
-                             @Value("${spring.profiles.active:}") String activeProfiles) {
-        if(configuredKey.getBytes(StandardCharsets.UTF_8).length<32)throw new IllegalStateException("ARTIO_ENCRYPTION_KEY must contain at least 32 bytes");
-        if(java.util.Arrays.asList(activeProfiles.split(",")).contains("production")&&configuredKey.equals("local-development-encryption-secret-change-before-deploy"))throw new IllegalStateException("ARTIO_ENCRYPTION_KEY must be explicitly configured in production");
+    public EncryptionService(@Value("${artio.security.encryption-key}") String configuredKey) {
+        SecretConfigurationValidator.requireStrongSecret(configuredKey, "ARTIO_ENCRYPTION_KEY");
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(configuredKey.getBytes(StandardCharsets.UTF_8));
             this.key = new SecretKeySpec(digest, "AES");

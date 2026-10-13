@@ -30,8 +30,9 @@ public class ProductController {
     @GetMapping("/search")
     public List<io.artio.catalog.ports.ProductSearchResult> search(
             @org.springframework.web.bind.annotation.RequestParam String q,
-            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int limit) {
-        return products.search(q, limit);
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int limit,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "en") String locale) {
+        return products.search(q, limit, locale);
     }
 
     @GetMapping("/{id}")

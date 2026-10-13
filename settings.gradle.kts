@@ -26,6 +26,7 @@ include(
     "artio-users",
     "artio-payments",
     "artio-notifications",
+    "artio-extensions",
     "artio-rest-api",
     "artio-storefront",
     "artio-backoffice",

@@ -21,7 +21,9 @@ public final class PricingEngine {
         BigDecimal taxRate = taxRule != null && taxRule.applies(jurisdiction, at) ? taxRule.getRate().value() : BigDecimal.ZERO;
         BigDecimal tax = taxable.multiply(taxRate.movePointLeft(2)).setScale(scale, RoundingMode.HALF_EVEN);
         return new PricingQuote(unitPrice, money(lineList, unitPrice, scale), money(lineDiscount, unitPrice, scale),
-                money(taxable, unitPrice, scale), money(tax, unitPrice, scale), money(taxable.add(tax), unitPrice, scale));
+                money(taxable, unitPrice, scale), money(tax, unitPrice, scale), money(taxable.add(tax), unitPrice, scale),
+                jurisdiction, taxRate, taxRule != null && taxRule.applies(jurisdiction, at) ? taxRule.getValidFrom() : null,
+                taxRule != null && taxRule.applies(jurisdiction, at) ? taxRule.getValidUntil() : null, at);
     }
     private Money money(BigDecimal value, Money basis, int scale) { return new Money(value.setScale(scale, RoundingMode.HALF_EVEN), basis.currency()); }
 }

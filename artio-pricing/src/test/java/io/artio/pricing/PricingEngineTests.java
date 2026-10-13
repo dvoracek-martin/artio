@@ -34,6 +34,16 @@ class PricingEngineTests {
         assertThat(quote.discounts().amount()).isEqualByComparingTo("0.02");
         assertThat(quote.total().amount()).isEqualByComparingTo("0.13");
     }
+    @Test void quoteCarriesTheEffectiveTaxPolicyProvenance() {
+        UUID item=UUID.randomUUID();Instant starts=NOW.minusSeconds(3600);Instant ends=NOW.plusSeconds(3600);
+        var tax=TaxRule.create(new TaxRuleId(UUID.randomUUID()),"CH-ZH",new Percentage(new BigDecimal("8.1")),starts,ends);
+        var quote=new PricingEngine().calculate(item,dollars("100.00"),new Quantity(BigDecimal.ONE),"CH","CH-ZH",NOW,List.of(),tax);
+        assertThat(quote.jurisdiction()).isEqualTo("CH-ZH");
+        assertThat(quote.taxRatePercent()).isEqualByComparingTo("8.1");
+        assertThat(quote.taxRuleValidFrom()).isEqualTo(starts);
+        assertThat(quote.taxRuleValidUntil()).isEqualTo(ends);
+        assertThat(quote.pricedAt()).isEqualTo(NOW);
+    }
     @Test void rejectsInvalidPricePeriodAndMarketCodes() {
         assertThatThrownBy(() -> Price.create(new PriceId(UUID.randomUUID()), UUID.randomUUID(), "us", "WEB", dollars("1"), NOW, null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Price.create(new PriceId(UUID.randomUUID()), UUID.randomUUID(), "US", "WEB", dollars("1"), NOW, NOW)).isInstanceOf(IllegalArgumentException.class);

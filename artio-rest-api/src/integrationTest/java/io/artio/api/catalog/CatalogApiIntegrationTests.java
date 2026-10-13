@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
+import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -47,6 +49,12 @@ class CatalogApiIntegrationTests {
     @Autowired
     private ObjectMapper mapper;
 
+    @Autowired
+    private io.artio.api.inventory.InventoryApplicationService inventory;
+
+    @Autowired
+    private io.artio.api.security.EncryptionService encryption;
+
     private String adminToken;
 
     @DynamicPropertySource
@@ -54,6 +62,11 @@ class CatalogApiIntegrationTests {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("artio.security.jwt-secret", () -> "integration-test-jwt-secret-value-32-bytes-minimum");
+        registry.add("artio.security.encryption-key", () -> "integration-test-encryption-key-value-32-bytes-minimum");
+        registry.add("artio.extensions.trusted-registries", () -> "ghcr.io");
+        registry.add("artio.inventory.expiry-interval-ms", () -> "3600000");
+        registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
     }
 
     @BeforeEach
@@ -68,6 +81,7 @@ class CatalogApiIntegrationTests {
         var login = http.postForObject("/api/auth/login",
                 Map.of("email", "admin-" + userId + "@example.test", "password", "admin-password-123"), LoginResponse.class);
         assertThat(login).isNotNull();
+        assertThat(login.accessToken()).isNotBlank();
         adminToken = login.accessToken();
     }
 
@@ -105,6 +119,213 @@ class CatalogApiIntegrationTests {
         var inactive = http.getForEntity("/api/products/{id}", ProductResponse.class, created.getBody().id());
         assertThat(inactive.getBody()).isNotNull();
         assertThat(inactive.getBody().active()).isFalse();
+    }
+
+    @Test
+    void storesTranslationsIndependentlyAndResolvesLocaleFallbackPerField() {
+        var product = adminExchange("/api/products", HttpMethod.POST,
+                new ProductRequest("Coffee", "Base description", "COF-100"), ProductResponse.class);
+        assertThat(product.getBody()).isNotNull();
+        UUID id = product.getBody().id();
+
+        adminExchange("/api/products/{id}/translations/{locale}", HttpMethod.PUT,
+                new ProductTranslationApplicationService.TranslationRequest("Kaffee", null),
+                ProductTranslationApplicationService.TranslationView.class, id, "de");
+        adminExchange("/api/products/{id}/translations/{locale}", HttpMethod.PUT,
+                new ProductTranslationApplicationService.TranslationRequest("Coffee", "Roasted beans"),
+                ProductTranslationApplicationService.TranslationView.class, id, "en");
+
+        var localized = http.getForEntity("/api/v1/products/{id}/localized?locale=de",
+                ProductTranslationApplicationService.LocalizedProductView.class, id);
+        assertThat(localized.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(localized.getBody()).isNotNull();
+        assertThat(localized.getBody().name()).isEqualTo("Kaffee");
+        assertThat(localized.getBody().description()).isEqualTo("Roasted beans");
+        assertThat(localized.getBody().sku()).isEqualTo("COF-100");
+
+        var translations = http.getForEntity("/api/products/{id}/translations",
+                ProductTranslationApplicationService.TranslationView[].class, id);
+        assertThat(translations.getBody()).hasSize(2);
+        var canonical = http.getForEntity("/api/products/{id}", ProductResponse.class, id);
+        assertThat(canonical.getBody()).isNotNull();
+        assertThat(canonical.getBody().name()).isEqualTo("Coffee");
+    }
+
+    @Test
+    void validatesExtensionManifestOnlyForAdministratorsAndNeverExecutesImage() {
+        var manifest = new io.artio.extensions.PluginManifest("1", "payments.example", "Example Payments", "Artio",
+                "1.0.0", "Example provider", "0.1.0", "1.0.0",
+                "ghcr.io/artio/example-payments@sha256:" + "a".repeat(64), java.util.List.of(),
+                java.util.List.of("payment.process"), java.util.Map.of(), java.util.List.of("payment.provider.v1"),
+                "/health", "/diagnostics");
+
+        var anonymous = http.postForEntity("/api/v1/admin/extensions/validate", manifest, ApiError.class);
+        assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        var validation = adminExchange("/api/v1/admin/extensions/validate", HttpMethod.POST, manifest,
+                io.artio.api.extensions.ExtensionManagementController.ManifestValidationResponse.class);
+        assertThat(validation.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(validation.getBody()).isNotNull();
+        assertThat(validation.getBody().valid()).isTrue();
+
+        var mutable = new io.artio.extensions.PluginManifest("1", "payments.example", "Example Payments", "Artio",
+                "1.0.0", "Example provider", "0.1.0", "1.0.0", "ghcr.io/artio/example-payments:latest",
+                java.util.List.of(), java.util.List.of("host-access"), java.util.Map.of(), java.util.List.of("payment.provider.v1"),
+                "/health", "/diagnostics");
+        var rejected = adminExchange("/api/v1/admin/extensions/validate", HttpMethod.POST, mutable,
+                io.artio.api.extensions.ExtensionManagementController.ManifestValidationResponse.class);
+        assertThat(rejected.getBody()).isNotNull();
+        assertThat(rejected.getBody().valid()).isFalse();
+        assertThat(rejected.getBody().errors()).contains("image must be pinned by sha256 digest", "unsupported permission: host-access");
+    }
+
+    @Test
+    void registersExtensionValidatesAndEncryptsSecretsAndAuditsWithoutReturningSecretValues() throws Exception {
+        var manifest = new io.artio.extensions.PluginManifest("1", "payments.integration", "Integration Payments", "Artio",
+                "1.0.0", "Integration provider", "0.1.0", "1.0.0",
+                "ghcr.io/artio/integration-payments@sha256:" + "b".repeat(64), java.util.List.of(),
+                java.util.List.of("payment.process"), java.util.Map.of(
+                        "apiKey", new io.artio.extensions.PluginManifest.ConfigField("secret", true, true, "API key", "Provider secret", null, java.util.List.of(), null, null, null, null),
+                        "mode", new io.artio.extensions.PluginManifest.ConfigField("enum", true, false, "Mode", null, null, java.util.List.of("test", "live"), null, null, null, null),
+                        "endpoint", new io.artio.extensions.PluginManifest.ConfigField("url", true, false, "Endpoint", null, null, java.util.List.of(), null, null, null, null)),
+                java.util.List.of("payment.provider.v1"), "/health", "/diagnostics");
+        var registered = adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, manifest,
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class);
+        assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(registered.getBody()).isNotNull();
+        assertThat(registered.getBody().lifecycleState()).isEqualTo("VALIDATED");
+
+        String secret = "sk_test_write_only_integration_secret";
+        var configured = adminExchange("/api/v1/admin/extensions/{id}/configuration", HttpMethod.PUT,
+                Map.of("apiKey", secret, "mode", "test", "endpoint", "https://provider.example.test"),
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class, manifest.id());
+        assertThat(configured.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(configured.getBody()).isNotNull();
+        assertThat(configured.getBody().configuredSecrets()).contains("apiKey");
+        assertThat(mapper.writeValueAsString(configured.getBody())).doesNotContain(secret);
+        String ciphertext = jdbc.queryForObject("SELECT encrypted_secrets->>'apiKey' FROM extension_plugins WHERE plugin_id=?", String.class, manifest.id());
+        assertThat(ciphertext).isNotBlank().doesNotContain(secret);
+        assertThat(encryption.decrypt(ciphertext)).isEqualTo(secret);
+
+        var updated = adminExchange("/api/v1/admin/extensions/{id}/configuration", HttpMethod.PUT,
+                Map.of("mode", "live", "endpoint", "https://provider.example.test"),
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class, manifest.id());
+        assertThat(updated.getBody()).isNotNull();
+        assertThat(updated.getBody().configurationVersion()).isEqualTo(2);
+        assertThat(updated.getBody().configuredSecrets()).contains("apiKey");
+        var audit = adminExchange("/api/v1/admin/extensions/{id}/audit", HttpMethod.GET, null,
+                io.artio.api.extensions.ExtensionManagementController.AuditView[].class, manifest.id());
+        assertThat(audit.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(audit.getBody()).hasSize(3);
+        assertThat(mapper.writeValueAsString(audit.getBody())).doesNotContain(secret);
+
+        var invalid = adminExchange("/api/v1/admin/extensions/{id}/configuration", HttpMethod.PUT,
+                Map.of("mode", "root", "endpoint", "javascript:alert(1)"),
+                io.artio.api.extensions.ExtensionManagementController.ConfigurationErrorResponse.class, manifest.id());
+        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void expiryJobReleasesReservedStockAndDoesNotConsumeOnHand() {
+        var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest("EXP-01", "Expiry warehouse", "CH-ZH"),
+                io.artio.api.inventory.InventoryApplicationService.WarehouseView.class);
+        assertThat(warehouse.getBody()).isNotNull();
+        UUID warehouseId = warehouse.getBody().id();
+        UUID sellableId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(new BigDecimal("5")),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouseId, sellableId);
+
+        var reservation = inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                orderId, warehouseId, sellableId, new BigDecimal("2")));
+        assertThat(reservation.expiresAt()).isAfter(java.time.Instant.now());
+        jdbc.update("UPDATE inventory_reservation SET expires_at=now()-interval '1 second' WHERE id=?", reservation.id());
+
+        assertThat(inventory.expireDueReservations(java.time.Instant.now(), 100)).isEqualTo(1);
+        assertThat(inventory.reservationsByOrder(orderId)).singleElement()
+                .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
+                .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
+        assertThat(inventory.stockBySellable(sellableId)).singleElement()
+                .satisfies(stock -> {
+                    assertThat(stock.onHand()).isEqualByComparingTo("5");
+                    assertThat(stock.reserved()).isEqualByComparingTo("0");
+                    assertThat(stock.available()).isEqualByComparingTo("5");
+                });
+    }
+
+    @Test
+    void checkoutIsIdempotentAndPersistsTaxProvenanceSnapshot() throws Exception {
+        var product = adminExchange("/api/products", HttpMethod.POST,
+                new ProductRequest("Tax snapshot item", "Taxable", "TAX-SNAP-1"), ProductResponse.class);
+        assertThat(product.getBody()).isNotNull();
+        var variant = adminExchange("/api/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Standard", "TAX-SNAP-1-STD"), VariantResponse.class, product.getBody().id());
+        assertThat(variant.getBody()).isNotNull();
+        adminExchange("/api/prices", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.PriceRequest(variant.getBody().id(), "US", "WEB",
+                        new BigDecimal("50.00"), "USD", java.time.Instant.now().minusSeconds(3600), null),
+                io.artio.api.pricing.PricingApplicationService.PriceView.class);
+        adminExchange("/api/tax-rules", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.TaxRequest("US", new BigDecimal("8.25"),
+                        java.time.Instant.now().minusSeconds(3600), null),
+                io.artio.api.pricing.PricingApplicationService.TaxView.class);
+        var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest("IDEM-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Checkout", "US"),
+                String.class);
+        assertThat(warehouse.getStatusCode()).withFailMessage("Warehouse response: %s", warehouse.getBody()).isEqualTo(HttpStatus.CREATED);
+        var warehouseView = readWarehouse(warehouse.getBody());
+        var received = adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(new BigDecimal("10")),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouseView.id(), variant.getBody().id());
+        assertThat(received.getStatusCode()).withFailMessage("Receipt response: %s", received.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(received.getBody()).isNotNull();
+        assertThat(received.getBody().available()).isEqualByComparingTo("10");
+        var bundleResponse = adminExchange("/api/bundles", HttpMethod.POST,
+                new io.artio.api.bundles.BundleApplicationService.BundleRequest("Snapshot bundle", "SNAP-BUNDLE-1",
+                        io.artio.bundles.BundleType.FIXED,
+                        List.of(new io.artio.api.bundles.BundleApplicationService.ComponentRequest(variant.getBody().id(), BigDecimal.ONE)),
+                        List.of(), new io.artio.api.bundles.BundleApplicationService.PricingRuleRequest(
+                                io.artio.bundles.BundlePricingRule.Mode.COMPONENT_SUM, null, null, null)),
+                io.artio.api.bundles.BundleApplicationService.BundleView.class);
+        assertThat(bundleResponse.getBody()).isNotNull();
+        adminExchange("/api/bundles/{id}/active", HttpMethod.PUT,
+                new io.artio.api.bundles.BundleController.ActiveRequest(true),
+                io.artio.api.bundles.BundleApplicationService.BundleView.class, bundleResponse.getBody().id());
+        adminExchange("/api/cart/bundles", HttpMethod.POST,
+                new io.artio.api.orders.CartController.AddBundleRequest(bundleResponse.getBody().id(), Map.of(),
+                        new BigDecimal("2"), "US", "WEB", "US"),
+                io.artio.api.orders.CartController.CartView.class);
+
+        String key = UUID.randomUUID().toString();
+        var headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+        headers.set("Idempotency-Key", key);
+        var body = new io.artio.api.orders.CartController.CheckoutRequest("1 Main Street, Zurich", null, "US");
+        var first = http.exchange("/api/v1/cart/checkout", HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+        assertThat(first.getStatusCode()).withFailMessage("Checkout response: %s", first.getBody()).isEqualTo(HttpStatus.CREATED);
+        var firstBody = readOrder(first.getBody());
+        assertThat(firstBody.tax()).isEqualByComparingTo("8.25");
+        assertThat(firstBody.taxSnapshot()).containsEntry("jurisdiction", "US");
+        assertThat(firstBody.taxSnapshot()).containsKey("bundles");
+        assertThat(mapper.writeValueAsString(firstBody.taxSnapshot().get("bundles")))
+                .contains(bundleResponse.getBody().id().toString(), variant.getBody().id().toString(), "configuredTotal", "componentAdjustmentFactor");
+
+        var replay = http.exchange("/api/v1/cart/checkout", HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(readOrder(replay.getBody()).orderId()).isEqualTo(firstBody.orderId());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE idempotency_key=?", Integer.class, key)).isEqualTo(1);
+    }
+
+    private io.artio.api.orders.CartController.OrderView readOrder(String json) {
+        try { return mapper.readValue(json, io.artio.api.orders.CartController.OrderView.class); }
+        catch (Exception e) { throw new AssertionError("Could not decode checkout response: " + json, e); }
+    }
+
+    private io.artio.api.inventory.InventoryApplicationService.WarehouseView readWarehouse(String json) {
+        try { return mapper.readValue(json, io.artio.api.inventory.InventoryApplicationService.WarehouseView.class); }
+        catch (Exception e) { throw new AssertionError("Could not decode warehouse response: " + json, e); }
     }
 
     @Test
@@ -155,7 +376,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabase() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE", String.class);
-        assertThat(appliedVersions).contains("6", "7", "8", "9", "10");
+        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "

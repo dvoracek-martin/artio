@@ -75,7 +75,7 @@ services:
     image: grafana/grafana:11.2.2
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-this-local-password}
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}"
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ../artio-observability/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -90,8 +90,8 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: artio
-      POSTGRES_USER: artio
-      POSTGRES_PASSWORD: artio
+      POSTGRES_USER: ${ARTIO_DATABASE_USERNAME:-artio}
+      POSTGRES_PASSWORD: "${ARTIO_DATABASE_PASSWORD:?Set ARTIO_DATABASE_PASSWORD in .env}"
     ports:
       - "5432:5432"
     healthcheck:
@@ -107,13 +107,17 @@ services:
       context: ..
       dockerfile: artio-docker/Dockerfile
     environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
       ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
-      ARTIO_DATABASE_USERNAME: artio
-      ARTIO_DATABASE_PASSWORD: artio
+      ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
+      ARTIO_DATABASE_PASSWORD: "${ARTIO_DATABASE_PASSWORD:?Set ARTIO_DATABASE_PASSWORD in .env}"
       ARTIO_SEARCH_ENABLED: "true"
       ARTIO_SEARCH_URL: http://opensearch:9200
-      ARTIO_JWT_SECRET: ${ARTIO_JWT_SECRET:-replace-this-local-secret-with-at-least-32-random-bytes}
-      ARTIO_ENCRYPTION_KEY: ${ARTIO_ENCRYPTION_KEY:-replace-this-local-encryption-secret-before-deployment}
+      ARTIO_JWT_SECRET: "${ARTIO_JWT_SECRET:?Set ARTIO_JWT_SECRET in .env}"
+      ARTIO_ENCRYPTION_KEY: "${ARTIO_ENCRYPTION_KEY:?Set ARTIO_ENCRYPTION_KEY in .env}"
+      ARTIO_EXTENSION_TRUSTED_REGISTRIES: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-}
+      ARTIO_INVENTORY_RESERVATION_TTL: ${ARTIO_INVENTORY_RESERVATION_TTL:-PT30M}
+      ARTIO_INVENTORY_EXPIRY_INTERVAL_MS: ${ARTIO_INVENTORY_EXPIRY_INTERVAL_MS:-60000}
       ARTIO_ALLOWED_ORIGINS: ${ARTIO_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4201}
       ARTIO_BOOTSTRAP_ADMIN_EMAIL: ${ARTIO_BOOTSTRAP_ADMIN_EMAIL:-}
       ARTIO_BOOTSTRAP_ADMIN_PASSWORD: ${ARTIO_BOOTSTRAP_ADMIN_PASSWORD:-}

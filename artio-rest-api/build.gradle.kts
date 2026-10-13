@@ -26,6 +26,7 @@ dependencies {
     implementation(project(":artio-users"))
     implementation(project(":artio-payments"))
     implementation(project(":artio-notifications"))
+    implementation(project(":artio-extensions"))
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-client")

@@ -58,7 +58,7 @@ public class PaymentController {
         form.add("line_items[0][price_data][currency]",order.currency().toLowerCase()); form.add("line_items[0][price_data][unit_amount]",Long.toString(minor));
         form.add("line_items[0][price_data][product_data][name]","Artio order "+orderId.toString().substring(0,8)); form.add("line_items[0][quantity]","1");
         Map<?,?> session;
-        try { session=stripe.post().uri("https://api.stripe.com/v1/checkout/sessions").headers(h->h.setBearerAuth(stripeKey)).contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(Map.class); }
+        try { session=stripe.post().uri("https://api.stripe.com/v1/checkout/sessions").headers(h->{h.setBearerAuth(stripeKey);h.set("Idempotency-Key","artio-order-"+orderId);}).contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(Map.class); }
         catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Payment provider could not create a checkout session");}
         String sessionId=String.valueOf(session.get("id")); String url=String.valueOf(session.get("url"));
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) VALUES (?,?,?,?,?,'STRIPE','PENDING',?,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",UUID.randomUUID(),orderId,userId,order.total(),order.currency(),sessionId);

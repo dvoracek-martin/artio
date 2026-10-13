@@ -31,10 +31,9 @@ import io.artio.api.error.ApiErrorWriter;
 
 @Configuration
 public class SecurityConfiguration {
-    @Bean SecretKey jwtSecretKey(@Value("${artio.security.jwt-secret}") String secret,@Value("${spring.profiles.active:}") String profiles) {
+    @Bean SecretKey jwtSecretKey(@Value("${artio.security.jwt-secret}") String secret) {
+        SecretConfigurationValidator.requireStrongSecret(secret, "ARTIO_JWT_SECRET");
         byte[] bytes = secret.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length < 32) throw new IllegalStateException("ARTIO_JWT_SECRET must contain at least 32 bytes");
-        if(java.util.Arrays.asList(profiles.split(",")).contains("production")&&secret.equals("local-development-secret-change-this-32-bytes-minimum"))throw new IllegalStateException("ARTIO_JWT_SECRET must be explicitly configured in production");
         return new SecretKeySpec(bytes, "HmacSHA256");
     }
     @Bean JwtEncoder jwtEncoder(SecretKey key) { return new NimbusJwtEncoder(new ImmutableSecret<>(key)); }
@@ -43,7 +42,7 @@ public class SecurityConfiguration {
         CorsConfiguration config=new CorsConfiguration();
         config.setAllowedOrigins(java.util.Arrays.stream(origins.split(",")).map(String::trim).filter(s->!s.isEmpty()).toList());
         config.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization","Content-Type","X-API-Key","X-Artio-Tenant"));
+        config.setAllowedHeaders(List.of("Authorization","Content-Type","Idempotency-Key","X-API-Key","X-Artio-Tenant"));
         config.setAllowCredentials(false); config.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source=new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/api/**",config); return source;
     }

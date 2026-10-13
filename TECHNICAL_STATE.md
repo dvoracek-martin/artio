@@ -7,13 +7,20 @@
 
 ## Aktuálně ověřený stav (2026-10-13)
 
-- Gradle registruje 21 modulových projektů. Mobile, Kubernetes/Istio a Terraform adresáře i mobilní convention plugin byly odstraněny; aktuálně popsanou deployment cestou je Docker Compose.
+- Gradle registruje 22 modulových projektů. Mobile, Kubernetes/Istio a Terraform adresáře i mobilní convention plugin byly odstraněny; aktuálně popsanou deployment cestou je Docker Compose.
 - `/api/v1` je kanonická REST cesta. `/api` zůstává kompatibilní alias. OpenAPI popisuje obě cesty, správné požadavky na bearer autentizaci a API vrací jednotný JSON chybový kontrakt včetně 401/403.
-- PostgreSQL Testcontainers ověřil čistou instalaci migrací V1–V10 i upgrade z V9 s uchováním uživatele a jeho členství. Runtime integrační testy API a autentizace prošly lokálně.
-- V10 zůstává beze změn. Lokální Git nemá její historii ani remote a dostupné Docker kontejnery/volumes neobsahují Artio databázi; stav externích databází tedy zůstává neznámý.
-- CI ověřuje dostupnost Dockeru a explicitně spouští `clean build integrationTest jacocoTestReport`. Hosted run nelze ověřit, protože repozitář nemá nastavený remote.
+- PostgreSQL Testcontainers ověřil čistou instalaci migrací V1–V15 i upgrade z V9 s uchováním uživatele a jeho členství. API překlady, extension manifest/registraci/konfiguraci/audit, expirace rezervací a checkout idempotency/tax snapshots mají integrační pokrytí.
+- Extension management zahrnuje manifest v1, admin preflight a registraci, persistenci konfigurace podle schématu, AES-GCM šifrování secretů, write-only secret view a append-only audit. Žádný Docker image se z API nespouští; bounded Docker runtime, invocation, health/diagnostics a rollback stále chybí.
+- V11 přidává locale-scoped produktové překlady (`de`, `it`, `fr`, `en`) a fallback požadovaný jazyk → angličtina → základní copy. OpenSearch indexuje lokalizované dokumenty; Backoffice nyní umožňuje administrátorovi upravovat překlady názvu a popisu. Reindex stávajícího indexu zůstává otevřeným úkolem.
+- V12 přidává expiraci rezervací a periodické uvolňování v transakci. TTL defaultně 30 minut lze nastavit pomocí `ARTIO_INVENTORY_RESERVATION_TTL`; test prokázal, že expirace obnoví dostupnost bez snížení on-hand.
+- V13 ukládá ke každé objednávce checkout country/market/jurisdikci a verziovaný JSON tax snapshot s jednotlivými quote řádky, sazbou a efektivním obdobím. U historických záznamů se původní částky nemění a provenance je označena jako neznámá.
+- V14 vynucuje unikátní checkout idempotency key per uživatel. Stejný klíč vrací původní objednávku; storefront jej zachovává při opakování a Stripe Checkout volání používá stabilní klíč odvozený od order ID.
+- V15 přidává registrované pluginy a append-only audit. Veřejná konfigurace se ukládá jako JSONB; secret hodnoty se ukládají pouze šifrované a API vrací jen názvy nastavených secretů. API integrační test ověřil i zachování dřívějšího secretu při jeho vynechání v dalším PUT.
+- Checkout objednávkový tax snapshot nyní uchovává konfiguraci bundle: zvolené možnosti, vyřešené komponenty, množství, nakonfigurovanou cenu, korekční faktor a trh/jurisdikci. Implementace této změny ještě čeká na cílené ověření.
+- Hosted CI ani externí deployment provenance se v této iteraci neověřují podle pokynu vlastníka; zůstávají mimo aktuální implementační slice.
+- P1-07: API již nemá výchozí databázové heslo ani JWT/šifrovací klíče. Compose vyžaduje tyto hodnoty, spouští profil `production` a API odmítá krátké nebo zástupné kryptografické klíče. Nové validační unit testy a API Testcontainers integrační testy prošly; ukázkové hodnoty jsou v `.env.example` a musejí být nahrazeny před spuštěním.
 
-**Větev / výchozí commit:** `master` / `0148784` (základní implementace; změny této iterace jsou zatím lokální)
+**Větev / commit:** `main` / `6074286` (základ; současné implementační změny jsou lokální a necommitnuté, push provádí vlastník)
 **Účel:** popis skutečně přítomné architektury, rozhraní, provozu a omezení. Tento dokument není roadmapa ani tvrzení o certifikované produkční připravenosti.
 
 ## 1. Přehled

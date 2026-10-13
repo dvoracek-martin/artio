@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
 class EncryptionServiceTests {
-    private final EncryptionService encryption=new EncryptionService("test-key-material-is-long-enough-for-this-suite","");
+    private final EncryptionService encryption=new EncryptionService("test-key-material-is-long-enough-for-this-suite");
     @Test void encryptsWithRandomIvAndRoundTrips(){
         String value="secret that must not be stored in clear text";
         String first=encryption.encrypt(value),second=encryption.encrypt(value);

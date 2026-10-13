@@ -5,6 +5,7 @@ import io.artio.catalog.ProductDescription;
 import io.artio.catalog.ProductId;
 import io.artio.catalog.ProductName;
 import io.artio.catalog.Sku;
+import io.artio.catalog.LocaleCode;
 import io.artio.catalog.ports.ProductRepository;
 import io.artio.catalog.ports.ProductSearch;
 import io.artio.catalog.ports.ProductSearchResult;
@@ -58,10 +59,16 @@ public class ProductApplicationService {
 
     @Transactional(readOnly = true)
     public List<ProductSearchResult> search(String query, int limit) {
+        return search(query, limit, "en");
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductSearchResult> search(String query, int limit, String locale) {
         if (query == null || query.isBlank()) throw new IllegalArgumentException("Search query is required");
+        LocaleCode localeCode = new LocaleCode(locale);
         ProductSearch productSearch = search.getIfAvailable();
         if (productSearch == null) throw new IllegalStateException("Product search is not enabled");
-        return productSearch.search(query.trim(), limit);
+        return productSearch.search(query.trim(), limit, localeCode);
     }
 
     @Transactional(readOnly = true)

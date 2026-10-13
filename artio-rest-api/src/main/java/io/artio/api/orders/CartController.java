@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
+import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -89,10 +90,12 @@ public class CartController {
     }
 
     @PostMapping("/checkout") @Transactional
-    @ResponseStatus(HttpStatus.CREATED)
-    public OrderView checkout(@RequestBody CheckoutRequest request, JwtAuthenticationToken auth) {
-        if(stripeKey.isBlank())throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
+    public org.springframework.http.ResponseEntity<OrderView> checkout(@RequestBody CheckoutRequest request,
+            @RequestHeader("Idempotency-Key") String idempotencyKey, JwtAuthenticationToken auth) {
         UUID userId = userId(auth);
+        if(idempotencyKey==null||!idempotencyKey.matches("[A-Za-z0-9._:-]{8,128}"))throw new IllegalArgumentException("Idempotency-Key must contain 8 to 128 safe characters");
+        OrderView prior=findByIdempotencyKey(userId,idempotencyKey);if(prior!=null)return org.springframework.http.ResponseEntity.ok(prior);
+        if(stripeKey.isBlank())throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
         UUID cartId = jdbc.query("SELECT id FROM carts WHERE user_id=? AND expires_at>now()", rs -> rs.next() ? UUID.fromString(rs.getString(1)) : null, userId);
         if (cartId == null) throw new IllegalArgumentException("Cart is empty");
         List<CartRow> items = jdbc.query("SELECT id,variant_id,quantity,unit_price,currency,bundle_ref,bundle_id FROM cart_items WHERE cart_id=?", (rs,n) -> new CartRow(rs.getObject("id",UUID.class),rs.getObject("variant_id",UUID.class),rs.getBigDecimal("quantity"),rs.getBigDecimal("unit_price"),rs.getString("currency").trim(),rs.getObject("bundle_ref",UUID.class),rs.getObject("bundle_id",UUID.class)), cartId);
@@ -100,7 +103,7 @@ public class CartController {
         BigDecimal subtotal = BigDecimal.ZERO;
         BigDecimal tax = BigDecimal.ZERO;
         Market market=marketForCountry(request.shippingCountry());Currency currency=Currency.getInstance(market.currency());
-        List<OrderLineItem> orderItems=new java.util.ArrayList<>();Map<UUID,BigDecimal> requirements=new HashMap<>();Set<UUID> processedBundles=new java.util.HashSet<>();
+        List<OrderLineItem> orderItems=new java.util.ArrayList<>();List<LineTaxSnapshot> taxLines=new ArrayList<>();List<BundleOrderSnapshot> bundleSnapshots=new ArrayList<>();Map<UUID,BigDecimal> requirements=new HashMap<>();Set<UUID> processedBundles=new java.util.HashSet<>();
         for(CartRow item:items){
             if(item.bundleRef()!=null){if(!processedBundles.add(item.bundleRef()))continue;var bundleLine=jdbc.queryForObject("SELECT selected_options,quantity,market,channel,jurisdiction FROM cart_bundle_lines WHERE bundle_ref=? AND cart_id=?",(rs,n)->new BundleCartRow(rs.getString("selected_options"),rs.getBigDecimal("quantity"),rs.getString("market"),rs.getString("channel"),rs.getString("jurisdiction")),item.bundleRef(),cartId);
                 Map<String,Set<UUID>> selections;try{selections=mapper.readValue(bundleLine.selectedOptions(),new TypeReference<>(){});}catch(Exception e){throw new IllegalStateException("Stored bundle configuration is invalid",e);}
@@ -109,26 +112,32 @@ public class CartController {
                 var current=new ArrayList<ComponentPrice>();BigDecimal base=BigDecimal.ZERO;BigDecimal baseTax=BigDecimal.ZERO;
                 for(var component:config.components()){BigDecimal qty=component.quantity().multiply(bundleLine.quantity());var pq=pricing.quote(new PricingApplicationService.QuoteRequest(component.sellableId(),market.market(),"WEB",market.jurisdiction(),qty,null));if(!currency.equals(pq.unitListPrice().currency()))throw new IllegalArgumentException("Bundle currency does not match shipping country");base=base.add(pq.taxableAmount().amount());baseTax=baseTax.add(pq.tax().amount());current.add(new ComponentPrice(component.sellableId(),qty,pq));requirements.merge(component.sellableId(),qty,BigDecimal::add);}
                 if(base.signum()<=0)throw new IllegalArgumentException("The bundle cannot be repriced because its components have no current taxable value");BigDecimal bundleTotal=quote.totalPrice().amount();BigDecimal factor=bundleTotal.divide(base,12,RoundingMode.HALF_EVEN);subtotal=subtotal.add(base.multiply(factor));tax=tax.add(baseTax.multiply(factor));
-                for(var component:current){BigDecimal unit=component.quote().taxableAmount().amount().divide(component.quantity(),12,RoundingMode.HALF_EVEN).multiply(factor).setScale(Math.max(0,currency.getDefaultFractionDigits()),RoundingMode.HALF_EVEN);orderItems.add(new OrderLineItem(component.variantId(),new Quantity(component.quantity()),new Money(unit,currency),item.bundleId()));}
+                for(var component:current){BigDecimal unit=component.quote().taxableAmount().amount().divide(component.quantity(),12,RoundingMode.HALF_EVEN).multiply(factor).setScale(Math.max(0,currency.getDefaultFractionDigits()),RoundingMode.HALF_EVEN);orderItems.add(new OrderLineItem(component.variantId(),new Quantity(component.quantity()),new Money(unit,currency),item.bundleId()));taxLines.add(LineTaxSnapshot.from(component.variantId(),component.quantity(),component.quote(),item.bundleId(),factor));}
+                bundleSnapshots.add(new BundleOrderSnapshot(item.bundleId(),bundleLine.quantity(),selections,config.components().stream().map(c->new BundleComponentSnapshot(c.sellableId(),c.quantity())).toList(),quote.totalPrice().amount(),quote.totalPrice().currency().getCurrencyCode(),factor,market.market(),market.jurisdiction()));
             }else{
-                BigDecimal qty=item.quantity();var quote=pricing.quote(new PricingApplicationService.QuoteRequest(item.variantId(),market.market(),"WEB",market.jurisdiction(),qty,null));if(!currency.equals(quote.unitListPrice().currency()))throw new IllegalArgumentException("Cart currency does not match shipping country");subtotal=subtotal.add(quote.taxableAmount().amount());tax=tax.add(quote.tax().amount());orderItems.add(new OrderLineItem(item.variantId(),new Quantity(qty),quote.unitListPrice()));requirements.merge(item.variantId(),qty,BigDecimal::add);
+                BigDecimal qty=item.quantity();var quote=pricing.quote(new PricingApplicationService.QuoteRequest(item.variantId(),market.market(),"WEB",market.jurisdiction(),qty,null));if(!currency.equals(quote.unitListPrice().currency()))throw new IllegalArgumentException("Cart currency does not match shipping country");subtotal=subtotal.add(quote.taxableAmount().amount());tax=tax.add(quote.tax().amount());orderItems.add(new OrderLineItem(item.variantId(),new Quantity(qty),quote.unitListPrice()));taxLines.add(LineTaxSnapshot.from(item.variantId(),qty,quote,null,BigDecimal.ONE));requirements.merge(item.variantId(),qty,BigDecimal::add);
             }
         }
         if(subtotal.signum()<0)throw new IllegalArgumentException("Order total must not be negative");
         Money shipping=new Money(shippingCost,currency);
         var order=Order.checkout(userId,orderItems,request.shippingAddress(),request.billingAddress(),new Money(subtotal,currency),new Money(tax,currency),shipping);
-        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",order.getId().value(),userId,order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),order.shippingAddress(),request.billingAddress()==null?request.shippingAddress():request.billingAddress(),java.sql.Timestamp.from(order.createdAt()));
+        Map<String,Object> taxSnapshot=Map.of("schemaVersion",1,"calculatedAt",Instant.now(),"shippingCountry",request.shippingCountry().toUpperCase(java.util.Locale.ROOT),"market",market.market(),"jurisdiction",market.jurisdiction(),"currency",currency.getCurrencyCode(),"lines",List.copyOf(taxLines),"bundles",List.copyOf(bundleSnapshots));
+        String taxSnapshotJson;try{taxSnapshotJson=mapper.writeValueAsString(taxSnapshot);}catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Order tax snapshot could not be serialized",e);}
+        var inserted=jdbc.query("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?) ON CONFLICT(user_id,idempotency_key) DO NOTHING RETURNING id",(rs,n)->rs.getObject(1,UUID.class),order.getId().value(),userId,order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),order.shippingAddress(),request.billingAddress()==null?request.shippingAddress():request.billingAddress(),java.sql.Timestamp.from(order.createdAt()),request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshotJson,idempotencyKey);
+        if(inserted.isEmpty()){OrderView winner=findByIdempotencyKey(userId,idempotencyKey);if(winner==null)throw new IllegalStateException("Idempotent order was not visible after insert conflict");return org.springframework.http.ResponseEntity.ok(winner);}
         order.items().forEach(i->jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,?,?,?,?)",UUID.randomUUID(),order.getId().value(),i.variantId(),i.quantity().value(),i.unitPrice().amount(),i.unitPrice().currency().getCurrencyCode(),i.bundleId()));
         var warehouses=inventory.warehouses().stream().filter(InventoryApplicationService.WarehouseView::active).toList();
         for(var requirement:requirements.entrySet()){var selected=warehouses.stream().filter(w->inventory.stockByWarehouse(w.id()).stream().anyMatch(s->s.sellableId().equals(requirement.getKey())&&s.available().compareTo(requirement.getValue())>=0)).findFirst().orElseThrow(()->new IllegalStateException("Insufficient inventory for item "+requirement.getKey()));inventory.reserve(new InventoryApplicationService.ReserveRequest(order.getId().value(),selected.id(),requirement.getKey(),requirement.getValue()));}
         events.publishEvent(new io.artio.orders.OrderCreated(order.getId(),userId));jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
-        return new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null);
+        return org.springframework.http.ResponseEntity.status(HttpStatus.CREATED).body(new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null,request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshot));
     }
 
     @GetMapping("/orders")
     public List<OrderView> orders(JwtAuthenticationToken auth) {
-        return jdbc.query("SELECT id,status,subtotal,tax,shipping,total,currency,tracking_number FROM orders WHERE user_id=? ORDER BY created_at DESC", (rs,n) -> new OrderView(UUID.fromString(rs.getString(1)), rs.getString(2), rs.getBigDecimal(3), rs.getBigDecimal(4), rs.getBigDecimal(5), rs.getBigDecimal(6), rs.getString(7).trim(),rs.getString(8)), userId(auth));
+        return jdbc.query("SELECT id,status,subtotal,tax,shipping,total,currency,tracking_number,shipping_country,market,tax_jurisdiction,tax_snapshot FROM orders WHERE user_id=? ORDER BY created_at DESC", (rs,n) -> {try{return new OrderView(UUID.fromString(rs.getString(1)),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getBigDecimal(5),rs.getBigDecimal(6),rs.getString(7).trim(),rs.getString(8),rs.getString(9).trim(),rs.getString(10),rs.getString(11),mapper.readValue(rs.getString(12),new TypeReference<Map<String,Object>>(){}));}catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Stored order tax snapshot is invalid",e);}}, userId(auth));
     }
+
+    private OrderView findByIdempotencyKey(UUID userId,String key){var matches=jdbc.query("SELECT id,status,subtotal,tax,shipping,total,currency,tracking_number,shipping_country,market,tax_jurisdiction,tax_snapshot FROM orders WHERE user_id=? AND idempotency_key=?",(rs,n)->{try{return new OrderView(rs.getObject("id",UUID.class),rs.getString("status"),rs.getBigDecimal("subtotal"),rs.getBigDecimal("tax"),rs.getBigDecimal("shipping"),rs.getBigDecimal("total"),rs.getString("currency").trim(),rs.getString("tracking_number"),rs.getString("shipping_country").trim(),rs.getString("market"),rs.getString("tax_jurisdiction"),mapper.readValue(rs.getString("tax_snapshot"),new TypeReference<Map<String,Object>>(){}));}catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Stored order tax snapshot is invalid",e);}},userId,key);return matches.stream().findFirst().orElse(null);}
 
     private UUID ensureCart(UUID userId) {
         UUID id = jdbc.query("SELECT id FROM carts WHERE user_id=? AND expires_at>now() ORDER BY created_at DESC LIMIT 1", rs -> rs.next() ? UUID.fromString(rs.getString(1)) : null, userId);
@@ -148,9 +157,12 @@ public class CartController {
     public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry) { }
     public record ItemView(UUID variantId, BigDecimal quantity, BigDecimal unitPrice, String currency,UUID bundleId) { }
     public record CartView(UUID cartId, List<ItemView> items) { }
-    public record OrderView(UUID orderId, String status, BigDecimal subtotal, BigDecimal tax, BigDecimal shipping, BigDecimal total, String currency,String trackingNumber) { }
+    public record OrderView(UUID orderId, String status, BigDecimal subtotal, BigDecimal tax, BigDecimal shipping, BigDecimal total, String currency,String trackingNumber,String shippingCountry,String market,String taxJurisdiction,Map<String,Object> taxSnapshot) { }
+    private record LineTaxSnapshot(UUID sellableId,BigDecimal quantity,String currency,BigDecimal unitListPrice,BigDecimal lineListPrice,BigDecimal discount,BigDecimal taxableAmount,BigDecimal taxRatePercent,BigDecimal tax,java.time.Instant taxRuleValidFrom,java.time.Instant taxRuleValidUntil,java.time.Instant pricedAt,UUID bundleId,BigDecimal bundleAdjustmentFactor){static LineTaxSnapshot from(UUID id,BigDecimal quantity,io.artio.pricing.PricingQuote quote,UUID bundleId,BigDecimal factor){return new LineTaxSnapshot(id,quantity,quote.unitListPrice().currency().getCurrencyCode(),quote.unitListPrice().amount(),quote.lineListPrice().amount(),quote.discounts().amount(),quote.taxableAmount().amount(),quote.taxRatePercent(),quote.tax().amount(),quote.taxRuleValidFrom(),quote.taxRuleValidUntil(),quote.pricedAt(),bundleId,factor);}}
     private record CartRow(UUID id,UUID variantId,BigDecimal quantity,BigDecimal unitPrice,String currency,UUID bundleRef,UUID bundleId){}
     private record BundleCartRow(String selectedOptions,BigDecimal quantity,String market,String channel,String jurisdiction){}
+    private record BundleComponentSnapshot(UUID sellableId,BigDecimal quantity){}
+    private record BundleOrderSnapshot(UUID bundleId,BigDecimal quantity,Map<String,Set<UUID>> selectedOptions,List<BundleComponentSnapshot> components,BigDecimal configuredTotal,String currency,BigDecimal componentAdjustmentFactor,String market,String jurisdiction){}
     private record ComponentPrice(UUID variantId,BigDecimal quantity,io.artio.pricing.PricingQuote quote){}
     private static Market marketForCountry(String country){return switch(country==null?"":country.toUpperCase(java.util.Locale.ROOT)){case "US"->new Market("US","US","USD");case "CZ"->new Market("CZ","CZ","CZK");case "DE","AT","FR","NL","BE","ES","IT","PL","SK"->new Market("EU",country.toUpperCase(java.util.Locale.ROOT),"EUR");default->throw new IllegalArgumentException("Shipping country is not supported");};}
     private record Market(String market,String jurisdiction,String currency){}
