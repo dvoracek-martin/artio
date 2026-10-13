@@ -12,6 +12,8 @@ The validator checks manifest version, identifier and semantic-version shape, Co
 
 Runtime dependency checks use the installed manifest version and lifecycle state: install requires every dependency to be installed and inside its declared inclusive version range; enable requires every dependency to be enabled; disable is rejected while another enabled extension depends on the target. Registration's structural validation only confirms dependency declarations refer to registered plugin IDs.
 
+Backoffice currently exposes Install for configured plugins, Enable for installed/disabled plugins, Disable for enabled plugins, health display, and schema-backed configuration. Update, rollback, uninstall and invocation diagnostics are not yet part of the UI.
+
 ## Example
 
 ```json
