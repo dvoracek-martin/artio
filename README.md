@@ -84,6 +84,8 @@ Create an active warehouse, receive stock for each variant and create an active 
 
 If Stripe webhook delivery is delayed or lost, the API reconciles pending sessions after their expected 31-minute lifetime. The bounded worker claims work with PostgreSQL `SKIP LOCKED`, queries Stripe outside the database transaction, and applies paid/expired outcomes under the order lock. Transient failures retry with exponential backoff capped at one hour; `payments.reconciliation_last_error` stores only a bounded error type. Polling defaults to 60 seconds and can be tuned with `ARTIO_PAYMENTS_RECONCILIATION_INTERVAL_MS`.
 
+Processed Stripe webhook deduplication receipts are retained for 90 days by default and then removed in bounded batches. The retention interval and daily UTC cleanup schedule can be configured with `ARTIO_PAYMENTS_WEBHOOK_RECEIPT_RETENTION_DAYS` and `ARTIO_PAYMENTS_WEBHOOK_RECEIPT_RETENTION_CRON`. Unprocessed receipts are retained regardless of age.
+
 Orders preserve the checkout shipping country, market, tax jurisdiction and a versioned per-line tax snapshot including applied rate/effective period, discounts, tax-inclusive mode, currency and quote timestamp. Historical orders predating this snapshot are marked as having unknown policy provenance; their stored totals are not rewritten.
 
 ## Configurable bundles

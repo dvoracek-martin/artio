@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import io.artio.api.payments.StripeWebhookReceiptRetentionWorker;
 
 /** Exercises the supported clean installation against PostgreSQL. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -45,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(22);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("22");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(23);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("23");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('catalog_product_translations')")) {
             assertThat(result.next()).isTrue();
@@ -93,6 +96,19 @@ class MigrationIntegrationTests {
             assertThat(result.getString(1)).isNull();
             assertThat(result.getString(2)).isNull();
         }
+        var source = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        JdbcTemplate jdbc = new JdbcTemplate(source);
+        String prefix = "retention-" + java.util.UUID.randomUUID();
+        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('STRIPE',?,'completed',now()-interval '120 days',now()-interval '120 days')", prefix + "-old");
+        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('STRIPE',?,'completed',now()-interval '5 days',now()-interval '5 days')", prefix + "-recent");
+        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at) VALUES ('STRIPE',?,'pending',now()-interval '120 days')", prefix + "-unprocessed");
+
+        var worker = new StripeWebhookReceiptRetentionWorker(jdbc, 90);
+        assertThat(worker.removeExpiredReceipts()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE event_id LIKE ?", Integer.class, prefix + "%"))
+                .isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE event_id=? AND processed_at IS NULL", Integer.class, prefix + "-unprocessed"))
+                .isEqualTo(1);
     }
 
     private static FluentConfiguration flyway(String url) {
