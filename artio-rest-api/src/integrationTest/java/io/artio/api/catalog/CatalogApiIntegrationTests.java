@@ -270,9 +270,11 @@ class CatalogApiIntegrationTests {
     void concurrentReservationsCannotOversellSharedStock() throws Exception {
         var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
                 new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
-                        "CONC-" + UUID.randomUUID().toString().substring(0, 8), "Concurrency warehouse", "CH-ZH"),
+                        "CONC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Concurrency warehouse", "CH-ZH"),
                 io.artio.api.inventory.InventoryApplicationService.WarehouseView.class);
+        assertThat(warehouse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(warehouse.getBody()).isNotNull();
+        assertThat(warehouse.getBody().id()).isNotNull();
         UUID warehouseId = warehouse.getBody().id();
         UUID sellableId = UUID.randomUUID();
         adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
@@ -289,6 +291,37 @@ class CatalogApiIntegrationTests {
             assertThat(stock.reserved()).isEqualByComparingTo("3");
             assertThat(stock.available()).isEqualByComparingTo("2");
         });
+    }
+
+    @Test
+    void extendsReservedStockThroughThePaymentSessionWindow() {
+        var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                        "PAY-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Payment warehouse", "CH-ZH"),
+                io.artio.api.inventory.InventoryApplicationService.WarehouseView.class);
+        assertThat(warehouse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(warehouse.getBody()).isNotNull();
+        assertThat(warehouse.getBody().id()).isNotNull();
+        UUID warehouseId = warehouse.getBody().id();
+        UUID sellableId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(BigDecimal.ONE),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouseId, sellableId);
+        var initial = inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                orderId, warehouseId, sellableId, BigDecimal.ONE));
+        var minimumExpiry = java.time.Instant.now().plus(java.time.Duration.ofMinutes(31));
+
+        var actualExpiry = inventory.extendReservationsForPayment(orderId, minimumExpiry);
+
+        assertThat(actualExpiry).isAfterOrEqualTo(minimumExpiry);
+        assertThat(inventory.reservationsByOrder(orderId)).singleElement().satisfies(reservation -> {
+            assertThat(reservation.id()).isEqualTo(initial.id());
+            assertThat(reservation.state()).isEqualTo(io.artio.inventory.ReservationState.RESERVED);
+            assertThat(reservation.expiresAt()).isEqualTo(actualExpiry);
+        });
+        assertThat(inventory.stockBySellable(sellableId)).singleElement()
+                .satisfies(stock -> assertThat(stock.available()).isEqualByComparingTo("0"));
     }
 
     private boolean reserveIfAvailable(UUID orderId, UUID warehouseId, UUID sellableId) {

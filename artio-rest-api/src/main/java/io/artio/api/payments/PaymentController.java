@@ -10,6 +10,8 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Duration;
+import java.time.Instant;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,10 +52,15 @@ public class PaymentController {
         if(rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");
         OrderRow order=rows.getFirst();
         if(!"PENDING".equals(order.status())) throw new ResponseStatusException(HttpStatus.CONFLICT,"Order is not awaiting payment");
+        Instant now=Instant.now();
+        Instant sessionExpiresAt=now.plus(Duration.ofMinutes(31));
+        try { inventory.extendReservationsForPayment(orderId,sessionExpiresAt.plus(Duration.ofMinutes(1))); }
+        catch(IllegalStateException|io.artio.api.catalog.CatalogNotFoundException e){throw new ResponseStatusException(HttpStatus.CONFLICT,"Order stock reservation has expired",e);}
         int scale=java.util.Currency.getInstance(order.currency()).getDefaultFractionDigits();
         long minor=order.total().movePointRight(scale).longValueExact();
         MultiValueMap<String,String> form=new LinkedMultiValueMap<>();
         form.add("mode","payment"); form.add("success_url",storefrontUrl+"/checkout/success?session_id={CHECKOUT_SESSION_ID}"); form.add("cancel_url",storefrontUrl+"/orders");
+        form.add("expires_at",Long.toString(sessionExpiresAt.getEpochSecond()));
         form.add("client_reference_id",orderId.toString()); form.add("metadata[order_id]",orderId.toString());
         form.add("line_items[0][price_data][currency]",order.currency().toLowerCase()); form.add("line_items[0][price_data][unit_amount]",Long.toString(minor));
         form.add("line_items[0][price_data][product_data][name]","Artio order "+orderId.toString().substring(0,8)); form.add("line_items[0][quantity]","1");
