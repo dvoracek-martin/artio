@@ -52,9 +52,23 @@ class PricingEngineTests {
         assertThat(quote.taxCategory()).isEqualTo(TaxCategory.ACCOMMODATION);
         assertThat(quote.tax().amount()).isEqualByComparingTo("3.80");
     }
+    @Test void extractsTaxFromTaxInclusivePriceAfterDiscountWithoutChangingCustomerTotal() {
+        UUID item = UUID.randomUUID();
+        var discount = DiscountRule.create(new DiscountRuleId(UUID.randomUUID()), "TEN", item, "CH", new Percentage(new BigDecimal("10")), 0, NOW, null);
+        var tax = TaxRule.create(new TaxRuleId(UUID.randomUUID()), "CH", new Percentage(new BigDecimal("8.1")), NOW, null);
+        var quote = new PricingEngine().calculate(item, chf("108.10"), new Quantity(BigDecimal.ONE), "CH", "CH", NOW,
+                List.of(discount), tax, true);
+        assertThat(quote.pricesIncludeTax()).isTrue();
+        assertThat(quote.lineListPrice().amount()).isEqualByComparingTo("108.10");
+        assertThat(quote.discounts().amount()).isEqualByComparingTo("10.81");
+        assertThat(quote.taxableAmount().amount()).isEqualByComparingTo("90.00");
+        assertThat(quote.tax().amount()).isEqualByComparingTo("7.29");
+        assertThat(quote.total().amount()).isEqualByComparingTo("97.29");
+    }
     @Test void rejectsInvalidPricePeriodAndMarketCodes() {
         assertThatThrownBy(() -> Price.create(new PriceId(UUID.randomUUID()), UUID.randomUUID(), "us", "WEB", dollars("1"), NOW, null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Price.create(new PriceId(UUID.randomUUID()), UUID.randomUUID(), "US", "WEB", dollars("1"), NOW, NOW)).isInstanceOf(IllegalArgumentException.class);
     }
     private Money dollars(String value) { return new Money(new BigDecimal(value), Currency.getInstance("USD")); }
+    private Money chf(String value) { return new Money(new BigDecimal(value), Currency.getInstance("CHF")); }
 }

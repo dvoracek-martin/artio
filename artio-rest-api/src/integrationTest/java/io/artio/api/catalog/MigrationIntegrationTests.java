@@ -45,8 +45,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(19);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("19");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(20);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("20");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('catalog_product_translations')")) {
             assertThat(result.next()).isTrue();
@@ -81,6 +81,11 @@ class MigrationIntegrationTests {
                 var result = statement.executeQuery("SELECT to_regclass('notification_delivery_outbox')")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getString(1)).isEqualTo("notification_delivery_outbox");
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='pricing_price' AND column_name='prices_include_tax'")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt(1)).isEqualTo(1);
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('tenants'), to_regclass('tenant_memberships')")) {

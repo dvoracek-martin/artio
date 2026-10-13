@@ -69,7 +69,7 @@ Product request: `{"name":"Laptop","description":"Portable computer","sku":"LAP-
 
 ## Pricing and inventory
 
-Prices are scoped to a sellable UUID, market and channel. A sellable is normally a product variant. The API applies active discounts and jurisdiction tax on the server. Storefront requests cannot supply their own unit prices or tax amounts. Product data is cached in Redis for two hours and price quotes for one hour; changes to products, prices, discounts or taxes invalidate the relevant cache.
+Prices are scoped to a sellable UUID, market and channel. A sellable is normally a product variant. Administrators set whether each price is tax-inclusive; inclusive prices preserve the customer-facing gross amount while Core extracts its taxable base and tax after discounts. The API applies active discounts and jurisdiction tax on the server. Storefront requests cannot supply their own unit prices or tax amounts. Product data is cached in Redis for two hours and price quotes for one hour; changes to products, prices, discounts or taxes invalidate the relevant cache.
 
 - `GET/POST /api/v1/prices`, `PUT /api/v1/prices/{id}`, `PUT /api/v1/prices/{id}/active`
 - `GET/POST /api/v1/discount-rules`, `GET/POST /api/v1/tax-rules`
@@ -82,7 +82,7 @@ Extension manifest preflight is available to administrators at `POST /api/v1/adm
 
 Create an active warehouse, receive stock for each variant and create an active price before testing checkout. Checkout refreshes all prices, calculates taxes, reserves stock, creates a pending order and requests a Stripe Checkout session. It requires an `Idempotency-Key`; replay returns the original order. Stripe session creation uses a stable order-scoped idempotency key and a 31-minute provider expiry. Immediately before session creation, the API extends all active stock holds through the session window plus a one-minute safety margin under the stock-row locks. Stripe's signed completion event marks the order paid; an expired session releases reservations early. Administrators can ship paid orders and record a tracking number through `/api/v1/admin/orders/{id}/ship`.
 
-Orders preserve the checkout shipping country, market, tax jurisdiction and a versioned per-line tax snapshot including applied rate/effective period, discounts, currency and quote timestamp. Historical orders predating this snapshot are marked as having unknown policy provenance; their stored totals are not rewritten.
+Orders preserve the checkout shipping country, market, tax jurisdiction and a versioned per-line tax snapshot including applied rate/effective period, discounts, tax-inclusive mode, currency and quote timestamp. Historical orders predating this snapshot are marked as having unknown policy provenance; their stored totals are not rewritten.
 
 ## Configurable bundles
 

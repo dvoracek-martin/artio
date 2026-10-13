@@ -293,6 +293,28 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void priceTaxInclusionModeIsPersistedAndExtractedFromCustomerPrice() {
+        UUID sellableId = UUID.randomUUID();
+        var price = new io.artio.api.pricing.PricingApplicationService.PriceRequest(sellableId, "CH", "WEB",
+                new BigDecimal("108.10"), "CHF", null, null, true);
+        var created = adminExchange("/api/v1/prices", HttpMethod.POST, price,
+                io.artio.api.pricing.PricingApplicationService.PriceView.class);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(created.getBody()).isNotNull();
+        assertThat(created.getBody().pricesIncludeTax()).isTrue();
+
+        var quote = adminExchange("/api/v1/pricing/quote", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.QuoteRequest(sellableId, "CH", "WEB", "CH", BigDecimal.ONE, null),
+                io.artio.pricing.PricingQuote.class);
+        assertThat(quote.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(quote.getBody()).isNotNull();
+        assertThat(quote.getBody().pricesIncludeTax()).isTrue();
+        assertThat(quote.getBody().taxableAmount().amount()).isEqualByComparingTo("100.00");
+        assertThat(quote.getBody().tax().amount()).isEqualByComparingTo("8.10");
+        assertThat(quote.getBody().total().amount()).isEqualByComparingTo("108.10");
+    }
+
+    @Test
     void expiryJobReleasesReservedStockAndDoesNotConsumeOnHand() {
         var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
                 new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest("EXP-01", "Expiry warehouse", "CH-ZH"),

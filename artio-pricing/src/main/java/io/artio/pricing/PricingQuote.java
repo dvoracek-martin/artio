@@ -5,4 +5,4 @@ import java.time.Instant;
 /** Complete, auditable breakdown for a single sellable and requested quantity. */
 public record PricingQuote(Money unitListPrice, Money lineListPrice, Money discounts, Money taxableAmount, Money tax, Money total,
                            String jurisdiction, TaxCategory taxCategory, BigDecimal taxRatePercent, Instant taxRuleValidFrom,
-                           Instant taxRuleValidUntil, Instant pricedAt) implements java.io.Serializable {}
+                           Instant taxRuleValidUntil, Instant pricedAt, boolean pricesIncludeTax) implements java.io.Serializable {}
