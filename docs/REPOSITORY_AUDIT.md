@@ -13,6 +13,8 @@ The API unit and integration tasks passed after the schema/runtime changes; clea
 
 The localized catalog reindex now builds a separate OpenSearch generation, refreshes it and atomically swaps the search alias. OpenSearch 2.17 Testcontainers verified replacement, stale-document removal, real alias search and rollback on replay failure. This test also caught an invalid query JSON envelope, which is fixed. Compose now requires `ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD`, since the pinned 2.17 image requires a bootstrap password even when its security plugin is disabled.
 
+Stripe checkout now compensates definitive client rejections transactionally by cancelling the pending order, failing pending payment rows and releasing active stock reservations. Timeouts, conflicts and rate limits remain pending because the provider outcome may be ambiguous and a retry must preserve Stripe's stable order idempotency key. Focused compensation unit tests pass.
+
 ## 1. Repository identity and baseline
 
 **Current-scope update (2026-10-13):** Mobile, Kubernetes/Istio and Terraform were removed from the repository after source/reference and uncommitted-change review. No active build or product dependency was found. Reviewed Kubernetes changes were deployment-specific; generated mobile dependencies/build output were removed. Docker Compose remains the documented deployment path. The audit below records the original repository inventory; its historical baseline results are retained as evidence, not current status.

@@ -32,17 +32,19 @@ public class PaymentController {
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;
     private final OrderUpdatePublisher orderUpdates;
+    private final CheckoutFailureCompensation checkoutCompensation;
     private final RestClient stripe = RestClient.create();
     private final ObjectMapper mapper;
     private final String stripeKey;
     private final String webhookSecret;
     private final String storefrontUrl;
 
-    public PaymentController(JdbcTemplate jdbc, InventoryApplicationService inventory, OrderUpdatePublisher orderUpdates, ObjectMapper mapper,
+    public PaymentController(JdbcTemplate jdbc, InventoryApplicationService inventory, OrderUpdatePublisher orderUpdates,
+            CheckoutFailureCompensation checkoutCompensation, ObjectMapper mapper,
             @Value("${artio.payments.stripe-secret-key:}") String stripeKey,
             @Value("${artio.payments.stripe-webhook-secret:}") String webhookSecret,
             @Value("${artio.storefront-url:http://localhost:4200}") String storefrontUrl) {
-        this.jdbc=jdbc; this.inventory=inventory; this.orderUpdates=orderUpdates; this.mapper=mapper; this.stripeKey=stripeKey; this.webhookSecret=webhookSecret; this.storefrontUrl=storefrontUrl;
+        this.jdbc=jdbc; this.inventory=inventory; this.orderUpdates=orderUpdates; this.checkoutCompensation=checkoutCompensation; this.mapper=mapper; this.stripeKey=stripeKey; this.webhookSecret=webhookSecret; this.storefrontUrl=storefrontUrl;
     }
 
     @PostMapping("/orders/{orderId}/checkout-session")
@@ -67,6 +69,11 @@ public class PaymentController {
         form.add("line_items[0][price_data][product_data][name]","Artio order "+orderId.toString().substring(0,8)); form.add("line_items[0][quantity]","1");
         Map<?,?> session;
         try { session=stripe.post().uri("https://api.stripe.com/v1/checkout/sessions").headers(h->{h.setBearerAuth(stripeKey);h.set("Idempotency-Key","artio-order-"+orderId);}).contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(Map.class); }
+        catch(org.springframework.web.client.RestClientResponseException e){
+            int status=e.getStatusCode().value();
+            if(e.getStatusCode().is4xxClientError()&&status!=408&&status!=409&&status!=429)checkoutCompensation.cancelRejectedCheckout(orderId);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Payment provider could not create a checkout session");
+        }
         catch(Exception e){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Payment provider could not create a checkout session");}
         String sessionId=String.valueOf(session.get("id")); String url=String.valueOf(session.get("url"));
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) VALUES (?,?,?,?,?,'STRIPE','PENDING',?,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",UUID.randomUUID(),orderId,userId,order.total(),order.currency(),sessionId);

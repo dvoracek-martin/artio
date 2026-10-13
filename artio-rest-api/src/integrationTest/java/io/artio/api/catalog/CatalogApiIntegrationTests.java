@@ -67,7 +67,11 @@ class CatalogApiIntegrationTests {
     @Autowired
     private io.artio.api.security.EncryptionService encryption;
 
+    @Autowired
+    private io.artio.api.payments.CheckoutFailureCompensation checkoutFailureCompensation;
+
     private String adminToken;
+    private UUID adminUserId;
 
     @DynamicPropertySource
     static void postgresProperties(DynamicPropertyRegistry registry) {
@@ -86,6 +90,7 @@ class CatalogApiIntegrationTests {
     @BeforeEach
     void authenticateAdminForCatalogAdministration() {
         UUID userId = UUID.randomUUID();
+        adminUserId = userId;
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) "
                         + "VALUES (?,?,?,?,?,'ADMIN',now())",
                 userId, "admin-" + userId + "@example.test", new BCryptPasswordEncoder().encode("admin-password-123"),
@@ -275,6 +280,37 @@ class CatalogApiIntegrationTests {
                     assertThat(stock.onHand()).isEqualByComparingTo("5");
                     assertThat(stock.reserved()).isEqualByComparingTo("0");
                     assertThat(stock.available()).isEqualByComparingTo("5");
+                });
+    }
+
+    @Test
+    void rejectedCheckoutCompensationCancelsOrderAndReleasesStockAtomically() {
+        UUID orderId = UUID.randomUUID();
+        UUID sellableId = UUID.randomUUID();
+        var warehouse = inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "COMP-" + orderId.toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Compensation warehouse", "CH-ZH"));
+        UUID warehouseId = warehouse.id();
+        inventory.receive(warehouseId, sellableId, BigDecimal.ONE);
+        var reservation = inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                orderId, warehouseId, sellableId, BigDecimal.ONE));
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                        + "VALUES (?,?,'PENDING',1,0,0,1,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
+                orderId, adminUserId, "compensation-" + orderId);
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'CHF','STRIPE','PENDING',?,now(),now())",
+                UUID.randomUUID(), orderId, adminUserId, "cs_compensation_" + orderId);
+
+        checkoutFailureCompensation.cancelRejectedCheckout(orderId);
+
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("FAILED");
+        assertThat(inventory.reservationsByOrder(orderId)).singleElement()
+                .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
+                .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
+        assertThat(inventory.stockBySellable(sellableId)).singleElement()
+                .satisfies(stock -> {
+                    assertThat(stock.onHand()).isEqualByComparingTo("1");
+                    assertThat(stock.reserved()).isEqualByComparingTo("0");
                 });
     }
 
