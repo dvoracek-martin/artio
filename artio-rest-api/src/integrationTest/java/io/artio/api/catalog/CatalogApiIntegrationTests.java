@@ -695,6 +695,22 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void outboxDiagnosticsAreAdminOnlyAndExposeAggregateCounts() {
+        var anonymous = http.getForEntity("/api/v1/admin/operations/outbox",
+                io.artio.api.notifications.OutboxOperationsController.OutboxSummary.class);
+        assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        var headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+        var response = http.exchange("/api/v1/admin/operations/outbox", HttpMethod.GET,
+                new HttpEntity<>(headers), io.artio.api.notifications.OutboxOperationsController.OutboxSummary.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().eventPending()).isGreaterThanOrEqualTo(0);
+        assertThat(response.getBody().emailDead()).isGreaterThanOrEqualTo(0);
+        assertThat(response.getBody().webhookUnprocessed()).isGreaterThanOrEqualTo(0);
+    }
+
+    @Test
     void mailOutboxWorkerDeliversAndRedactsSuccessfulDelivery() throws Exception {
         UUID orderId = UUID.randomUUID();
         UUID deliveryId = UUID.randomUUID();

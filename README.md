@@ -86,6 +86,8 @@ If Stripe webhook delivery is delayed or lost, the API reconciles pending sessio
 
 Processed Stripe webhook deduplication receipts are retained for 90 days by default and then removed in bounded batches. The retention interval and daily UTC cleanup schedule can be configured with `ARTIO_PAYMENTS_WEBHOOK_RECEIPT_RETENTION_DAYS` and `ARTIO_PAYMENTS_WEBHOOK_RECEIPT_RETENTION_CRON`. Unprocessed receipts are retained regardless of age.
 
+Administrators can inspect safe aggregate delivery counts at `GET /api/v1/admin/operations/outbox`. It reports pending and stale event/email claims, dead email deliveries, and webhook receipts awaiting processing or past retention; it never returns queued payloads, email content, or provider error text.
+
 Orders preserve the checkout shipping country, market, tax jurisdiction and a versioned per-line tax snapshot including applied rate/effective period, discounts, tax-inclusive mode, currency and quote timestamp. Historical orders predating this snapshot are marked as having unknown policy provenance; their stored totals are not rewritten.
 
 ## Configurable bundles
