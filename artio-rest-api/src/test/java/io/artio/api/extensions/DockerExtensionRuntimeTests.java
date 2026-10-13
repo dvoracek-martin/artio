@@ -140,6 +140,55 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void retriesOneTransientGatewayFailureWithTheSameIdempotencyKey() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicReference<String> firstKey = new AtomicReference<>();
+        AtomicReference<String> secondKey = new AtomicReference<>();
+        server.createContext("/v1/invoke", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            String key = exchange.getRequestHeaders().getFirst("Idempotency-Key");
+            if (attempts.incrementAndGet() == 1) {
+                firstKey.set(key);
+                exchange.sendResponseHeaders(503, -1);
+            } else {
+                secondKey.set(key);
+                byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, response.length);
+                exchange.getResponseBody().write(response);
+            }
+            exchange.close();
+        });
+        server.start();
+        try {
+            DockerClient docker = mock(DockerClient.class);
+            InspectContainerCmd inspect = mock(InspectContainerCmd.class);
+            InspectContainerResponse container = mock(InspectContainerResponse.class);
+            InspectContainerResponse.ContainerState state = mock(InspectContainerResponse.ContainerState.class);
+            NetworkSettings settings = mock(NetworkSettings.class);
+            ContainerNetwork network = mock(ContainerNetwork.class);
+            when(docker.inspectContainerCmd(anyString())).thenReturn(inspect);
+            when(inspect.exec()).thenReturn(container);
+            when(container.getState()).thenReturn(state);
+            when(state.getRunning()).thenReturn(true);
+            when(container.getNetworkSettings()).thenReturn(settings);
+            when(settings.getNetworks()).thenReturn(Map.of("extensions", network));
+            when(network.getIpAddress()).thenReturn("127.0.0.1");
+            var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(),
+                    new io.artio.api.security.EncryptionService("unit-test-key-material-that-is-at-least-32-bytes"));
+
+            var result = runtime.invoke("payments.example", "payment.provider.v1", "authorize",
+                    "00000000-0000-0000-0000-000000000099", "{}", "{}", Duration.ofSeconds(3));
+
+            assertThat(result.statusCode()).isEqualTo(200);
+            assertThat(attempts).hasValue(2);
+            assertThat(secondKey.get()).isEqualTo(firstKey.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void circuitBreakerOpensAfterFailuresAndAllowsOneRecoveryProbe() {
         long[] now = { 1_000L };
         var breaker = new ExtensionCircuitBreaker(2, Duration.ofSeconds(10), () -> now[0]);

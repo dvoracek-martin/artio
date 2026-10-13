@@ -124,7 +124,27 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
                 ignored -> new ExtensionCircuitBreaker(5, Duration.ofSeconds(30)));
         try {
             breaker.acquire();
-            var result = invokeOnce(pluginId, extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);
+            long deadlineNanos = System.nanoTime() + deadline.toNanos();
+            ExtensionRuntimePort.InvocationResult result;
+            for (int attempt = 0; ; attempt++) {
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) throw new ExtensionRuntimePort.ExtensionTimeoutException("Extension invocation exceeded its deadline");
+                try {
+                    result = invokeOnce(pluginId, extensionPoint, operation, idempotencyKey, configurationJson,
+                            requestJson, Duration.ofNanos(remainingNanos));
+                    break;
+                } catch (ExtensionRuntimePort.ExtensionCallException failure) {
+                    if (attempt >= 1 || !isRetryable(failure.statusCode())) throw failure;
+                    long pauseNanos = Math.min(Duration.ofMillis(50).toNanos(), deadlineNanos - System.nanoTime());
+                    if (pauseNanos <= 0) throw new ExtensionRuntimePort.ExtensionTimeoutException("Extension invocation exceeded its deadline");
+                    try {
+                        TimeUnit.NANOSECONDS.sleep(pauseNanos);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension invocation retry was interrupted");
+                    }
+                }
+            }
             breaker.succeeded();
             return result;
         } catch (ExtensionRuntimePort.ExtensionCallException providerFailure) {
@@ -137,6 +157,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             breaker.failed();
             throw failure;
         }
+    }
+
+    private static boolean isRetryable(int statusCode) {
+        return statusCode == 502 || statusCode == 503 || statusCode == 504;
     }
 
     private ExtensionRuntimePort.InvocationResult invokeOnce(String pluginId, String extensionPoint, String operation,
