@@ -12,6 +12,9 @@ import java.net.URI; import java.util.List; import java.util.UUID; import org.sp
     @GetMapping("/tax-rules") public List<PricingApplicationService.TaxView> taxes(){return pricing.taxRules();}
     @PostMapping("/tax-rules") public ResponseEntity<PricingApplicationService.TaxView> createTax(@RequestBody PricingApplicationService.TaxRequest request){var t=pricing.createTaxRule(request);return ResponseEntity.created(URI.create("/api/tax-rules/"+t.id())).body(t);}
     @PutMapping("/tax-rules/{id}/active") public PricingApplicationService.TaxView setTaxActive(@PathVariable UUID id,@RequestBody ActiveRequest request){return pricing.setTaxActive(id,request.active());}
+    @PutMapping("/tax-rules/sellables/{sellableId}/category") public TaxCategoryView assignTaxCategory(@PathVariable UUID sellableId,@RequestBody TaxCategoryRequest request){return new TaxCategoryView(sellableId,pricing.assignTaxCategory(sellableId,request.category()));}
     @PostMapping("/pricing/quote") public io.artio.pricing.PricingQuote quote(@RequestBody PricingApplicationService.QuoteRequest request){return pricing.quote(request);}
     public record ActiveRequest(boolean active){}
+    public record TaxCategoryRequest(io.artio.pricing.TaxCategory category){}
+    public record TaxCategoryView(UUID sellableId,io.artio.pricing.TaxCategory category){}
 }

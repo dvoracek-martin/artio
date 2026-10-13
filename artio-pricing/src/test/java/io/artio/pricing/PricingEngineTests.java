@@ -44,6 +44,14 @@ class PricingEngineTests {
         assertThat(quote.taxRuleValidUntil()).isEqualTo(ends);
         assertThat(quote.pricedAt()).isEqualTo(NOW);
     }
+    @Test void preservesTaxCategoryInQuoteAndAppliesItsRate() {
+        var accommodation = TaxRule.create(new TaxRuleId(UUID.randomUUID()), "CH", TaxCategory.ACCOMMODATION,
+                new Percentage(new BigDecimal("3.8")), NOW, null);
+        var quote = new PricingEngine().calculate(UUID.randomUUID(), new Money(new BigDecimal("100.00"), Currency.getInstance("CHF")),
+                new Quantity(BigDecimal.ONE), "CH", "CH", NOW, List.of(), accommodation);
+        assertThat(quote.taxCategory()).isEqualTo(TaxCategory.ACCOMMODATION);
+        assertThat(quote.tax().amount()).isEqualByComparingTo("3.80");
+    }
     @Test void rejectsInvalidPricePeriodAndMarketCodes() {
         assertThatThrownBy(() -> Price.create(new PriceId(UUID.randomUUID()), UUID.randomUUID(), "us", "WEB", dollars("1"), NOW, null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Price.create(new PriceId(UUID.randomUUID()), UUID.randomUUID(), "US", "WEB", dollars("1"), NOW, NOW)).isInstanceOf(IllegalArgumentException.class);

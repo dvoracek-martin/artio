@@ -419,6 +419,45 @@ class CatalogApiIntegrationTests {
                 .satisfies(stock -> assertThat(stock.available()).isEqualByComparingTo("0"));
     }
 
+    @Test
+    void appliesSeededSwissVatBySellableTaxCategory() throws Exception {
+        var product = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Swiss tea", null, "CH-TEA-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT)), ProductResponse.class);
+        assertThat(product.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(product.getBody()).isNotNull();
+        assertThat(product.getBody().id()).isNotNull();
+        var variant = adminExchange("/api/v1/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("250 g", "CH-TEA-V-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT)), VariantResponse.class,
+                product.getBody().id());
+        assertThat(variant.getStatusCode()).withFailMessage("Swiss variant creation: %s", variant.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(variant.getBody()).isNotNull();
+        assertThat(variant.getBody().id()).isNotNull();
+        var swissPrice = adminExchange("/api/v1/prices", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.PriceRequest(variant.getBody().id(), "CH", "WEB",
+                        new BigDecimal("100.00"), "CHF", java.time.Instant.now().minusSeconds(60), null),
+                String.class);
+        assertThat(swissPrice.getStatusCode()).withFailMessage("Swiss price creation: %s", swissPrice.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        var standard = http.postForEntity("/api/pricing/quote",
+                new io.artio.api.pricing.PricingApplicationService.QuoteRequest(variant.getBody().id(), "CH", "WEB", "CH", BigDecimal.ONE, null),
+                String.class);
+        assertThat(standard.getStatusCode()).withFailMessage("Swiss pricing response: %s", standard.getBody()).isEqualTo(HttpStatus.OK);
+        var standardQuote=mapper.readValue(standard.getBody(),io.artio.pricing.PricingQuote.class);
+        assertThat(standardQuote.taxCategory()).isEqualTo(io.artio.pricing.TaxCategory.STANDARD);
+        assertThat(standardQuote.tax().amount()).isEqualByComparingTo("8.10");
+
+        adminExchange("/api/v1/tax-rules/sellables/{sellableId}/category", HttpMethod.PUT,
+                new io.artio.api.pricing.PricingController.TaxCategoryRequest(io.artio.pricing.TaxCategory.REDUCED),
+                io.artio.api.pricing.PricingController.TaxCategoryView.class, variant.getBody().id());
+        var reduced = http.postForEntity("/api/pricing/quote",
+                new io.artio.api.pricing.PricingApplicationService.QuoteRequest(variant.getBody().id(), "CH", "WEB", "CH", BigDecimal.ONE, null),
+                String.class);
+        assertThat(reduced.getStatusCode()).withFailMessage("Reduced Swiss pricing response: %s",reduced.getBody()).isEqualTo(HttpStatus.OK);
+        var reducedQuote=mapper.readValue(reduced.getBody(),io.artio.pricing.PricingQuote.class);
+        assertThat(reducedQuote.taxCategory()).isEqualTo(io.artio.pricing.TaxCategory.REDUCED);
+        assertThat(reducedQuote.tax().amount()).isEqualByComparingTo("2.60");
+    }
+
     private boolean reserveIfAvailable(UUID orderId, UUID warehouseId, UUID sellableId) {
         try {
             inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
@@ -483,6 +522,9 @@ class CatalogApiIntegrationTests {
         assertThat(firstBody.tax()).isEqualByComparingTo("8.25");
         assertThat(firstBody.taxSnapshot()).containsEntry("jurisdiction", "US");
         assertThat(firstBody.taxSnapshot()).containsKey("bundles");
+        JsonNode taxSnapshot = mapper.valueToTree(firstBody.taxSnapshot());
+        assertThat(taxSnapshot.path("schemaVersion").asInt()).isEqualTo(2);
+        assertThat(taxSnapshot.path("lines").get(0).path("taxCategory").asText()).isEqualTo("STANDARD");
         assertThat(mapper.writeValueAsString(firstBody.taxSnapshot().get("bundles")))
                 .contains(bundleResponse.getBody().id().toString(), variant.getBody().id().toString(), "configuredTotal", "componentAdjustmentFactor");
 
@@ -550,7 +592,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE", String.class);
-        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16");
+        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
