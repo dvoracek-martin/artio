@@ -56,7 +56,7 @@ Credentials and provider secrets are injected/stored through an operator-control
 
 ## Migration sequence and current divergence
 
-Preserve existing modular domains, PostgreSQL adapters and API behavior when compatible. The current checkout has a SaaS `TenantContext`, tenant claims/membership migration V10 and tenant-scoped enterprise endpoints. These conflict with the single-customer product decision. V10 is uncommitted in the current Git state, but whether it was applied in another environment is unknown; do not rewrite it or roll it back until release provenance is established. The chosen corrective migration must preserve any customer data if it has shipped.
+Preserve existing modular domains, PostgreSQL adapters and API behavior when compatible. The project owner confirmed that no production or other external data ever existed. SaaS tenancy is outside the product boundary; V10 defines the applicable single-installation identity/security and commerce schema. Legacy external database preservation is not a requirement.
 
 Direct Stripe integration in `artio-rest-api` is also a known conflict. Introduce and test the Core-owned payment Extension API first, then migrate provider behavior and webhook compatibility into a Docker plugin without changing accepted order/payment history.
 

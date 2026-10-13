@@ -11,13 +11,13 @@
 - `/api/v1` je kanonická REST cesta. `/api` zůstává kompatibilní alias. OpenAPI popisuje obě cesty, správné požadavky na bearer autentizaci a API vrací jednotný JSON chybový kontrakt včetně 401/403.
 - PostgreSQL Testcontainers ověřil čistou instalaci migrací V1–V15 i upgrade z V9 s uchováním uživatele a jeho členství. API překlady, extension manifest/registraci/konfiguraci/audit, expirace rezervací a checkout idempotency/tax snapshots mají integrační pokrytí.
 - Extension management zahrnuje manifest v1, admin preflight a registraci, persistenci konfigurace podle schématu, AES-GCM šifrování secretů, write-only secret view a append-only audit. Žádný Docker image se z API nespouští; bounded Docker runtime, invocation, health/diagnostics a rollback stále chybí.
-- V11 přidává locale-scoped produktové překlady (`de`, `it`, `fr`, `en`) a fallback požadovaný jazyk → angličtina → základní copy. OpenSearch indexuje lokalizované dokumenty; Backoffice nyní umožňuje administrátorovi upravovat překlady názvu a popisu. Reindex stávajícího indexu zůstává otevřeným úkolem.
+- V11 přidává locale-scoped produktové překlady (`de`, `it`, `fr`, `en`) a fallback požadovaný jazyk → angličtina → základní copy. OpenSearch indexuje lokalizované dokumenty; Backoffice nyní umožňuje administrátorovi upravovat překlady názvu a popisu. Admin může spustit replay všech produktů a uložených jazykových překladů do indexu. Operace zatím používá upsert; atomická výměna indexu a úklid osiřelých dokumentů zůstávají otevřené.
 - V12 přidává expiraci rezervací a periodické uvolňování v transakci. TTL defaultně 30 minut lze nastavit pomocí `ARTIO_INVENTORY_RESERVATION_TTL`; test prokázal, že expirace obnoví dostupnost bez snížení on-hand.
 - V13 ukládá ke každé objednávce checkout country/market/jurisdikci a verziovaný JSON tax snapshot s jednotlivými quote řádky, sazbou a efektivním obdobím. U historických záznamů se původní částky nemění a provenance je označena jako neznámá.
 - V14 vynucuje unikátní checkout idempotency key per uživatel. Stejný klíč vrací původní objednávku; storefront jej zachovává při opakování a Stripe Checkout volání používá stabilní klíč odvozený od order ID.
 - V15 přidává registrované pluginy a append-only audit. Veřejná konfigurace se ukládá jako JSONB; secret hodnoty se ukládají pouze šifrované a API vrací jen názvy nastavených secretů. API integrační test ověřil i zachování dřívějšího secretu při jeho vynechání v dalším PUT.
 - Checkout objednávkový tax snapshot nyní uchovává konfiguraci bundle: zvolené možnosti, vyřešené komponenty, množství, nakonfigurovanou cenu, korekční faktor a trh/jurisdikci. Implementace této změny ještě čeká na cílené ověření.
-- Hosted CI ani externí deployment provenance se v této iteraci neověřují podle pokynu vlastníka; zůstávají mimo aktuální implementační slice.
+- P1-02 je uzavřen jako „closed – not applicable“: vlastník potvrdil, že nikdy neexistovala produkční ani externí data. V10 je určena pro čistou instalaci bez tenant modelu; kompatibilita se staršími databázemi se nepožaduje.
 - P1-07: API již nemá výchozí databázové heslo ani JWT/šifrovací klíče. Compose vyžaduje tyto hodnoty, spouští profil `production` a API odmítá krátké nebo zástupné kryptografické klíče. Nové validační unit testy a API Testcontainers integrační testy prošly; ukázkové hodnoty jsou v `.env.example` a musejí být nahrazeny před spuštěním.
 
 **Větev / commit:** `main` / `6074286` (základ; současné implementační změny jsou lokální a necommitnuté, push provádí vlastník)
@@ -25,9 +25,9 @@
 
 ## 1. Přehled
 
-Artio je commerce aplikace organizovaná jako **modulární monolit**. Samostatné Gradle moduly obsahují doménové modely, PostgreSQL adaptéry, REST aplikaci a dvě Angular aplikace. V této iteraci přibyly vybrané enterprise funkce: tenant registry a členství, MFA TOTP, šifrování tajemství, auditní metadata, GraphQL čtení katalogu, realtime stav objednávek, privacy export a anonymizace, souhlasy, gift cards, loyalty, měnové kurzy, doporučení založená na popularitě, pravidlové fraud review, správu subscription záznamů, PWA shell, React Native / Expo základ, tracing a monitoring.
+Artio je commerce aplikace organizovaná jako **modulární monolit**. Samostatné Gradle moduly obsahují doménové modely, PostgreSQL adaptéry, REST aplikaci a dvě Angular aplikace. V této iteraci přibyly vybrané enterprise funkce: MFA TOTP, šifrování tajemství, auditní metadata, GraphQL čtení katalogu, realtime stav objednávek, privacy export a anonymizace, souhlasy, gift cards, loyalty, měnové kurzy, doporučení založená na popularitě, pravidlové fraud review, správu subscription záznamů, PWA shell, React Native / Expo základ, tracing a monitoring.
 
-Základní obchodní cesta zůstává REST API → PostgreSQL. Stripe potvrzuje platbu přes webhook. Rezervace skladu, uživatelská oznámení a přenos událostí do Kafka jsou součástí aplikace. Nové enterprise tabulky používají explicitní `tenant_id`; kompletní tenant izolace katalogu, cen, objednávek a všech existujících repository implementací dokončená není.
+Základní obchodní cesta zůstává REST API → PostgreSQL. Stripe potvrzuje platbu přes webhook. Rezervace skladu, uživatelská oznámení a přenos událostí do Kafka jsou součástí aplikace. Databáze používá single-install model bez `tenant_id`; autorizace vychází z rolí a vlastnictví konkrétních zdrojů.
 
 ```mermaid
 flowchart LR
@@ -121,7 +121,7 @@ Flyway schema registry obsahuje migrace V1–V10 rozdělené mezi adapter moduly
 7. V7: platby a in-app oznámení.
 8. V8: tracking zásilky.
 9. V9: konfigurované bundle řádky v košíku/objednávce.
-10. V10: tenants a členství, MFA metody, append-only audit metadata, souhlasy, gift cards a transakce, loyalty, směnné kurzy, produktové interakce, fraud review a subscriptions.
+10. V10: MFA metody, append-only audit metadata, souhlasy, gift cards a transakce, loyalty, směnné kurzy, produktové interakce, fraud review a subscriptions. Tenant tabulky ani tenant sloupce nevznikají.
 
 MFA TOTP secret je v DB uložen jako AES-GCM ciphertext. Záložní kódy jsou uloženy pouze jako BCrypt hashe. Gift card kód je klientovi vrácen pouze při vydání; v DB je jeho SHA-256 hash. Audit tabulka uchovává metadata requestu, ne těla requestů ani snapshot změn. Trigger blokuje update a delete auditních řádků.
 
@@ -129,17 +129,14 @@ MFA TOTP secret je v DB uložen jako AES-GCM ciphertext. Záložní kódy jsou u
 
 Všechny JSON API běží pod `/api`, GraphQL pod `/graphql`, realtime STOMP/WebSocket handshake pod `/ws`.
 
-### Identity, tenant a security
+### Identity a security
 
 - `POST /api/auth/register`, `POST /api/auth/login` — registrace zákazníka a HS256 access JWT (1 hodina). Login s MFA očekává nepovinné `mfaCode`; při zapnutém MFA je vyžadován TOTP nebo nepoužitý záložní kód.
 - `POST /api/auth/mfa/totp/enrollment` — zahájí enrolment a vrátí TOTP secret + `otpauth://` URI.
 - `POST /api/auth/mfa/totp/verify` — ověří TOTP a vrátí sadu jednorázových backup kódů pouze jednou.
 - `DELETE /api/auth/mfa/totp` — MFA deaktivuje po ověření aktuálního TOTP.
-- `GET /api/users/me`, `GET /api/admin/users` — profil a tenant-scoped seznam uživatelů.
-- `POST /api/admin/tenants`, `POST /api/admin/tenants/{tenantId}/members/{userId}` — superadmin správa tenantů a členství.
-- `GET /api/tenants`, `GET /api/tenants/current` — dostupné tenanty a aktivní tenant.
-- Volitelný `X-Artio-Tenant` UUID přepne kontext pouze tehdy, když je uživatel členem aktivního tenantu. Token obsahuje výchozí `tenant_id`.
-- `GET /api/admin/audit-logs` — tenant-scoped audit metadata s filtry `userId`, `action`, `from`, `to`, `page`, `size`.
+- `GET /api/users/me`, `GET /api/admin/users` — profil a seznam uživatelů pro samostatnou instalaci.
+- `GET /api/admin/audit-logs` — audit metadata s filtry `userId`, `action`, `from`, `to`, `page`, `size`.
 - Rate limit: default 100 requestů/minutu/IP, Redis s lokálním fallbackem; `X-API-Key` dostává samostatný vyšší limit, ale samotný klíč zde nenahrazuje autentizaci.
 
 ### Katalog a GraphQL
@@ -171,7 +168,7 @@ query Catalog($q: String, $first: Int) {
 
 ### Realtime objednávky
 
-STOMP connect na `/ws` musí obsahovat `Authorization: Bearer <JWT>`. Klient odebírá pouze `/user/queue/orders/{orderId}` a odešle `/app/orders/{orderId}/subscribe`; backend ověřuje vlastnictví objednávky a členství v tenantovi. Stavový snapshot i změny PAID/SHIPPED/DELIVERED/CANCELLED se posílají na privátní user queue. Použitý Spring simple broker je pouze procesní; pro více replik se musí nahradit externím STOMP broker relay / event fan-outem. Produkty, ceny a stock zatím realtime stream nemají.
+STOMP connect na `/ws` musí obsahovat `Authorization: Bearer <JWT>`. Klient odebírá pouze `/user/queue/orders/{orderId}` a odešle `/app/orders/{orderId}/subscribe`; backend ověřuje vlastnictví objednávky. Stavový snapshot i změny PAID/SHIPPED/DELIVERED/CANCELLED se posílají na privátní user queue. Použitý Spring simple broker je pouze procesní; pro více replik se musí nahradit externím STOMP broker relay / event fan-outem. Produkty, ceny a stock zatím realtime stream nemají.
 
 ## 6. Bezpečnostní pravidla a ochrana dat
 
@@ -181,7 +178,7 @@ STOMP connect na `/ws` musí obsahovat `Authorization: Bearer <JWT>`. Klient ode
 - `ARTIO_ENCRYPTION_KEY` má mít nejméně 32 bajtů; AES key se odvodí SHA-256. MFA secret používá AES/GCM/NoPadding, 96-bit random IV a 128-bit auth tag. Změna klíče bez migračního/rotation workflow znepřístupní dřívější ciphertext.
 - Produkční profile odmítne známé výchozí JWT/encryption secrets. Compose však záměrně poskytuje pouze lokální placeholdery; `.env` musí mít nové náhodné klíče.
 - CORS je allowlist přes `ARTIO_ALLOWED_ORIGINS`. Nginx a API přidávají CSP, `X-Content-Type-Options`, `X-Frame-Options`, referrer a permissions policy; HSTS je nastaven na Kubernetes ingressu a API respektuje forwarded proto.
-- Audit zapisuje metodu, cestu, status, actor/tenant UUID, IP a User-Agent; nepíše body ani hesla/tokeny. Auditní obsah (metadata) není šifrovaný; append-only trigger brání editaci/mazání, proto není nastavená automatická retenční purge.
+- Audit zapisuje metodu, cestu, status, actor UUID, IP a User-Agent; nepíše body ani hesla/tokeny. Auditní obsah (metadata) není šifrovaný; append-only trigger brání editaci/mazání, proto není nastavená automatická retenční purge.
 - PWA cache neukládá `/api`, `/graphql` ani `/actuator`; offline fallback výslovně upozorňuje, že účet, košík a checkout potřebují připojení.
 - `X-Forwarded-For` není audit filtrem důvěřován; IP je `getRemoteAddr()`. Pro správnou IP za proxy je třeba řídit trusted-proxy konfiguraci v deploymentu.
 
@@ -191,7 +188,7 @@ STOMP connect na `/ws` musí obsahovat `Authorization: Bearer <JWT>`. Klient ode
 
 Storefront obsahuje katalogové prohlížení/hledání, varianty, registraci/login (včetně MFA kódu), košík, konfiguraci bundle, checkout přes Stripe-hosted session a přehled objednávek. PWA soubory jsou v `artio-storefront/src/manifest.webmanifest`, `src/sw.js`, `src/offline.html`. Service worker se registruje jen v production build režimu. Ukládá shell a statické assety; API ani autentizované odpovědi necachuje.
 
-EN/CS/DE `LocaleService` překládá navigaci, login doplněk a cookie panel. Zbytek UI nemá dokončenou lokalizaci; locale není server-side preferencí tenantu a chybí kompletní pluralizace/number/date format.
+EN/CS/DE `LocaleService` překládá navigaci, login doplněk a cookie panel. Zbytek UI nemá dokončenou lokalizaci; locale není server-side preferencí účtu a chybí kompletní pluralizace/number/date format.
 
 Cookie panel ukládá nezbytné/analytics/marketing preference lokálně. Po přihlášení odešle preference na API; anonymous consent zatím není serverově persistován. Analytics/marketing tagy nejsou zavedené.
 
@@ -226,9 +223,9 @@ Jaeger export používá OTLP HTTP (default `http://localhost:4318/v1/traces`, C
 | 15 — Security | TOTP MFA, jednorázové backup hashes, AES-GCM pro MFA secret, request audit metadata, CORS allowlist, security headers, existing JWT roles/rate limiter. | Volitelné Google OIDC přihlášení s provisioningem/napojením pouze přes ověřený email je implementováno v profile `oauth2`; chybí Facebook/GitHub/Apple, recovery flow, obnova/rotace klíčů, šifrování dalších osobních polí a state snapshots, audit export/signature, WAF/DDoS proxy integrations, threat/security tests. |
 | 16 — Performance | Read-only katalog GraphQL, static PWA shell a offline fallback, authenticated realtime order STOMP stream. | CDN/S3 image adapter, Angular SSR/SEO/prerender, bezpečný offline cart/background sync, produktové/cenové/stock realtime, multi-instance broker relay, query complexity/persisted GraphQL queries a výkonové testy. |
 | 17 — AI/ML | Hybridní směr není vybudován; nyní popularity-based recommendations a vysvětlitelné pravidlové fraud score + persist review. | Trénované/validované modely, collaborative/content filtering, feature pipeline, inference/monitoring/bias controls, price elasticity/demand forecasts/competitor feed a lidské schválení optimalizace. |
-| 18 — Multi-tenancy | Tenant registry, members, default tenant backfill, JWT tenant claim, `X-Artio-Tenant` membership/active check, tenant-scoped nové finance/consent/reco/audit tabulky. | Tenant key v katalogu, cenách, bundle, cart/order, warehouse a search; tenant-scoped admin/reporting všude; DB RLS + spolehlivé session context; unique SKU/email per tenant; subdomain resolver; tenant-specific configuration isolation a cross-tenant integration tests. |
+| 18 — Multi-tenancy | Out of scope. Owner decision confirms one independently deployed installation per customer; tenant schema, runtime context, API routes, and JWT claims are removed. | No tenant-specific follow-up. |
 | 19 — Mobile | Expo/React Native app skeleton + secure bearer token, login/MFA entry, catalog/cart/orders. | Completní obrazovky, router/state layer, registration, checkout/payments, push token registration/provider, deep links, tests, native builds/signing/App Store/Play Store. |
-| 20 — I18N | Omezené EN/CS/DE stringy na storefront navigaci/privacy/login. Manuální FX tabulka/conversion endpoint; checkout tax dál používá stávající pricing tax rules. | Kompletní frontend/backend i18n, locale-aware SEO/formaty, externí FX feed, pricing conversion end-to-end, tenant currencies, VAT reverse charge, region/country product tax categories a právně validovaná tax integrace. |
+| 20 — I18N | Omezené EN/CS/DE stringy na storefront navigaci/privacy/login. Manuální FX tabulka/conversion endpoint; checkout tax dál používá stávající pricing tax rules. | Kompletní frontend/backend i18n, locale-aware SEO/formaty, externí FX feed, pricing conversion end-to-end, installation currencies, VAT reverse charge, region/country product tax categories a právně validovaná tax integrace. |
 | 21 — Advanced commerce | Gift card issuance/hash/atomic redemption; loyalty accounts, dedupe points earned for paid orders, redeem ledger; subscription CRUD/status/frequency. | Gift card jako checkout tender/refund/audit UI; loyalty tiers/spend thresholds/expiry/payment undo; robust billing scheduler, payment method vault/Stripe subscription lifecycle, order creation, retry/dunning a customer portal. |
 | 22 — Analytics | Existing admin summaries/order status, top variants a průměrné lifetime revenue/customer (CLV approximation); Prometheus runtime metrics/dashboard pro API. | Real-time business event pipeline, cohort CLV, retention/conversion funnels, inventory turnover, discount analysis, multi-currency normalized revenue a dashboard UI. |
 | 23 — Compliance | User JSON export, account anonymization + address redaction, lokální consent preference UI a server snapshot po loginu, API audit log. | Complete GDPR subject mapping/retention schedule/legal holds, portable assets/billing data, consent for anonymous users, revocation propagation, CCPA workflows, DPA/consent evidence review, legal/privacy validation and automated tests. |
@@ -248,6 +245,6 @@ Po této iteraci je nutné ověřit zejména:
 2. TOTP RFC 6238 a AES-GCM round-trip/tamper testy prošly; ostatní existující unit testy v build graphu také prošly.
 3. Storefront production build prošel. Backoffice npm build byl up-to-date a Gradle jej znovu provedl jen pokud bylo potřeba. Expo typecheck prošel jako součást Gradle buildu.
 4. `docker compose -f artio-docker/docker-compose.yml config --quiet` prošel; `kubectl kustomize artio-kubernetes` prošel. Terraform CLI není nainstalován, proto jeho `fmt`/`validate` nebylo možné spustit.
-5. Flyway V10 a API integrační testy nebylo možné ověřit proti PostgreSQL: Docker daemon není dostupný a integrační testy v Gradle výstupu byly přeskočeny. Bez běhu proti databázi nelze garantovat runtime SQL, constraints ani tenant migration.
+5. Čistá instalace Flyway V1–V15 a API integrační testy jsou ověřovány přes Docker Testcontainers. Starší externí databáze nejsou podporovaným migračním cílem podle konečného rozhodnutí vlastníka.
 
 Provozní omezení: Compose používá vývojová hesla PostgreSQL a výchozí lokální klíče, single-node Kafka, cache a broker. Nejde o HA produkční topologii. Stripe credentials/webhook, SMTP TLS, secrets, cluster external dependencies, TLS domains, images, backup policy, monitoring receivers, Grafana admin credentials a API origin allowlist musí provozovatel nastavit před reálným nasazením. Nejsou zde tvrzeny load tests, pen-test, coverage nad 80 %, GDPR/PCI certifikace ani deployment do cloudu.

@@ -6,7 +6,7 @@
 
 ## Context
 
-The prior implementation iteration added a SaaS-style tenant registry, tenant membership, tenant JWT claim and request header selection in uncommitted code and Flyway V10. The current repository audit shows these in `TenantContext`, `TenantContextFilter`, `TenantController`, authentication/OIDC flows and `V10__enterprise_foundations.sql`. The binding product brief states that Artio is independently deployed and customer-controlled; SaaS multitenancy is explicitly out of scope. The brief also defines the product as proprietary with a useful free Community edition and licensed Enterprise capabilities.
+The prior implementation iteration added SaaS tenancy. The binding product brief states that Artio is independently deployed and customer-controlled; SaaS multitenancy is explicitly out of scope. The project owner has confirmed that no production or other external data ever existed, so V10 was aligned directly to the single-installation schema. The brief also defines the product as proprietary with a useful free Community edition and licensed Enterprise capabilities.
 
 ## Decision
 
@@ -15,25 +15,25 @@ Artio has one merchant installation/database per customer. Tenant resolution, te
 ## Alternatives considered
 
 1. Preserve multi-tenancy as optional: rejected because it creates a permanent second deployment/security model contrary to the product decision.
-2. Remove existing tenant schema immediately: rejected until deployment provenance for V10 is known; an additive data-preserving migration is required if it has been applied anywhere.
+2. Remove the tenant schema and runtime tenancy: accepted. No legacy external database compatibility is required.
 3. Preserve single-store tenant as internal framework: rejected unless a later concrete need demonstrates value; it obscures ownership and keeps SaaS concepts in security/data paths.
 
 ## Consequences
 
-- Code that selects/validates tenants and data access scoped by tenant must be refactored to installation-level authorization and ordinary resource ownership.
-- The uncommitted V10 schema cannot be treated as deployed or disposable without evidence. Verify all environments before changing the migration history; if already applied, add a safe forward migration.
-- API/JWT compatibility is not promised for these uncommitted development claims; deployed customer data/API behavior must be preserved based on actual release evidence.
+- Former code that selected tenants and scoped data by tenant was refactored to installation-level authorization and ordinary resource ownership.
+- The project owner confirmed that no production or external data ever existed. V10 may be shaped directly for the target schema; old database preservation is out of scope.
+- API/JWT compatibility is not promised for these uncommitted development claims; legacy external database behavior is not a compatibility target.
 - License/edition policy must be isolated and tested, with public-key-only verification in customer images and a defined refresh/grace policy.
 
 ## Evidence and follow-up
 
 - Product decision: directive sections 2.1, 2.2 and 20.4.
-- Existing conflict: `artio-rest-api/src/main/resources/db/migration/V10__enterprise_foundations.sql`; `TenantContextFilter.java`; `AuthController.java`; `TenantController.java`.
-- Follow-up task `P1-02` records the migration-provenance blocker and data-safe correction criteria in `docs/ROADMAP.md`.
+- V10 currently records the single-installation schema. The former tenant context, tenant controller, and tenant JWT handling have been removed.
+- `P1-02` is closed – not applicable; `docs/ROADMAP.md` records the owner decision and clean-install acceptance.
 
 ## Decision register fields
 
 - **Question:** Should this installation support more than one merchant tenant? **Decision:** No.
 - **Options:** SaaS tenants / one installation per merchant. **Recommended:** one installation, selected by product owner.
-- **Trade-off:** removes SaaS resource isolation needs and simplifies the operator model, but requires replacing tenant-scoped current APIs/data access.
-- **Blocks:** migration/schema removal only until V10 deployment provenance is known; does not block independent Phase 1/2 work.
+- **Trade-off:** removes SaaS resource isolation needs and simplifies the operator model, but required replacing the former tenant-scoped APIs/data access.
+- **Status:** the former V10 provenance question is closed – not applicable by owner decision. Clean installation is tested; no legacy database migration is required.

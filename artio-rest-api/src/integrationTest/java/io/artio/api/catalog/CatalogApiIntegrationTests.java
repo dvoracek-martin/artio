@@ -72,12 +72,10 @@ class CatalogApiIntegrationTests {
     @BeforeEach
     void authenticateAdminForCatalogAdministration() {
         UUID userId = UUID.randomUUID();
-        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,tenant_id,created_at) "
-                        + "VALUES (?,?,?,?,?,'ADMIN','00000000-0000-0000-0000-000000000001',now())",
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) "
+                        + "VALUES (?,?,?,?,?,'ADMIN',now())",
                 userId, "admin-" + userId + "@example.test", new BCryptPasswordEncoder().encode("admin-password-123"),
                 "Test", "Administrator");
-        jdbc.update("INSERT INTO tenant_memberships(tenant_id,user_id,role) "
-                        + "VALUES ('00000000-0000-0000-0000-000000000001',?,'ADMIN')", userId);
         var login = http.postForObject("/api/auth/login",
                 Map.of("email", "admin-" + userId + "@example.test", "password", "admin-password-123"), LoginResponse.class);
         assertThat(login).isNotNull();
@@ -177,6 +175,17 @@ class CatalogApiIntegrationTests {
         assertThat(rejected.getBody()).isNotNull();
         assertThat(rejected.getBody().valid()).isFalse();
         assertThat(rejected.getBody().errors()).contains("image must be pinned by sha256 digest", "unsupported permission: host-access");
+    }
+
+    @Test
+    void catalogSearchRebuildRequiresAdminAndReportsDisabledSearch() {
+        var anonymous = http.postForEntity("/api/v1/admin/catalog/search-index/rebuild", null, ApiError.class);
+        assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        var disabled = adminExchange("/api/v1/admin/catalog/search-index/rebuild", HttpMethod.POST, null, ApiError.class);
+        assertThat(disabled.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(disabled.getBody()).isNotNull();
+        assertThat(disabled.getBody().status()).isEqualTo(503);
     }
 
     @Test
@@ -373,7 +382,7 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void appliesCurrentApiMigrationsToAnEmptyPostgresDatabase() {
+    void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE", String.class);
         assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15");
@@ -381,14 +390,17 @@ class CatalogApiIntegrationTests {
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
                         + "WHERE table_schema = current_schema() AND table_name IN "
-                        + "('users','tenants','tenant_memberships','mfa_methods','oauth_identities',"
+                        + "('users','mfa_methods','oauth_identities',"
                         + "'audit_logs','consent_records','gift_cards','loyalty_accounts','subscriptions')",
                 Integer.class);
-        assertThat(enterpriseTables).isEqualTo(10);
+        assertThat(enterpriseTables).isEqualTo(8);
 
-        var usersWithoutTenant = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM users WHERE tenant_id IS NULL", Long.class);
-        assertThat(usersWithoutTenant).isZero();
+        var tenantTables = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables "
+                + "WHERE table_schema=current_schema() AND table_name IN ('tenants','tenant_memberships')", Integer.class);
+        var tenantColumn = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE table_schema=current_schema() AND table_name='users' AND column_name='tenant_id'", Integer.class);
+        assertThat(tenantTables).isZero();
+        assertThat(tenantColumn).isZero();
     }
 
     @Test

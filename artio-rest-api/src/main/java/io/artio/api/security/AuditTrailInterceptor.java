@@ -19,11 +19,10 @@ public class AuditTrailInterceptor implements HandlerInterceptor {
         if(!java.util.Set.of("POST","PUT","PATCH","DELETE").contains(request.getMethod())) return;
         Authentication auth=SecurityContextHolder.getContext().getAuthentication();
         UUID actor=auth instanceof JwtAuthenticationToken jwt?UUID.fromString(jwt.getToken().getSubject()):null;
-        UUID tenant=TenantContext.current();
         String ip=request.getRemoteAddr();
         String path=request.getRequestURI(); if(path!=null&&path.length()>512)path=path.substring(0,512);
         String agent=request.getHeader("User-Agent"); if(agent!=null&&agent.length()>512)agent=agent.substring(0,512);
-        jdbc.update("INSERT INTO audit_logs(id,tenant_id,user_id,action,path,status,ip_address,user_agent) VALUES (?,?,?,?,?,?,?,?)",
-                UUID.randomUUID(),tenant,actor,request.getMethod(),path,response.getStatus(),ip,agent);
+        jdbc.update("INSERT INTO audit_logs(id,user_id,action,path,status,ip_address,user_agent) VALUES (?,?,?,?,?,?,?)",
+                UUID.randomUUID(),actor,request.getMethod(),path,response.getStatus(),ip,agent);
     }
 }

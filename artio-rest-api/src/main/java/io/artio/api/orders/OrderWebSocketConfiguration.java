@@ -49,8 +49,7 @@ public class OrderWebSocketConfiguration implements WebSocketMessageBrokerConfig
                     if(destination==null||!destination.matches("/user/queue/orders/[0-9a-fA-F-]{36}"))throw new IllegalArgumentException("Only private order subscriptions are supported");
                     UUID orderId=UUID.fromString(destination.substring(destination.lastIndexOf('/')+1));
                     UUID user=UUID.fromString(auth.getToken().getSubject());
-                    UUID tenant=UUID.fromString(auth.getToken().getClaimAsString("tenant_id"));
-                    Boolean allowed=jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM orders o JOIN users u ON u.id=o.user_id JOIN tenant_memberships m ON m.user_id=u.id JOIN tenants t ON t.id=m.tenant_id WHERE o.id=? AND o.user_id=? AND m.tenant_id=? AND t.active)",Boolean.class,orderId,user,tenant);
+                    Boolean allowed=jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM orders WHERE id=? AND user_id=?)",Boolean.class,orderId,user);
                     if(!Boolean.TRUE.equals(allowed))throw new IllegalArgumentException("Order subscription is not authorized");
                 }
                 return message;

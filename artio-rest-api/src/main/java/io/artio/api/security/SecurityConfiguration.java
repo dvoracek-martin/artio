@@ -42,11 +42,11 @@ public class SecurityConfiguration {
         CorsConfiguration config=new CorsConfiguration();
         config.setAllowedOrigins(java.util.Arrays.stream(origins.split(",")).map(String::trim).filter(s->!s.isEmpty()).toList());
         config.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization","Content-Type","Idempotency-Key","X-API-Key","X-Artio-Tenant"));
+        config.setAllowedHeaders(List.of("Authorization","Content-Type","Idempotency-Key","X-API-Key"));
         config.setAllowCredentials(false); config.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source=new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/api/**",config); return source;
     }
-    @Bean SecurityFilterChain securityFilterChain(HttpSecurity http, JdbcTemplate jdbc,
+    @Bean SecurityFilterChain securityFilterChain(HttpSecurity http,
             @Value("${artio.security.oauth2-enabled:false}") boolean oauth2Enabled,
             AuthenticationSuccessHandler oauth2SuccessHandler,
             ApiVersioningFilter apiVersioningFilter,
@@ -88,8 +88,7 @@ public class SecurityConfiguration {
                 .accessDeniedHandler((request, response, exception) ->
                     ApiErrorWriter.write(objectMapper, request, response, org.springframework.http.HttpStatus.FORBIDDEN,
                             "Access is denied")))
-            .addFilterBefore(apiVersioningFilter, BearerTokenAuthenticationFilter.class)
-            .addFilterAfter(new TenantContextFilter(jdbc), BearerTokenAuthenticationFilter.class);
+            .addFilterBefore(apiVersioningFilter, BearerTokenAuthenticationFilter.class);
         if(oauth2Enabled)http.oauth2Login(oauth->oauth.successHandler(oauth2SuccessHandler));
         return http.build();
     }

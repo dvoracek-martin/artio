@@ -38,8 +38,7 @@ public class AuthController {
         if (request == null || request.password() == null || request.password().length() < 12 || request.password().length() > 72) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must contain between 12 and 72 characters");
         try {
             User user = User.registerCustomer(new UserId(UUID.randomUUID()), new Email(request.email()), passwords.encode(request.password()), request.firstName(), request.lastName());
-            jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,tenant_id,created_at) VALUES (?,?,?,?,?,'CUSTOMER','00000000-0000-0000-0000-000000000001',?)", user.getId().value(), user.email().value(), user.passwordHash(), user.firstName(), user.lastName(), java.sql.Timestamp.from(user.createdAt()));
-            jdbc.update("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES ('00000000-0000-0000-0000-000000000001',?,'CUSTOMER')",user.getId().value());
+            jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) VALUES (?,?,?,?,?,'CUSTOMER',?)", user.getId().value(), user.email().value(), user.passwordHash(), user.firstName(), user.lastName(), java.sql.Timestamp.from(user.createdAt()));
             return Map.of("id", user.getId().value(), "email", user.email().value());
         } catch (org.springframework.dao.DuplicateKeyException e) { throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already registered"); }
         catch (IllegalArgumentException e) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage()); }
@@ -69,8 +68,7 @@ public class AuthController {
         }
         Instant now = Instant.now();
         jdbc.update("UPDATE users SET last_login=? WHERE id=?", java.sql.Timestamp.from(now), user.id());
-        UUID tenantId=jdbc.queryForObject("SELECT tenant_id FROM tenant_memberships WHERE user_id=? ORDER BY created_at LIMIT 1",UUID.class,user.id());
-        var claims = JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email", user.email()).claim("role", user.role()).claim("tenant_id",tenantId.toString()).build();
+        var claims = JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email", user.email()).claim("role", user.role()).build();
         String token = jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
         return new LoginResponse(token, "Bearer", 3600, user.id(), user.email(), user.role());
     }

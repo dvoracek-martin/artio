@@ -21,9 +21,8 @@ public class BootstrapAdminConfiguration {
             Integer exists = jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE email=?", Integer.class, email.toLowerCase());
             if (exists != null && exists == 0) {
                 java.util.UUID id=java.util.UUID.randomUUID();
-                jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,permissions,tenant_id,created_at) VALUES (?,?,?,?,?,'SUPERADMIN','*','00000000-0000-0000-0000-000000000001',now())",
+                jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,permissions,created_at) VALUES (?,?,?,?,?,'SUPERADMIN','*',now())",
                         id, email.toLowerCase(), new BCryptPasswordEncoder().encode(password), "Artio", "Administrator");
-                jdbc.update("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES ('00000000-0000-0000-0000-000000000001',?,'OWNER')",id);
             }
         };
     }

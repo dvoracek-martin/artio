@@ -19,8 +19,8 @@ public class OrderStreamController {
     @MessageMapping("/orders/{orderId}/subscribe")
     public void subscribe(@DestinationVariable UUID orderId,org.springframework.messaging.simp.stomp.StompHeaderAccessor headers){
         if(!(headers.getUser() instanceof JwtAuthenticationToken auth))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Bearer token required");
-        UUID user=UUID.fromString(auth.getToken().getSubject());UUID tenant=UUID.fromString(auth.getToken().getClaimAsString("tenant_id"));
-        var rows=jdbc.query("SELECT o.status,o.total,o.currency,o.tracking_number,o.created_at FROM orders o JOIN tenant_memberships m ON m.user_id=o.user_id JOIN tenants t ON t.id=m.tenant_id WHERE o.id=? AND o.user_id=? AND m.tenant_id=? AND t.active",(rs,n)->new OrderUpdate(orderId,rs.getString(1),rs.getBigDecimal(2),rs.getString(3).trim(),rs.getString(4),rs.getTimestamp(5).toInstant()),orderId,user,tenant);
+        UUID user=UUID.fromString(auth.getToken().getSubject());
+        var rows=jdbc.query("SELECT status,total,currency,tracking_number,created_at FROM orders WHERE id=? AND user_id=?",(rs,n)->new OrderUpdate(orderId,rs.getString(1),rs.getBigDecimal(2),rs.getString(3).trim(),rs.getString(4),rs.getTimestamp(5).toInstant()),orderId,user);
         if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");
         messaging.convertAndSendToUser(user.toString(),"/queue/orders/"+orderId,rows.getFirst());
     }
