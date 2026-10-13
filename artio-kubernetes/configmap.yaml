@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: artio-config
+data:
+  SPRING_PROFILES_ACTIVE: production
+  ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
+  ARTIO_DATABASE_USERNAME: artio
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  KAFKA_BROKERS: kafka:9092
+  ARTIO_SEARCH_ENABLED: "true"
+  ARTIO_SEARCH_URL: http://opensearch:9200
+  ARTIO_STOREFRONT_URL: https://shop.artio.example.com
+  ARTIO_RATE_LIMIT_PER_MINUTE: "100"

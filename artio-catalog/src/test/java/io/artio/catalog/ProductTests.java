@@ -1,0 +1,136 @@
+package io.artio.catalog;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+
+class ProductTests {
+    @Test
+    void createsAnActiveProductAndRecordsCreationEvent() {
+        var id = new ProductId(UUID.randomUUID());
+        var name = new ProductName("Laptop");
+        var description = new ProductDescription("High-performance laptop");
+        var sku = new Sku("LAP-001");
+
+        var product = Product.create(id, name, description, sku);
+
+        assertThat(product.getId()).isEqualTo(id);
+        assertThat(product.getName()).isEqualTo(name);
+        assertThat(product.getDescription()).isEqualTo(description);
+        assertThat(product.getSku()).isEqualTo(sku);
+        assertThat(product.isActive()).isTrue();
+        assertThat(product.getCreatedAt()).isNotNull();
+        assertThat(product.getUpdatedAt()).isEqualTo(product.getCreatedAt());
+        assertThat(product.getDomainEvents()).containsExactly(new ProductCreated(id, name, description, sku));
+    }
+
+    @Test
+    void productNameCannotBeEmptyOrBlank() {
+        assertThatThrownBy(() -> new ProductName(""))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Name required");
+        assertThatThrownBy(() -> new ProductName("  "))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Name required");
+    }
+
+    @Test
+    void productNameCannotExceed500Characters() {
+        assertThatThrownBy(() -> new ProductName("x".repeat(501)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Name too long");
+    }
+
+    @Test
+    void descriptionMayBeAbsentButCannotExceed5000Characters() {
+        assertThat(new ProductDescription(null).value()).isNull();
+        assertThatThrownBy(() -> new ProductDescription("x".repeat(5_001)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Description too long");
+    }
+
+    @Test
+    void skuMustUseUppercaseLettersDigitsAndHyphens() {
+        assertThat(new Sku("LAP-001").value()).isEqualTo("LAP-001");
+        assertThatThrownBy(() -> new Sku("invalid-sku-123"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Invalid SKU format");
+        assertThatThrownBy(() -> new Sku("AB"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Invalid SKU format");
+    }
+
+    @Test
+    void productIdMustNotBeNull() {
+        assertThatThrownBy(() -> new ProductId(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void deactivatesAndReactivatesProductWithEvents() {
+        var product = product();
+
+        product.deactivate();
+        assertThat(product.isActive()).isFalse();
+        product.activate();
+
+        assertThat(product.isActive()).isTrue();
+        assertThat(product.getDomainEvents()).hasSize(3)
+                .contains(new ProductDeactivated(product.getId()), new ProductActivated(product.getId()));
+    }
+
+    @Test
+    void cannotRepeatActivationOrDeactivation() {
+        var product = product();
+        assertThatThrownBy(product::activate).isInstanceOf(IllegalStateException.class).hasMessage("Already active");
+
+        product.deactivate();
+        assertThatThrownBy(product::deactivate)
+                .isInstanceOf(IllegalStateException.class).hasMessage("Already inactive");
+    }
+
+    @Test
+    void renameChangesTheProductAndRecordsOldAndNewNames() {
+        var product = product();
+        var oldName = product.getName();
+        var newName = new ProductName("Workstation");
+
+        product.rename(newName);
+
+        assertThat(product.getName()).isEqualTo(newName);
+        assertThat(product.getDomainEvents()).last().isEqualTo(new ProductRenamed(product.getId(), oldName, newName));
+    }
+
+    @Test
+    void renamingToTheSameNameDoesNotRecordAnEvent() {
+        var product = product();
+        var originalEventCount = product.getDomainEvents().size();
+
+        product.rename(product.getName());
+
+        assertThat(product.getDomainEvents()).hasSize(originalEventCount);
+    }
+
+    @Test
+    void updatingDescriptionChangesTheProductAndRecordsTheChange() {
+        var product = product();
+        var previous = product.getDescription();
+        var replacement = new ProductDescription("Portable workstation");
+
+        product.updateDescription(replacement);
+
+        assertThat(product.getDescription()).isEqualTo(replacement);
+        assertThat(product.getDomainEvents()).last()
+                .isEqualTo(new ProductDescriptionUpdated(product.getId(), previous, replacement));
+    }
+
+    @Test
+    void aggregateReturnsAnImmutableEventSnapshotAndCanClearPendingEvents() {
+        var product = product();
+        var events = product.getDomainEvents();
+
+        assertThatThrownBy(() -> events.clear()).isInstanceOf(UnsupportedOperationException.class);
+        product.clearDomainEvents();
+        assertThat(product.getDomainEvents()).isEmpty();
+    }
+
+    private Product product() {
+        return Product.create(new ProductId(UUID.randomUUID()), new ProductName("Laptop"),
+                new ProductDescription("High-performance laptop"), new Sku("LAP-001"));
+    }
+}

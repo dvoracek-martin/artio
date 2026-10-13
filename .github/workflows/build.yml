@@ -1,0 +1,48 @@
+name: Build, test and containerize
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            artio-storefront/package-lock.json
+            artio-backoffice/package-lock.json
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build, run tests and generate coverage
+        run: ./gradlew --no-daemon clean build jacocoTestReport
+      - name: Build API container
+        run: docker build -f artio-docker/Dockerfile -t artio/api:${GITHUB_SHA} .
+      - name: Build storefront container
+        run: docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-storefront --build-arg APP_NAME=storefront -t artio/storefront:${GITHUB_SHA} .
+      - name: Build backoffice container
+        run: docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-backoffice --build-arg APP_NAME=backoffice -t artio/backoffice:${GITHUB_SHA} .
+      - name: Publish images on main when registry credentials exist
+        if: github.ref == 'refs/heads/main'
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then
+            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+            docker push artio/api:${GITHUB_SHA}
+            docker push artio/storefront:${GITHUB_SHA}
+            docker push artio/backoffice:${GITHUB_SHA}
+          else
+            echo "Registry credentials are not configured; image publishing is skipped."
+          fi

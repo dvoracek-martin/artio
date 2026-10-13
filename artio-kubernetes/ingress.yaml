@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: artio
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 2m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [shop.artio.example.com, admin.artio.example.com]
+      secretName: artio-tls
+  rules:
+    - host: shop.artio.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: artio-api, port: { number: 8080 } } }
+          - path: /actuator
+            pathType: Prefix
+            backend: { service: { name: artio-api, port: { number: 8080 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: artio-storefront, port: { number: 80 } } }
+    - host: admin.artio.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: artio-api, port: { number: 8080 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: artio-backoffice, port: { number: 80 } } }

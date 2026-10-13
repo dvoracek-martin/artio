@@ -1,0 +1,63 @@
+package io.artio.api.catalog;
+
+import java.net.URI;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+    private final ProductApplicationService products;
+
+    public ProductController(ProductApplicationService products) {
+        this.products = products;
+    }
+
+    @GetMapping
+    public List<ProductResponse> findAll() {
+        return products.findAll();
+    }
+
+    @GetMapping("/search")
+    public List<io.artio.catalog.ports.ProductSearchResult> search(
+            @org.springframework.web.bind.annotation.RequestParam String q,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int limit) {
+        return products.search(q, limit);
+    }
+
+    @GetMapping("/{id}")
+    public ProductResponse findById(@PathVariable UUID id) {
+        return products.findById(id);
+    }
+
+    @PostMapping
+    public ResponseEntity<ProductResponse> create(@RequestBody ProductRequest request) {
+        var product = products.create(request);
+        return ResponseEntity.created(URI.create("/api/products/" + product.id())).body(product);
+    }
+
+    @PutMapping("/{id}")
+    public ProductResponse update(@PathVariable UUID id, @RequestBody UpdateProductRequest request) {
+        return products.update(id, request);
+    }
+
+    @PutMapping("/{id}/active")
+    public ProductResponse setActive(@PathVariable UUID id, @RequestBody SetActiveRequest request) {
+        return products.setActive(id, request.active());
+    }
+
+    @PutMapping("/{id}/catalog-metadata")
+    public ProductResponse updateCatalogMetadata(@PathVariable UUID id,
+            @RequestBody ProductApplicationService.CatalogMetadataRequest request) {
+        return products.updateCatalogMetadata(id, request);
+    }
+}

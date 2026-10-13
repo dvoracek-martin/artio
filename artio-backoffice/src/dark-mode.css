@@ -1,0 +1,13 @@
+@media (prefers-color-scheme: dark) {
+  body { background: #111a16; color: #e7eee9; }
+  .content { color: #e7eee9; }
+  .panel, .metrics article, .bundle-list article, .login-card { background: #1b2721; border-color: #34443a; color: #e7eee9; }
+  .welcome { background: #243a30; }
+  .welcome h2, .panel h2, .bundle-list h2 { color: #e7eee9; }
+  .welcome p:last-child, .muted, .empty, .metrics article span, .metrics small { color: #aab8ae; }
+  th { background: #202c25; color: #b4c1b8; }
+  th, td, .row { border-color: #344239; }
+  .search, .search input, .create-form { background: #202c25; color: #e7eee9; border-color: #344239; }
+  .create-form input, .create-form select, .login-card input { background: #131d17; color: #e7eee9; border-color: #3b4a40; }
+  .dot-icon { background: #293a30; color: #b1cbb7; }
+}

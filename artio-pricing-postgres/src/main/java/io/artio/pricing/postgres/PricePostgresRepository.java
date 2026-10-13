@@ -1,0 +1,11 @@
+package io.artio.pricing.postgres;
+import io.artio.kernel.Money; import io.artio.pricing.*; import io.artio.pricing.ports.PriceRepository; import java.sql.Timestamp; import java.time.Instant; import java.util.*; import org.springframework.jdbc.core.JdbcTemplate; import org.springframework.jdbc.core.RowMapper; import org.springframework.stereotype.Repository;
+@Repository public class PricePostgresRepository implements PriceRepository {
+    private static final RowMapper<Price> ROW = (r, n) -> Price.reconstitute(new PriceId(r.getObject("id", UUID.class)), r.getObject("sellable_id", UUID.class), r.getString("market"), r.getString("channel"), new Money(r.getBigDecimal("amount"), Currency.getInstance(r.getString("currency").trim())), r.getTimestamp("valid_from").toInstant(), instant(r.getTimestamp("valid_until")), r.getBoolean("active"));
+    private final JdbcTemplate jdbc; public PricePostgresRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public Optional<Price> findById(PriceId id) { return jdbc.query("SELECT * FROM pricing_price WHERE id=?", ROW, id.value()).stream().findFirst(); }
+    public List<Price> findAll() { return jdbc.query("SELECT * FROM pricing_price ORDER BY valid_from DESC,id", ROW); }
+    public List<Price> findApplicable(UUID item, String market, String channel, Instant at) { return jdbc.query("SELECT * FROM pricing_price WHERE sellable_id=? AND market=? AND channel=? AND active=true AND valid_from<=? AND (valid_until IS NULL OR valid_until>?) ORDER BY valid_from DESC,id", ROW, item, market, channel, Timestamp.from(at), Timestamp.from(at)); }
+    public void save(Price p) { jdbc.update("INSERT INTO pricing_price(id,sellable_id,market,channel,amount,currency,valid_from,valid_until,active) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET amount=EXCLUDED.amount,valid_until=EXCLUDED.valid_until,active=EXCLUDED.active", p.getId().value(), p.getSellableId(), p.getMarket(), p.getChannel(), p.getAmount().amount(), p.getAmount().currency().getCurrencyCode(), Timestamp.from(p.getValidFrom()), timestamp(p.getValidUntil()), p.isActive()); }
+    private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); } private static Timestamp timestamp(Instant value) { return value == null ? null : Timestamp.from(value); }
+}

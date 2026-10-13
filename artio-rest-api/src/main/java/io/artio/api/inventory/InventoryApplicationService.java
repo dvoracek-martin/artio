@@ -1,0 +1,30 @@
+package io.artio.api.inventory;
+
+import io.artio.api.catalog.CatalogNotFoundException;
+import io.artio.inventory.*; import io.artio.inventory.ports.*; import io.artio.kernel.Quantity;
+import java.math.BigDecimal; import java.util.List; import java.util.UUID;
+import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional;
+
+@Service @Transactional
+public class InventoryApplicationService {
+    private final WarehouseRepository warehouses; private final StockRepository stock; private final ReservationRepository reservations;
+    public InventoryApplicationService(WarehouseRepository warehouses,StockRepository stock,ReservationRepository reservations){this.warehouses=warehouses;this.stock=stock;this.reservations=reservations;}
+    @Transactional(readOnly=true) public List<WarehouseView> warehouses(){return warehouses.findAll().stream().map(WarehouseView::from).toList();}
+    public WarehouseView createWarehouse(WarehouseRequest r){var w=Warehouse.create(new WarehouseId(UUID.randomUUID()),r.code(),r.name(),r.location());warehouses.save(w);return WarehouseView.from(w);}
+    public WarehouseView setWarehouseActive(UUID id,boolean active){var w=warehouse(id);w.setActive(active);warehouses.save(w);return WarehouseView.from(w);}
+    @Transactional(readOnly=true) public List<StockView> stockByWarehouse(UUID warehouse){warehouse(warehouse);return stock.findByWarehouse(new WarehouseId(warehouse)).stream().map(StockView::from).toList();}
+    @Transactional(readOnly=true) public List<StockView> stockBySellable(UUID sellable){return stock.findBySellable(sellable).stream().map(StockView::from).toList();}
+    public StockView receive(UUID warehouse,UUID sellable,BigDecimal quantity){warehouse(warehouse);var level=stock.lockOrCreate(new WarehouseId(warehouse),sellable);level.receive(new Quantity(quantity));stock.save(level);return StockView.from(level);}
+    public StockView adjust(UUID warehouse,UUID sellable,BigDecimal onHand){warehouse(warehouse);var level=stock.lockOrCreate(new WarehouseId(warehouse),sellable);level.adjustTo(new Quantity(onHand));stock.save(level);return StockView.from(level);}
+    public ReservationView reserve(ReserveRequest r){var warehouse=warehouse(r.warehouseId());if(!warehouse.isActive())throw new IllegalStateException("Inactive warehouse cannot accept reservations");var warehouseId=warehouse.getId();var level=stock.lockOrCreate(warehouseId,r.sellableId());var previous=reservations.findByOrderAndWarehouseAndSellable(r.orderId(),warehouseId,r.sellableId());if(previous.isPresent()){var existing=previous.get();if(existing.getState()==ReservationState.RESERVED&&existing.getQuantity().compareTo(r.quantity())==0)return ReservationView.from(existing);throw new IllegalStateException("Order already has a reservation for this sellable and warehouse");}var reservation=Reservation.reserve(new ReservationId(UUID.randomUUID()),r.orderId(),warehouseId,r.sellableId(),new Quantity(r.quantity()));level.reserve(new Quantity(r.quantity()));stock.save(level);reservations.save(reservation);return ReservationView.from(reservation);}
+    public ReservationView allocate(UUID id){return transition(id,true);}
+    public ReservationView release(UUID id){return transition(id,false);}
+    @Transactional(readOnly=true) public List<ReservationView> reservationsByOrder(UUID order){return reservations.findByOrder(order).stream().map(ReservationView::from).toList();}
+    private ReservationView transition(UUID id,boolean allocate){var initial=reservations.findById(new ReservationId(id)).orElseThrow(()->new CatalogNotFoundException("Reservation not found: "+id));var level=stock.lockOrCreate(initial.getWarehouseId(),initial.getSellableId());var reservation=reservations.findById(new ReservationId(id)).orElseThrow(()->new CatalogNotFoundException("Reservation not found: "+id));var target=allocate?ReservationState.ALLOCATED:ReservationState.RELEASED;if(reservation.getState()==target)return ReservationView.from(reservation);if(allocate){level.allocate(new Quantity(reservation.getQuantity()));reservation.allocate();}else{level.release(new Quantity(reservation.getQuantity()));reservation.release();}stock.save(level);reservations.save(reservation);return ReservationView.from(reservation);}
+    private Warehouse warehouse(UUID id){return warehouses.findById(new WarehouseId(id)).orElseThrow(()->new CatalogNotFoundException("Warehouse not found: "+id));}
+    public record WarehouseRequest(String code,String name,String location){}
+    public record ReserveRequest(UUID orderId,UUID warehouseId,UUID sellableId,BigDecimal quantity){}
+    public record WarehouseView(UUID id,String code,String name,String location,boolean active){static WarehouseView from(Warehouse w){return new WarehouseView(w.getId().value(),w.getCode(),w.getName(),w.getLocation(),w.isActive());}}
+    public record StockView(UUID warehouseId,UUID sellableId,BigDecimal onHand,BigDecimal reserved,BigDecimal available){static StockView from(StockLevel s){return new StockView(s.getWarehouseId().value(),s.getSellableId(),s.getOnHand(),s.getReserved(),s.available());}}
+    public record ReservationView(UUID id,UUID orderId,UUID warehouseId,UUID sellableId,BigDecimal quantity,ReservationState state){static ReservationView from(Reservation r){return new ReservationView(r.getId().value(),r.getOrderId(),r.getWarehouseId().value(),r.getSellableId(),r.getQuantity(),r.getState());}}
+}

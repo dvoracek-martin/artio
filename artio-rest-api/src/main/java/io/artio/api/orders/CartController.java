@@ -1,0 +1,158 @@
+package io.artio.api.orders;
+
+import io.artio.api.pricing.PricingApplicationService;
+import io.artio.api.inventory.InventoryApplicationService;
+import io.artio.api.bundles.BundleApplicationService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.RoundingMode;
+import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.Set;
+import io.artio.kernel.Money;
+import io.artio.kernel.Quantity;
+import io.artio.orders.Order;
+import io.artio.orders.OrderLineItem;
+import java.math.BigDecimal;
+import java.util.Currency;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/cart")
+public class CartController {
+    private final JdbcTemplate jdbc;
+    private final PricingApplicationService pricing;
+    private final ApplicationEventPublisher events;
+    private final InventoryApplicationService inventory;
+    private final BundleApplicationService bundles;
+    private final ObjectMapper mapper;
+    private final BigDecimal shippingCost;
+    private final String stripeKey;
+    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, ApplicationEventPublisher events, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey) { this.jdbc = jdbc; this.pricing = pricing; this.events=events; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey; }
+
+    @GetMapping
+    public CartView get(JwtAuthenticationToken auth) {
+        UUID userId = userId(auth);
+        UUID cartId = ensureCart(userId);
+        return view(cartId);
+    }
+
+    @PostMapping("/items") @Transactional
+    public CartView add(@RequestBody AddItemRequest request, JwtAuthenticationToken auth) {
+        UUID userId = userId(auth);
+        UUID cartId = ensureCart(userId);
+        var quote = pricing.quote(new PricingApplicationService.QuoteRequest(request.variantId(), request.market(), request.channel(), request.jurisdiction(), request.quantity(), null));
+        validateQuantity(request.quantity());
+        int changed=jdbc.update("UPDATE cart_items SET quantity=quantity+?,unit_price=?,currency=? WHERE cart_id=? AND variant_id=? AND bundle_ref IS NULL",request.quantity(),quote.unitListPrice().amount(),quote.unitListPrice().currency().getCurrencyCode(),cartId,request.variantId());
+        if(changed==0)jdbc.update("INSERT INTO cart_items(cart_id,variant_id,quantity,unit_price,currency) VALUES (?,?,?,?,?)",cartId,request.variantId(),request.quantity(),quote.unitListPrice().amount(),quote.unitListPrice().currency().getCurrencyCode());
+        return view(cartId);
+    }
+
+    @PostMapping("/bundles") @Transactional
+    public CartView addBundle(@RequestBody AddBundleRequest request,JwtAuthenticationToken auth){
+        UUID cartId=ensureCart(userId(auth));validateQuantity(request.bundleQuantity());
+        var configureRequest=new BundleApplicationService.ConfigureRequest(request.selectedOptions(),request.bundleQuantity());
+        var configuration=bundles.configure(request.bundleId(),configureRequest);
+        var quoteRequest=new BundleApplicationService.BundleQuoteRequest(request.selectedOptions(),request.bundleQuantity(),request.market(),request.channel(),request.jurisdiction());
+        var bundleQuote=bundles.quote(request.bundleId(),quoteRequest);
+        BigDecimal componentTotal=BigDecimal.ZERO;var unitPrices=new HashMap<UUID,Money>();
+        for(var component:configuration.components()){var p=pricing.quote(new PricingApplicationService.QuoteRequest(component.sellableId(),request.market(),request.channel(),request.jurisdiction(),BigDecimal.ONE,null));unitPrices.put(component.sellableId(),p.taxableAmount());componentTotal=componentTotal.add(p.taxableAmount().amount().multiply(component.quantity()));}
+        if(componentTotal.signum()<=0)throw new IllegalArgumentException("Bundle component prices must be positive");
+        BigDecimal factor=bundleQuote.perBundlePrice().amount().divide(componentTotal,12,RoundingMode.HALF_EVEN);
+        UUID bundleRef=UUID.randomUUID();
+        try{jdbc.update("INSERT INTO cart_bundle_lines(bundle_ref,cart_id,bundle_id,selected_options,quantity,market,channel,jurisdiction,created_at) VALUES (?,?,?,?::jsonb,?,?,?,?,now())",bundleRef,cartId,request.bundleId(),mapper.writeValueAsString(request.selectedOptions()),request.bundleQuantity(),request.market(),request.channel(),request.jurisdiction());}
+        catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalArgumentException("Bundle configuration could not be stored",e);}
+        for(var component:configuration.components()){
+            var price=unitPrices.get(component.sellableId());if(!price.currency().equals(bundleQuote.perBundlePrice().currency()))throw new IllegalArgumentException("Bundle price currency must match component prices");BigDecimal quantity=component.quantity().multiply(request.bundleQuantity());
+            BigDecimal adjusted=price.amount().multiply(factor).setScale(Math.max(0,price.currency().getDefaultFractionDigits()),RoundingMode.HALF_EVEN);
+            jdbc.update("INSERT INTO cart_items(cart_id,variant_id,quantity,unit_price,currency,bundle_ref,bundle_id) VALUES (?,?,?,?,?,?,?)",cartId,component.sellableId(),quantity,adjusted,price.currency().getCurrencyCode(),bundleRef,request.bundleId());
+        }
+        return view(cartId);
+    }
+
+    @DeleteMapping("/items/{variantId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void remove(@PathVariable UUID variantId, JwtAuthenticationToken auth) {
+        UUID user=userId(auth);
+        jdbc.update("DELETE FROM cart_items WHERE bundle_ref IN (SELECT i.bundle_ref FROM cart_items i JOIN carts c ON c.id=i.cart_id WHERE c.user_id=? AND i.variant_id=? AND i.bundle_ref IS NOT NULL)",user,variantId);
+        jdbc.update("DELETE FROM cart_bundle_lines b USING carts c WHERE b.cart_id=c.id AND c.user_id=? AND NOT EXISTS (SELECT 1 FROM cart_items i WHERE i.bundle_ref=b.bundle_ref)",user);
+        jdbc.update("DELETE FROM cart_items i USING carts c WHERE i.cart_id=c.id AND c.user_id=? AND i.variant_id=? AND i.bundle_ref IS NULL", user, variantId);
+    }
+
+    @PostMapping("/checkout") @Transactional
+    @ResponseStatus(HttpStatus.CREATED)
+    public OrderView checkout(@RequestBody CheckoutRequest request, JwtAuthenticationToken auth) {
+        if(stripeKey.isBlank())throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
+        UUID userId = userId(auth);
+        UUID cartId = jdbc.query("SELECT id FROM carts WHERE user_id=? AND expires_at>now()", rs -> rs.next() ? UUID.fromString(rs.getString(1)) : null, userId);
+        if (cartId == null) throw new IllegalArgumentException("Cart is empty");
+        List<CartRow> items = jdbc.query("SELECT id,variant_id,quantity,unit_price,currency,bundle_ref,bundle_id FROM cart_items WHERE cart_id=?", (rs,n) -> new CartRow(rs.getObject("id",UUID.class),rs.getObject("variant_id",UUID.class),rs.getBigDecimal("quantity"),rs.getBigDecimal("unit_price"),rs.getString("currency").trim(),rs.getObject("bundle_ref",UUID.class),rs.getObject("bundle_id",UUID.class)), cartId);
+        if(items.isEmpty())throw new IllegalArgumentException("Cart is empty");
+        BigDecimal subtotal = BigDecimal.ZERO;
+        BigDecimal tax = BigDecimal.ZERO;
+        Market market=marketForCountry(request.shippingCountry());Currency currency=Currency.getInstance(market.currency());
+        List<OrderLineItem> orderItems=new java.util.ArrayList<>();Map<UUID,BigDecimal> requirements=new HashMap<>();Set<UUID> processedBundles=new java.util.HashSet<>();
+        for(CartRow item:items){
+            if(item.bundleRef()!=null){if(!processedBundles.add(item.bundleRef()))continue;var bundleLine=jdbc.queryForObject("SELECT selected_options,quantity,market,channel,jurisdiction FROM cart_bundle_lines WHERE bundle_ref=? AND cart_id=?",(rs,n)->new BundleCartRow(rs.getString("selected_options"),rs.getBigDecimal("quantity"),rs.getString("market"),rs.getString("channel"),rs.getString("jurisdiction")),item.bundleRef(),cartId);
+                Map<String,Set<UUID>> selections;try{selections=mapper.readValue(bundleLine.selectedOptions(),new TypeReference<>(){});}catch(Exception e){throw new IllegalStateException("Stored bundle configuration is invalid",e);}
+                var config=bundles.configure(item.bundleId(),new BundleApplicationService.ConfigureRequest(selections,bundleLine.quantity()));
+                var quote=bundles.quote(item.bundleId(),new BundleApplicationService.BundleQuoteRequest(selections,bundleLine.quantity(),market.market(),"WEB",market.jurisdiction()));
+                var current=new ArrayList<ComponentPrice>();BigDecimal base=BigDecimal.ZERO;BigDecimal baseTax=BigDecimal.ZERO;
+                for(var component:config.components()){BigDecimal qty=component.quantity().multiply(bundleLine.quantity());var pq=pricing.quote(new PricingApplicationService.QuoteRequest(component.sellableId(),market.market(),"WEB",market.jurisdiction(),qty,null));if(!currency.equals(pq.unitListPrice().currency()))throw new IllegalArgumentException("Bundle currency does not match shipping country");base=base.add(pq.taxableAmount().amount());baseTax=baseTax.add(pq.tax().amount());current.add(new ComponentPrice(component.sellableId(),qty,pq));requirements.merge(component.sellableId(),qty,BigDecimal::add);}
+                if(base.signum()<=0)throw new IllegalArgumentException("The bundle cannot be repriced because its components have no current taxable value");BigDecimal bundleTotal=quote.totalPrice().amount();BigDecimal factor=bundleTotal.divide(base,12,RoundingMode.HALF_EVEN);subtotal=subtotal.add(base.multiply(factor));tax=tax.add(baseTax.multiply(factor));
+                for(var component:current){BigDecimal unit=component.quote().taxableAmount().amount().divide(component.quantity(),12,RoundingMode.HALF_EVEN).multiply(factor).setScale(Math.max(0,currency.getDefaultFractionDigits()),RoundingMode.HALF_EVEN);orderItems.add(new OrderLineItem(component.variantId(),new Quantity(component.quantity()),new Money(unit,currency),item.bundleId()));}
+            }else{
+                BigDecimal qty=item.quantity();var quote=pricing.quote(new PricingApplicationService.QuoteRequest(item.variantId(),market.market(),"WEB",market.jurisdiction(),qty,null));if(!currency.equals(quote.unitListPrice().currency()))throw new IllegalArgumentException("Cart currency does not match shipping country");subtotal=subtotal.add(quote.taxableAmount().amount());tax=tax.add(quote.tax().amount());orderItems.add(new OrderLineItem(item.variantId(),new Quantity(qty),quote.unitListPrice()));requirements.merge(item.variantId(),qty,BigDecimal::add);
+            }
+        }
+        if(subtotal.signum()<0)throw new IllegalArgumentException("Order total must not be negative");
+        Money shipping=new Money(shippingCost,currency);
+        var order=Order.checkout(userId,orderItems,request.shippingAddress(),request.billingAddress(),new Money(subtotal,currency),new Money(tax,currency),shipping);
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",order.getId().value(),userId,order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),order.shippingAddress(),request.billingAddress()==null?request.shippingAddress():request.billingAddress(),java.sql.Timestamp.from(order.createdAt()));
+        order.items().forEach(i->jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,?,?,?,?)",UUID.randomUUID(),order.getId().value(),i.variantId(),i.quantity().value(),i.unitPrice().amount(),i.unitPrice().currency().getCurrencyCode(),i.bundleId()));
+        var warehouses=inventory.warehouses().stream().filter(InventoryApplicationService.WarehouseView::active).toList();
+        for(var requirement:requirements.entrySet()){var selected=warehouses.stream().filter(w->inventory.stockByWarehouse(w.id()).stream().anyMatch(s->s.sellableId().equals(requirement.getKey())&&s.available().compareTo(requirement.getValue())>=0)).findFirst().orElseThrow(()->new IllegalStateException("Insufficient inventory for item "+requirement.getKey()));inventory.reserve(new InventoryApplicationService.ReserveRequest(order.getId().value(),selected.id(),requirement.getKey(),requirement.getValue()));}
+        events.publishEvent(new io.artio.orders.OrderCreated(order.getId(),userId));jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
+        return new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null);
+    }
+
+    @GetMapping("/orders")
+    public List<OrderView> orders(JwtAuthenticationToken auth) {
+        return jdbc.query("SELECT id,status,subtotal,tax,shipping,total,currency,tracking_number FROM orders WHERE user_id=? ORDER BY created_at DESC", (rs,n) -> new OrderView(UUID.fromString(rs.getString(1)), rs.getString(2), rs.getBigDecimal(3), rs.getBigDecimal(4), rs.getBigDecimal(5), rs.getBigDecimal(6), rs.getString(7).trim(),rs.getString(8)), userId(auth));
+    }
+
+    private UUID ensureCart(UUID userId) {
+        UUID id = jdbc.query("SELECT id FROM carts WHERE user_id=? AND expires_at>now() ORDER BY created_at DESC LIMIT 1", rs -> rs.next() ? UUID.fromString(rs.getString(1)) : null, userId);
+        if (id != null) return id;
+        id = UUID.randomUUID();
+        jdbc.update("INSERT INTO carts(id,user_id,created_at,expires_at) VALUES (?,?,now(),now()+interval '30 days')", id, userId);
+        return id;
+    }
+    private CartView view(UUID cartId) {
+        var items = jdbc.query("SELECT variant_id,quantity,unit_price,currency,bundle_id FROM cart_items WHERE cart_id=?", (rs,n) -> new ItemView(UUID.fromString(rs.getString(1)), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getString(4).trim(),rs.getObject("bundle_id",UUID.class)), cartId);
+        return new CartView(cartId, items);
+    }
+    private static UUID userId(JwtAuthenticationToken auth) { return UUID.fromString(auth.getToken().getSubject()); }
+
+    public record AddItemRequest(UUID variantId, BigDecimal quantity, String market, String channel, String jurisdiction) { }
+    public record AddBundleRequest(UUID bundleId,Map<String,Set<UUID>> selectedOptions,BigDecimal bundleQuantity,String market,String channel,String jurisdiction){}
+    public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry) { }
+    public record ItemView(UUID variantId, BigDecimal quantity, BigDecimal unitPrice, String currency,UUID bundleId) { }
+    public record CartView(UUID cartId, List<ItemView> items) { }
+    public record OrderView(UUID orderId, String status, BigDecimal subtotal, BigDecimal tax, BigDecimal shipping, BigDecimal total, String currency,String trackingNumber) { }
+    private record CartRow(UUID id,UUID variantId,BigDecimal quantity,BigDecimal unitPrice,String currency,UUID bundleRef,UUID bundleId){}
+    private record BundleCartRow(String selectedOptions,BigDecimal quantity,String market,String channel,String jurisdiction){}
+    private record ComponentPrice(UUID variantId,BigDecimal quantity,io.artio.pricing.PricingQuote quote){}
+    private static Market marketForCountry(String country){return switch(country==null?"":country.toUpperCase(java.util.Locale.ROOT)){case "US"->new Market("US","US","USD");case "CZ"->new Market("CZ","CZ","CZK");case "DE","AT","FR","NL","BE","ES","IT","PL","SK"->new Market("EU",country.toUpperCase(java.util.Locale.ROOT),"EUR");default->throw new IllegalArgumentException("Shipping country is not supported");};}
+    private record Market(String market,String jurisdiction,String currency){}
+    private static void validateQuantity(BigDecimal quantity){if(quantity==null||quantity.signum()<=0||quantity.precision()>15||quantity.stripTrailingZeros().scale()>4)throw new IllegalArgumentException("Quantity must be positive, with at most 15 digits and 4 decimal places");}
+}

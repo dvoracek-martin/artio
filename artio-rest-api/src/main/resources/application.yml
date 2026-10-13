@@ -1,0 +1,51 @@
+spring:
+  datasource:
+    url: ${ARTIO_DATABASE_URL:jdbc:postgresql://localhost:5432/artio}
+    username: ${ARTIO_DATABASE_USERNAME:artio}
+    password: ${ARTIO_DATABASE_PASSWORD:artio}
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  mail:
+    host: ${ARTIO_SMTP_HOST:localhost}
+    port: ${ARTIO_SMTP_PORT:1025}
+    username: ${ARTIO_SMTP_USERNAME:}
+    password: ${ARTIO_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${ARTIO_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${ARTIO_SMTP_STARTTLS:false}
+server:
+  port: ${PORT:8080}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+artio:
+  mail-from: ${ARTIO_MAIL_FROM:no-reply@artio.local}
+  security:
+    jwt-secret: ${ARTIO_JWT_SECRET:local-development-secret-change-this-32-bytes-minimum}
+  search:
+    enabled: ${ARTIO_SEARCH_ENABLED:false}
+    url: ${ARTIO_SEARCH_URL:http://localhost:9200}
+  rate-limit:
+    enabled: ${ARTIO_RATE_LIMIT_ENABLED:true}
+    requests-per-minute: ${ARTIO_RATE_LIMIT_PER_MINUTE:100}
+  payments:
+    stripe-secret-key: ${ARTIO_STRIPE_SECRET_KEY:}
+    stripe-webhook-secret: ${ARTIO_STRIPE_WEBHOOK_SECRET:}
+  storefront-url: ${ARTIO_STOREFRONT_URL:http://localhost:4200}
+  checkout:
+    shipping-cost: ${ARTIO_CHECKOUT_SHIPPING_COST:0.00}
