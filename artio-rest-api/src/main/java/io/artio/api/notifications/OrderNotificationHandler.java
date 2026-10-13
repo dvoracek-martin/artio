@@ -33,8 +33,14 @@ public class OrderNotificationHandler {
         String orderId=event.orderId().value().toString();
         jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,'Order received',?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
                 UUID.randomUUID(),event.userId(),"ORDER_CREATED","Your order "+orderId+" has been received.","order-created:"+orderId);
-        try { kafka.send("artio.order.events",orderId,mapper.writeValueAsString(event)); }
+        try {
+            kafka.send("artio.order.events",orderId,mapper.writeValueAsString(event))
+                    .whenComplete((result, failure) -> {
+                        if (failure != null) log.warn("Order event could not be published for {}", orderId, failure);
+                    });
+        }
         catch(JsonProcessingException e){log.warn("Could not serialize order event {}",orderId,e);}
+        catch(RuntimeException e){log.warn("Order event could not be submitted for {}",orderId,e);}
         try { sendEmail(event.userId(),orderId); }
         catch(Exception e){log.warn("Order notification email could not be delivered for {}",orderId,e);}
     }

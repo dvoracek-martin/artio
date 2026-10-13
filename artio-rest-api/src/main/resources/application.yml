@@ -14,6 +14,8 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: ${ARTIO_KAFKA_MAX_BLOCK_MS:3000}
   mail:
     host: ${ARTIO_SMTP_HOST:localhost}
     port: ${ARTIO_SMTP_PORT:1025}
