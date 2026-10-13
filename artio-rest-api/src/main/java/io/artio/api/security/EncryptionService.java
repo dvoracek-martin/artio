@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 public class EncryptionService {
     private static final int IV_BYTES = 12;
     private final SecretKeySpec key;
+    private final SecretKeySpec extensionCredentialKey;
     private final SecureRandom random = new SecureRandom();
 
     public EncryptionService(@Value("${artio.security.encryption-key}") String configuredKey) {
@@ -23,6 +24,10 @@ public class EncryptionService {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(configuredKey.getBytes(StandardCharsets.UTF_8));
             this.key = new SecretKeySpec(digest, "AES");
+            javax.crypto.Mac derivation = javax.crypto.Mac.getInstance("HmacSHA256");
+            derivation.init(new SecretKeySpec(digest, "HmacSHA256"));
+            this.extensionCredentialKey = new SecretKeySpec(
+                    derivation.doFinal("artio-extension-auth-key-v1".getBytes(StandardCharsets.UTF_8)), "HmacSHA256");
         } catch (Exception e) { throw new IllegalStateException("AES key derivation failed", e); }
     }
 
@@ -47,5 +52,17 @@ public class EncryptionService {
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, iv));
             return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
         } catch (Exception e) { throw new IllegalArgumentException("Could not decrypt sensitive data", e); }
+    }
+
+    /** Stable, domain-separated credential for authenticating Core to one managed extension. */
+    public String deriveExtensionCredential(String pluginId) {
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(extensionCredentialKey);
+            byte[] digest = mac.doFinal(("artio-extension-v1:" + pluginId).getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not derive extension credential", e);
+        }
     }
 }

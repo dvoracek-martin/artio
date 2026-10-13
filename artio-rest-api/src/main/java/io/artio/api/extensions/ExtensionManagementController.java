@@ -3,6 +3,7 @@ package io.artio.api.extensions;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.artio.api.security.EncryptionService;
 import io.artio.extensions.PluginConfigurationValidator;
 import io.artio.extensions.PluginManifest;
@@ -137,6 +138,44 @@ public class ExtensionManagementController {
         return runtime().health(pluginId, row.manifest().healthPath());
     }
 
+    @PostMapping("/{pluginId}/invoke")
+    @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public InvocationResponse invoke(@PathVariable String pluginId, @RequestBody InvocationRequest request,
+                                     JwtAuthenticationToken actor) {
+        PluginRow row = findPlugin(pluginId);
+        if (!"ENABLED".equals(row.lifecycleState())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, "Plugin is not enabled");
+        }
+        try {
+            DockerExtensionRuntime.validateInvocation(request.extensionPoint(), request.operation(), request.idempotencyKey(),
+                    write(request.payload()), java.time.Duration.ofMillis(request.deadlineMillis()));
+        } catch (IllegalArgumentException invalidRequest) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, invalidRequest.getMessage());
+        }
+        if (!row.manifest().extensionPoints().contains(request.extensionPoint())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Extension point is not declared by this plugin");
+        }
+        String payload = write(request.payload());
+        try {
+            var result = runtime().invoke(pluginId, request.extensionPoint(), request.operation(), request.idempotencyKey(),
+                    payload, java.time.Duration.ofMillis(request.deadlineMillis()));
+            JsonNode response = mapper.readTree(result.responseJson());
+            audit(pluginId, actor, "INVOKE", Map.of("extensionPoint", request.extensionPoint(),
+                    "operation", request.operation(), "statusCode", result.statusCode()));
+            return new InvocationResponse(result.statusCode(), response);
+        } catch (DockerExtensionRuntime.ExtensionTimeoutException timeout) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "Extension deadline exceeded");
+        } catch (DockerExtensionRuntime.ExtensionCallException | DockerExtensionRuntime.ExtensionProtocolException failure) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_GATEWAY, "Extension returned an invalid or unsuccessful response");
+        } catch (DockerExtensionRuntime.ExtensionUnavailableException unavailable) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Extension is unavailable");
+        } catch (JsonProcessingException invalidJson) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_GATEWAY, "Extension response was not valid JSON");
+        } catch (IllegalArgumentException invalidRequest) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, invalidRequest.getMessage());
+        }
+    }
+
     @PutMapping("/{pluginId}/configuration")
     public ResponseEntity<?> saveConfiguration(@PathVariable String pluginId, @RequestBody Map<String, Object> submitted,
                                                JwtAuthenticationToken actor) {
@@ -236,5 +275,8 @@ public class ExtensionManagementController {
         public ConfigurationErrorResponse { errors = List.copyOf(errors); }
     }
     public record AuditView(UUID actorUserId, String action, Map<String, Object> details, java.time.Instant occurredAt) { }
+    public record InvocationRequest(String extensionPoint, String operation, String idempotencyKey,
+                                    JsonNode payload, long deadlineMillis) { }
+    public record InvocationResponse(int statusCode, JsonNode payload) { }
 }
 
