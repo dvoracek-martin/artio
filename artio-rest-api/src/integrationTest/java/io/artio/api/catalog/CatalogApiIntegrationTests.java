@@ -312,6 +312,10 @@ class CatalogApiIntegrationTests {
         assertThat(String.valueOf(install.getBody().get("errors"))).contains("dependency is not installed: common.transport");
 
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED' WHERE plugin_id IN (?,?)", base.id(), dependent.id());
+        var unavailableRotation = adminExchange("/api/v1/admin/extensions/{id}/credentials/rotate", HttpMethod.POST, null, ApiError.class, base.id());
+        assertThat(unavailableRotation.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(jdbc.queryForObject("SELECT credential_generation FROM extension_plugins WHERE plugin_id=?", Integer.class, base.id())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, base.id())).isEqualTo("INSTALLED");
         var enable = adminExchange("/api/v1/admin/extensions/{id}/enable", HttpMethod.POST, null, Map.class, dependent.id());
         assertThat(enable.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(enable.getBody()).containsEntry("message", "Plugin dependencies are not ready");

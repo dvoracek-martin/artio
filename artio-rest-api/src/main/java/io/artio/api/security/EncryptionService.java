@@ -56,10 +56,18 @@ public class EncryptionService {
 
     /** Stable, domain-separated credential for authenticating Core to one managed extension. */
     public String deriveExtensionCredential(String pluginId) {
+        return deriveExtensionCredential(pluginId, 1);
+    }
+
+    /** Derives a stable credential for one plugin and persisted rotation generation. */
+    public String deriveExtensionCredential(String pluginId, int generation) {
+        if (pluginId == null || pluginId.isBlank() || generation < 1) throw new IllegalArgumentException("Invalid extension credential identity");
         try {
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
             mac.init(extensionCredentialKey);
-            byte[] digest = mac.doFinal(("artio-extension-v1:" + pluginId).getBytes(StandardCharsets.UTF_8));
+            String identity = generation == 1 ? "artio-extension-v1:" + pluginId
+                    : "artio-extension-v1:" + pluginId + ":" + generation;
+            byte[] digest = mac.doFinal(identity.getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
         } catch (Exception e) {
             throw new IllegalStateException("Could not derive extension credential", e);

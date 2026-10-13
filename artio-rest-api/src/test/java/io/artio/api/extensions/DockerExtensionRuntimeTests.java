@@ -79,6 +79,8 @@ class DockerExtensionRuntimeTests {
         String token = encryption.deriveExtensionCredential("payments.example");
         assertThat(token).isEqualTo(encryption.deriveExtensionCredential("payments.example"));
         assertThat(token).isNotEqualTo(encryption.deriveExtensionCredential("shipping.example"));
+        assertThat(token).isNotEqualTo(encryption.deriveExtensionCredential("payments.example", 2));
+        assertThat(encryption.deriveExtensionCredential("payments.example", 1)).isEqualTo(token);
         assertThat(token).hasSize(43);
     }
 
@@ -119,12 +121,12 @@ class DockerExtensionRuntimeTests {
 
             var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(), encryption);
             String key = "00000000-0000-0000-0000-000000000001";
-            var result = runtime.invoke("payments.example", "payment.provider.v1", "authorize", key,
+            var result = runtime.invoke("payments.example", 2, "payment.provider.v1", "authorize", key,
                     "{\"apiKey\":\"provider-secret\"}", "{\"amount\":125}", Duration.ofSeconds(2));
 
             assertThat(result.statusCode()).isEqualTo(200);
             assertThat(new ObjectMapper().readTree(result.responseJson()).get("authorized").asBoolean()).isTrue();
-            assertThat(authorization.get()).isEqualTo("Bearer " + encryption.deriveExtensionCredential("payments.example"));
+            assertThat(authorization.get()).isEqualTo("Bearer " + encryption.deriveExtensionCredential("payments.example", 2));
             assertThat(apiVersion.get()).isEqualTo("1");
             assertThat(idempotencyKey.get()).isEqualTo(key);
             JsonNode envelope = new ObjectMapper().readTree(body.get());
@@ -177,7 +179,7 @@ class DockerExtensionRuntimeTests {
             var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(),
                     new io.artio.api.security.EncryptionService("unit-test-key-material-that-is-at-least-32-bytes"));
 
-            var result = runtime.invoke("payments.example", "payment.provider.v1", "authorize",
+            var result = runtime.invoke("payments.example", 1, "payment.provider.v1", "authorize",
                     "00000000-0000-0000-0000-000000000099", "{}", "{}", Duration.ofSeconds(3));
 
             assertThat(result.statusCode()).isEqualTo(200);

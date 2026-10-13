@@ -131,7 +131,7 @@ public class ExtensionManagementController {
                 .body(Map.of("message", "Plugin dependencies are not ready", "errors", dependencyErrors));
         ExtensionRuntimePort runtime = runtime();
         try {
-            runtime.enable(row.manifest());
+            runtime.enable(row.manifest(), row.credentialGeneration());
         } catch (RuntimeException failure) {
             jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
             audit(pluginId, actor, "ENABLE_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
@@ -140,6 +140,40 @@ public class ExtensionManagementController {
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED',updated_at=now() WHERE plugin_id=?", pluginId);
         audit(pluginId, actor, "ENABLE", Map.of("image", row.manifest().image()));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "ENABLED"));
+    }
+
+    @PostMapping("/{pluginId}/credentials/rotate")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> rotateCredentials(@PathVariable String pluginId, JwtAuthenticationToken actor) {
+        PluginRow row = findPlugin(pluginId);
+        ExtensionRuntimePort runtime = runtime();
+        boolean wasEnabled;
+        String restoreState;
+        if ("ROTATING".equals(row.lifecycleState())) {
+            wasEnabled = row.rotationWasEnabled();
+            restoreState = row.rotationPreviousState();
+        } else if (Set.of("INSTALLED", "DISABLED", "ENABLED").contains(row.lifecycleState())) {
+            wasEnabled = "ENABLED".equals(row.lifecycleState());
+            restoreState = row.lifecycleState();
+            int claimed = jdbc.update("UPDATE extension_plugins SET rotation_was_enabled=?,rotation_previous_state=?,lifecycle_state='ROTATING',updated_at=now() WHERE plugin_id=? AND lifecycle_state=?",
+                    wasEnabled, restoreState, pluginId, row.lifecycleState());
+            if (claimed != 1) return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin lifecycle changed; retry credential rotation"));
+        } else {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be installed and stable before credential rotation"));
+        }
+        int generation = jdbc.queryForObject("UPDATE extension_plugins SET credential_generation=credential_generation+1,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING' RETURNING credential_generation",
+                Integer.class, pluginId);
+        try {
+            runtime.rotateCredentials(row.manifest(), generation, wasEnabled);
+        } catch (RuntimeException failure) {
+            jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',rotation_was_enabled=false,rotation_previous_state=NULL,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING'", pluginId);
+            audit(pluginId, actor, "CREDENTIAL_ROTATION_FAILED", Map.of("errorClass", failure.getClass().getSimpleName(), "generation", generation));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension credentials could not be rotated"));
+        }
+        String state = restoreState == null ? (wasEnabled ? "ENABLED" : "DISABLED") : restoreState;
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state=?,rotation_was_enabled=false,rotation_previous_state=NULL,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING'", state, pluginId);
+        audit(pluginId, actor, "CREDENTIAL_ROTATED", Map.of("generation", generation));
+        return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", state, "credentialGeneration", generation));
     }
 
     @PostMapping("/{pluginId}/disable")
@@ -196,7 +230,7 @@ public class ExtensionManagementController {
         row.encryptedSecrets().forEach((key, ciphertext) -> providerConfiguration.put(key, encryption.decrypt(ciphertext)));
         String configuration = write(providerConfiguration);
         try {
-            var result = runtime().invoke(pluginId, request.extensionPoint(), request.operation(), request.idempotencyKey(),
+            var result = runtime().invoke(pluginId, row.credentialGeneration(), request.extensionPoint(), request.operation(), request.idempotencyKey(),
                     configuration, payload, java.time.Duration.ofMillis(request.deadlineMillis()));
             JsonNode response = mapper.readTree(result.responseJson());
             audit(pluginId, actor, "INVOKE", Map.of("extensionPoint", request.extensionPoint(),
@@ -273,10 +307,10 @@ public class ExtensionManagementController {
     }
 
     private PluginRow findPlugin(String id) {
-        return jdbc.query("SELECT manifest,public_configuration,encrypted_secrets,lifecycle_state,configuration_version FROM extension_plugins WHERE plugin_id=?",
+        return jdbc.query("SELECT manifest,public_configuration,encrypted_secrets,lifecycle_state,configuration_version,credential_generation,rotation_was_enabled,rotation_previous_state FROM extension_plugins WHERE plugin_id=?",
                 (rs, row) -> new PluginRow(read(rs.getString("manifest"), PluginManifest.class),
                         read(rs.getString("public_configuration"), OBJECT_MAP), read(rs.getString("encrypted_secrets"), STRING_MAP),
-                        rs.getString("lifecycle_state"), rs.getInt("configuration_version")), id)
+                        rs.getString("lifecycle_state"), rs.getInt("configuration_version"), rs.getInt("credential_generation"), rs.getBoolean("rotation_was_enabled"), rs.getString("rotation_previous_state")), id)
                 .stream().findFirst().orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Plugin is not registered"));
     }
 
@@ -313,7 +347,8 @@ public class ExtensionManagementController {
     }
 
     private record PluginRow(PluginManifest manifest, Map<String, Object> publicConfiguration,
-                             Map<String, String> encryptedSecrets, String lifecycleState, int configurationVersion) { }
+                             Map<String, String> encryptedSecrets, String lifecycleState, int configurationVersion,
+                             int credentialGeneration, boolean rotationWasEnabled, String rotationPreviousState) { }
     public record ManifestValidationResponse(boolean valid, String coreVersion, List<String> errors) {
         public ManifestValidationResponse { errors = List.copyOf(errors); }
     }

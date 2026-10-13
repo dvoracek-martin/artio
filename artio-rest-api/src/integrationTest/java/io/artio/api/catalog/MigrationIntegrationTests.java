@@ -48,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(23);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("23");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(24);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("24");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('catalog_product_translations')")) {
             assertThat(result.next()).isTrue();
@@ -74,6 +74,12 @@ class MigrationIntegrationTests {
                 var result = statement.executeQuery("SELECT to_regclass('extension_plugins')")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getString(1)).isEqualTo("extension_plugins");
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT column_name FROM information_schema.columns WHERE table_name='extension_plugins' AND column_name IN ('credential_generation','rotation_was_enabled','rotation_previous_state')")) {
+            var columns = new java.util.ArrayList<String>();
+            while (result.next()) columns.add(result.getString(1));
+            assertThat(columns).containsExactlyInAnyOrder("credential_generation", "rotation_was_enabled", "rotation_previous_state");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('payment_webhook_receipts')")) {

@@ -55,6 +55,12 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     public void enable(PluginManifest manifest) {
+        enable(manifest, 1);
+    }
+
+    @Override
+    public void enable(PluginManifest manifest, int credentialGeneration) {
+        if (credentialGeneration < 1) throw new IllegalArgumentException("Credential generation must be positive");
         requirePinnedImage(manifest.image());
         String name = containerName(manifest.id());
         try {
@@ -68,7 +74,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         HostConfig host = restrictedHostConfig(network);
         docker.createContainerCmd(manifest.image()).withName(name).withHostConfig(host)
                 .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(port))
-                .withEnv("ARTIO_EXTENSION_TOKEN=" + encryption.deriveExtensionCredential(manifest.id()), "ARTIO_EXTENSION_API_VERSION=1")
+                .withEnv("ARTIO_EXTENSION_TOKEN=" + encryption.deriveExtensionCredential(manifest.id(), credentialGeneration), "ARTIO_EXTENSION_API_VERSION=1")
                 .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.managed", "true"))
                 .exec();
         docker.startContainerCmd(name).exec();
@@ -90,6 +96,24 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         } catch (NotFoundException ignored) {
             // Already stopped/removed.
         }
+    }
+
+    @Override
+    public void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) {
+        String name = containerName(manifest.id());
+        try {
+            InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
+            if (current.getConfig() == null || current.getConfig().getLabels() == null
+                    || !"true".equals(current.getConfig().getLabels().get("io.artio.managed"))
+                    || !manifest.id().equals(current.getConfig().getLabels().get("io.artio.extension"))) {
+                throw new IllegalStateException("Refusing to replace an unmanaged extension container");
+            }
+            if (Boolean.TRUE.equals(current.getState().getRunning())) docker.stopContainerCmd(name).withTimeout(10).exec();
+            docker.removeContainerCmd(name).withForce(true).exec();
+        } catch (NotFoundException ignored) {
+            // A stopped or not-yet-created extension has no old runtime credential to revoke.
+        }
+        if (restartIfEnabled) enable(manifest, credentialGeneration);
     }
 
     @Override
@@ -119,6 +143,13 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     @Override
     public ExtensionRuntimePort.InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                                    String configurationJson, String requestJson, Duration deadline) {
+        return invoke(pluginId, 1, extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);
+    }
+
+    @Override
+    public ExtensionRuntimePort.InvocationResult invoke(String pluginId, int credentialGeneration, String extensionPoint,
+            String operation, String idempotencyKey, String configurationJson, String requestJson, Duration deadline) {
+        if (credentialGeneration < 1) throw new IllegalArgumentException("Credential generation must be positive");
         ExtensionRuntimePort.validateInvocation(extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);
         ExtensionCircuitBreaker breaker = circuits.computeIfAbsent(pluginId,
                 ignored -> new ExtensionCircuitBreaker(5, Duration.ofSeconds(30)));
@@ -130,7 +161,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
                 long remainingNanos = deadlineNanos - System.nanoTime();
                 if (remainingNanos <= 0) throw new ExtensionRuntimePort.ExtensionTimeoutException("Extension invocation exceeded its deadline");
                 try {
-                    result = invokeOnce(pluginId, extensionPoint, operation, idempotencyKey, configurationJson,
+                    result = invokeOnce(pluginId, credentialGeneration, extensionPoint, operation, idempotencyKey, configurationJson,
                             requestJson, Duration.ofNanos(remainingNanos));
                     break;
                 } catch (ExtensionRuntimePort.ExtensionCallException failure) {
@@ -163,7 +194,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         return statusCode == 502 || statusCode == 503 || statusCode == 504;
     }
 
-    private ExtensionRuntimePort.InvocationResult invokeOnce(String pluginId, String extensionPoint, String operation,
+    private ExtensionRuntimePort.InvocationResult invokeOnce(String pluginId, int credentialGeneration, String extensionPoint, String operation,
             String idempotencyKey, String configurationJson, String requestJson, Duration deadline) {
         try {
             InspectContainerResponse container = docker.inspectContainerCmd(containerName(pluginId)).exec();
@@ -178,7 +209,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             byte[] body = envelope.getBytes(StandardCharsets.UTF_8);
             if (body.length > MAX_REQUEST_BYTES) throw new IllegalArgumentException("Extension invocation exceeds 1 MiB");
             HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + address + ":" + port + "/v1/invoke"))
-                    .timeout(deadline).header("Authorization", "Bearer " + encryption.deriveExtensionCredential(pluginId))
+                    .timeout(deadline).header("Authorization", "Bearer " + encryption.deriveExtensionCredential(pluginId, credentialGeneration))
                     .header("Content-Type", "application/json").header("X-Artio-Extension-Api", "1")
                     .header("Idempotency-Key", idempotencyKey).POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
             HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());

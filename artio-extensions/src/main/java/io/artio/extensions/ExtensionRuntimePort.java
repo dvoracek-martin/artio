@@ -8,10 +8,21 @@ import java.util.UUID;
 public interface ExtensionRuntimePort {
     void install(PluginManifest manifest);
     void enable(PluginManifest manifest);
+    default void enable(PluginManifest manifest, int credentialGeneration) { enable(manifest); }
     void disable(String pluginId);
+    default void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) {
+        if (restartIfEnabled) {
+            disable(manifest.id());
+            enable(manifest, credentialGeneration);
+        }
+    }
     RuntimeHealth health(String pluginId, String healthPath);
     InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                             String configurationJson, String requestJson, Duration deadline);
+    default InvocationResult invoke(String pluginId, int credentialGeneration, String extensionPoint, String operation,
+            String idempotencyKey, String configurationJson, String requestJson, Duration deadline) {
+        return invoke(pluginId, extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);
+    }
 
     static void validateInvocation(String extensionPoint, String operation, String idempotencyKey,
                                    String configurationJson, String requestJson, Duration deadline) {
