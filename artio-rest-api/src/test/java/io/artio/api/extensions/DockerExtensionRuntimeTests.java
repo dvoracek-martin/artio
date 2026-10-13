@@ -2,6 +2,7 @@ package io.artio.api.extensions;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 import com.github.dockerjava.api.DockerClient;
@@ -131,5 +132,22 @@ class DockerExtensionRuntimeTests {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void circuitBreakerOpensAfterFailuresAndAllowsOneRecoveryProbe() {
+        long[] now = { 1_000L };
+        var breaker = new ExtensionCircuitBreaker(2, Duration.ofSeconds(10), () -> now[0]);
+        breaker.acquire();
+        breaker.failed();
+        breaker.acquire();
+        breaker.failed();
+        assertThatThrownBy(breaker::acquire).isInstanceOf(ExtensionCircuitBreaker.CircuitOpenException.class);
+
+        now[0] += Duration.ofSeconds(10).toNanos();
+        breaker.acquire();
+        assertThatThrownBy(breaker::acquire).isInstanceOf(ExtensionCircuitBreaker.CircuitOpenException.class);
+        breaker.succeeded();
+        breaker.acquire();
     }
 }

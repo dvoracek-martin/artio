@@ -32,6 +32,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final String network;
     private final EncryptionService encryption;
+    private final java.util.concurrent.ConcurrentMap<String, ExtensionCircuitBreaker> circuits = new java.util.concurrent.ConcurrentHashMap<>();
 
     public DockerExtensionRuntime(DockerClient docker,
             @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.network:artio-extensions}") String network,
@@ -58,8 +59,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         String name = containerName(manifest.id());
         try {
             InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
-            if (Boolean.TRUE.equals(current.getState().getRunning())) return;
-            docker.startContainerCmd(name).exec();
+            if (!Boolean.TRUE.equals(current.getState().getRunning())) docker.startContainerCmd(name).exec();
+            awaitReady(manifest.id(), manifest.healthPath());
             return;
         } catch (NotFoundException ignored) {
             // Create only containers owned by this runtime; no mounts, published ports or caller-supplied options.
@@ -71,6 +72,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
                 .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.managed", "true"))
                 .exec();
         docker.startContainerCmd(name).exec();
+        awaitReady(manifest.id(), manifest.healthPath());
     }
 
     static HostConfig restrictedHostConfig(String network) {
@@ -118,13 +120,33 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     public ExtensionRuntimePort.InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                                    String requestJson, Duration deadline) {
         ExtensionRuntimePort.validateInvocation(extensionPoint, operation, idempotencyKey, requestJson, deadline);
+        ExtensionCircuitBreaker breaker = circuits.computeIfAbsent(pluginId,
+                ignored -> new ExtensionCircuitBreaker(5, Duration.ofSeconds(30)));
+        try {
+            breaker.acquire();
+            var result = invokeOnce(pluginId, extensionPoint, operation, idempotencyKey, requestJson, deadline);
+            breaker.succeeded();
+            return result;
+        } catch (ExtensionRuntimePort.ExtensionCallException providerFailure) {
+            if (providerFailure.statusCode() >= 500) breaker.failed();
+            else breaker.succeeded();
+            throw providerFailure;
+        } catch (ExtensionCircuitBreaker.CircuitOpenException open) {
+            throw open;
+        } catch (RuntimeException failure) {
+            breaker.failed();
+            throw failure;
+        }
+    }
+
+    private ExtensionRuntimePort.InvocationResult invokeOnce(String pluginId, String extensionPoint, String operation,
+            String idempotencyKey, String requestJson, Duration deadline) {
         try {
             InspectContainerResponse container = docker.inspectContainerCmd(containerName(pluginId)).exec();
             if (!Boolean.TRUE.equals(container.getState().getRunning())) throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension is stopped");
             var networkInfo = container.getNetworkSettings().getNetworks().get(network);
             String address = networkInfo == null ? null : networkInfo.getIpAddress();
             if (address == null || address.isBlank()) throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension has no runtime network address");
-            byte[] payload = requestJson.getBytes(StandardCharsets.UTF_8);
             String envelope = "{\"protocolVersion\":1,\"extensionPoint\":\"" + jsonEscape(extensionPoint)
                     + "\",\"operation\":\"" + jsonEscape(operation) + "\",\"idempotencyKey\":\""
                     + jsonEscape(idempotencyKey) + "\",\"payload\":" + requestJson + "}";
@@ -153,6 +175,22 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         } catch (java.io.IOException failure) {
             throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension could not be reached");
         }
+    }
+
+    private void awaitReady(String pluginId, String healthPath) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        do {
+            if (health(pluginId, healthPath).healthy()) return;
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                disable(pluginId);
+                throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension readiness was interrupted");
+            }
+        } while (System.nanoTime() < deadline);
+        disable(pluginId);
+        throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension did not become healthy within 30 seconds");
     }
 
     private static String jsonEscape(String value) {
