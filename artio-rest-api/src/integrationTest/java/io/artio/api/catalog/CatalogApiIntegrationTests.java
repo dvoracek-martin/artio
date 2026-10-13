@@ -254,6 +254,45 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls() {
+        var base = new io.artio.extensions.PluginManifest("1", "common.transport", "Common transport", "Artio",
+                "1.5.0", "Transport contract", "0.1.0", "1.0.0",
+                "ghcr.io/artio/common-transport@sha256:" + "c".repeat(64), java.util.List.of(), java.util.List.of(),
+                java.util.Map.of(), java.util.List.of("shipping.provider.v1"), "/health", "/diagnostics");
+        var dependent = new io.artio.extensions.PluginManifest("1", "shipping.example", "Example shipping", "Artio",
+                "1.0.0", "Shipping extension", "0.1.0", "1.0.0",
+                "ghcr.io/artio/example-shipping@sha256:" + "d".repeat(64),
+                java.util.List.of(new io.artio.extensions.PluginManifest.Dependency("common.transport", "1.0.0", "2.0.0")),
+                java.util.List.of("shipping.quote"), java.util.Map.of(), java.util.List.of("shipping.provider.v1"),
+                "/health", "/diagnostics");
+        adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, base,
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class);
+        adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, dependent,
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class);
+        adminExchange("/api/v1/admin/extensions/{id}/configuration", HttpMethod.PUT, Map.of(),
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class, dependent.id());
+
+        var install = adminExchange("/api/v1/admin/extensions/{id}/install", HttpMethod.POST, null, Map.class, dependent.id());
+        assertThat(install.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(install.getBody()).containsEntry("valid", false);
+        assertThat(String.valueOf(install.getBody().get("errors"))).contains("dependency is not installed: common.transport");
+
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED' WHERE plugin_id IN (?,?)", base.id(), dependent.id());
+        var enable = adminExchange("/api/v1/admin/extensions/{id}/enable", HttpMethod.POST, null, Map.class, dependent.id());
+        assertThat(enable.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(enable.getBody()).containsEntry("message", "Plugin dependencies are not ready");
+
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED' WHERE plugin_id=?", base.id());
+        var runtimeDisabled = adminExchange("/api/v1/admin/extensions/{id}/enable", HttpMethod.POST, null, ApiError.class, dependent.id());
+        assertThat(runtimeDisabled.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED' WHERE plugin_id=?", dependent.id());
+        var disable = adminExchange("/api/v1/admin/extensions/{id}/disable", HttpMethod.POST, null, Map.class, base.id());
+        assertThat(disable.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(disable.getBody()).containsEntry("dependents", List.of(dependent.id()));
+    }
+
+    @Test
     void expiryJobReleasesReservedStockAndDoesNotConsumeOnHand() {
         var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
                 new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest("EXP-01", "Expiry warehouse", "CH-ZH"),

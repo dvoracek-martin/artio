@@ -10,6 +10,8 @@ The validator checks manifest version, identifier and semantic-version shape, Co
 
 `POST /api/v1/admin/extensions/register` validates and persists a plugin manifest without pulling or starting its image. `GET /api/v1/admin/extensions` and `GET /api/v1/admin/extensions/{pluginId}` return lifecycle/configuration metadata and the names of configured secrets, never secret values. `PUT /api/v1/admin/extensions/{pluginId}/configuration` validates submitted values against manifest field types, preserves already configured secrets omitted from the update, encrypts newly submitted secret values with the Core AES-GCM `EncryptionService`, and appends an audit event. `GET /api/v1/admin/extensions/{pluginId}/audit` is admin-only. V15 stores manifests/configuration and provides append-only audit rows. The API and PostgreSQL integration test covers register, valid/invalid configuration, encrypted secret persistence, omission-preserving updates and secret-free responses/audit.
 
+Runtime dependency checks use the installed manifest version and lifecycle state: install requires every dependency to be installed and inside its declared inclusive version range; enable requires every dependency to be enabled; disable is rejected while another enabled extension depends on the target. Registration's structural validation only confirms dependency declarations refer to registered plugin IDs.
+
 ## Example
 
 ```json

@@ -9,6 +9,7 @@ import io.artio.extensions.PluginConfigurationValidator;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.PluginManifestValidator;
 import io.artio.extensions.ExtensionRuntimePort;
+import io.artio.extensions.PluginDependencyPolicy;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -102,6 +103,8 @@ public class ExtensionManagementController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be configured or stopped before installation"));
         }
         List<String> errors = manifestValidator.validate(row.manifest(), coreVersion, registeredPluginIds());
+        errors = new java.util.ArrayList<>(errors);
+        errors.addAll(dependencyErrors(row.manifest(), false));
         if (!errors.isEmpty()) return ResponseEntity.badRequest().body(new ManifestValidationResponse(false, coreVersion, errors));
         runtime().install(row.manifest());
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", pluginId);
@@ -116,6 +119,9 @@ public class ExtensionManagementController {
         if (!Set.of("INSTALLED", "DISABLED").contains(row.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be installed and stopped before enabling"));
         }
+        List<String> dependencyErrors = dependencyErrors(row.manifest(), true);
+        if (!dependencyErrors.isEmpty()) return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "Plugin dependencies are not ready", "errors", dependencyErrors));
         runtime().enable(row.manifest());
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED',updated_at=now() WHERE plugin_id=?", pluginId);
         audit(pluginId, actor, "ENABLE", Map.of("image", row.manifest().image()));
@@ -126,6 +132,11 @@ public class ExtensionManagementController {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> disable(@PathVariable String pluginId, JwtAuthenticationToken actor) {
         findPlugin(pluginId);
+        List<PluginManifest> enabled = jdbc.query("SELECT manifest FROM extension_plugins WHERE lifecycle_state='ENABLED' AND plugin_id<>?",
+                (rs, row) -> read(rs.getString("manifest"), PluginManifest.class), pluginId);
+        List<String> dependents = PluginDependencyPolicy.enabledDependents(pluginId, enabled);
+        if (!dependents.isEmpty()) return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "Enabled plugins depend on this plugin", "dependents", dependents));
         runtime().disable(pluginId);
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='DISABLED',updated_at=now() WHERE plugin_id=?", pluginId);
         audit(pluginId, actor, "DISABLE", Map.of());
@@ -217,6 +228,17 @@ public class ExtensionManagementController {
 
     private Set<String> registeredPluginIds() {
         return Set.copyOf(jdbc.queryForList("SELECT plugin_id FROM extension_plugins WHERE lifecycle_state<>'UNINSTALLED'", String.class));
+    }
+
+    private List<String> dependencyErrors(PluginManifest manifest, boolean requireEnabled) {
+        Map<String, PluginDependencyPolicy.InstalledPlugin> installed = new HashMap<>();
+        jdbc.query("SELECT plugin_id,manifest,lifecycle_state FROM extension_plugins WHERE lifecycle_state<>'UNINSTALLED'",
+                rs -> {
+                    PluginManifest dependency = read(rs.getString("manifest"), PluginManifest.class);
+                    installed.put(rs.getString("plugin_id"),
+                            new PluginDependencyPolicy.InstalledPlugin(dependency.version(), rs.getString("lifecycle_state")));
+                });
+        return PluginDependencyPolicy.validate(manifest, installed, requireEnabled);
     }
 
     private boolean exists(String id) {
