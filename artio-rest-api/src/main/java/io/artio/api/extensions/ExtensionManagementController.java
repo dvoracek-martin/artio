@@ -84,6 +84,8 @@ public class ExtensionManagementController {
         if (!result.valid()) return ResponseEntity.badRequest().body(result);
         jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'VALIDATED')",
                 manifest.id(), write(manifest), manifest.image());
+        jdbc.update("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) VALUES (?,?,?,?::jsonb)",
+                manifest.id(), manifest.version(), manifest.image(), write(manifest));
         audit(manifest.id(), actor, "REGISTER", Map.of("version", manifest.version(), "image", manifest.image()));
         return ResponseEntity.status(HttpStatus.CREATED).body(new PluginView(manifest, "VALIDATED", Map.of(), Set.of(), 0));
     }
@@ -174,6 +176,74 @@ public class ExtensionManagementController {
         jdbc.update("UPDATE extension_plugins SET lifecycle_state=?,rotation_was_enabled=false,rotation_previous_state=NULL,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING'", state, pluginId);
         audit(pluginId, actor, "CREDENTIAL_ROTATED", Map.of("generation", generation));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", state, "credentialGeneration", generation));
+    }
+
+    @PostMapping("/{pluginId}/update")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> update(@PathVariable String pluginId, @RequestBody PluginManifest replacement,
+                                    JwtAuthenticationToken actor) {
+        PluginRow current = findPlugin(pluginId);
+        if (!Set.of("INSTALLED", "DISABLED").contains(current.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the plugin before updating it"));
+        }
+        if (!pluginId.equals(replacement.id())) return ResponseEntity.badRequest().body(Map.of("message", "An update must retain the registered plugin id"));
+        if (compareVersions(replacement.version(), current.manifest().version()) <= 0) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Update version must be greater than the installed version"));
+        }
+        if (existsRelease(pluginId, replacement.version())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin release versions are immutable and cannot be reused"));
+        }
+        ManifestValidationResponse validation = validateManifest(replacement, registeredPluginIds());
+        List<String> errors = new java.util.ArrayList<>(validation.errors());
+        errors.addAll(dependencyErrors(replacement, false));
+        var configuration = configurationValidator.validate(replacement, current.publicConfiguration(), current.encryptedSecrets().keySet());
+        errors.addAll(configuration.errors());
+        if (!errors.isEmpty()) return ResponseEntity.badRequest().body(new ManifestValidationResponse(false, coreVersion, errors));
+        ExtensionRuntimePort runtime = runtime();
+        try {
+            runtime.update(replacement);
+        } catch (RuntimeException failure) {
+            audit(pluginId, actor, "UPDATE_FAILED", Map.of("errorClass", failure.getClass().getSimpleName(), "version", replacement.version()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension image could not be updated"));
+        }
+        jdbc.update("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) VALUES (?,?,?,?::jsonb) ON CONFLICT (plugin_id,version) DO NOTHING",
+                pluginId, current.manifest().version(), current.manifest().image(), write(current.manifest()));
+        Map<String, String> retainedSecrets = retainedSecrets(replacement, current.encryptedSecrets());
+        jdbc.update("UPDATE extension_plugins SET manifest=?::jsonb,image_reference=?,public_configuration=?::jsonb,encrypted_secrets=?::jsonb,configuration_version=configuration_version+1,lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?",
+                write(replacement), replacement.image(), write(configuration.publicValues()), write(retainedSecrets), pluginId);
+        audit(pluginId, actor, "UPDATE", Map.of("fromVersion", current.manifest().version(), "toVersion", replacement.version()));
+        return ResponseEntity.ok(new PluginView(replacement, "INSTALLED", configuration.publicValues(),
+                Set.copyOf(retainedSecrets.keySet()), current.configurationVersion() + 1));
+    }
+
+    @PostMapping("/{pluginId}/rollback")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> rollback(@PathVariable String pluginId, JwtAuthenticationToken actor) {
+        PluginRow current = findPlugin(pluginId);
+        if (!Set.of("INSTALLED", "DISABLED").contains(current.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the plugin before rollback"));
+        }
+        PluginManifest previous = jdbc.query("SELECT manifest FROM extension_plugin_releases WHERE plugin_id=? AND version<>? ORDER BY release_id DESC LIMIT 1",
+                (rs, row) -> read(rs.getString("manifest"), PluginManifest.class), pluginId, current.manifest().version())
+                .stream().findFirst().orElse(null);
+        if (previous == null) return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "No earlier plugin release is available"));
+        var configuration = configurationValidator.validate(previous, current.publicConfiguration(), current.encryptedSecrets().keySet());
+        if (!configuration.valid()) return ResponseEntity.status(HttpStatus.CONFLICT).body(new ConfigurationErrorResponse(configuration.errors()));
+        ExtensionRuntimePort runtime = runtime();
+        try {
+            runtime.update(previous);
+        } catch (RuntimeException failure) {
+            audit(pluginId, actor, "ROLLBACK_FAILED", Map.of("errorClass", failure.getClass().getSimpleName(), "version", previous.version()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Previous extension image could not be restored"));
+        }
+        jdbc.update("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) VALUES (?,?,?,?::jsonb) ON CONFLICT (plugin_id,version) DO NOTHING",
+                pluginId, current.manifest().version(), current.manifest().image(), write(current.manifest()));
+        Map<String, String> retainedSecrets = retainedSecrets(previous, current.encryptedSecrets());
+        jdbc.update("UPDATE extension_plugins SET manifest=?::jsonb,image_reference=?,public_configuration=?::jsonb,encrypted_secrets=?::jsonb,configuration_version=configuration_version+1,lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?",
+                write(previous), previous.image(), write(configuration.publicValues()), write(retainedSecrets), pluginId);
+        audit(pluginId, actor, "ROLLBACK", Map.of("fromVersion", current.manifest().version(), "toVersion", previous.version()));
+        return ResponseEntity.ok(new PluginView(previous, "INSTALLED", configuration.publicValues(),
+                Set.copyOf(retainedSecrets.keySet()), current.configurationVersion() + 1));
     }
 
     @PostMapping("/{pluginId}/disable")
@@ -306,6 +376,10 @@ public class ExtensionManagementController {
         return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM extension_plugins WHERE plugin_id=?)", Boolean.class, id));
     }
 
+    private boolean existsRelease(String pluginId, String version) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM extension_plugin_releases WHERE plugin_id=? AND version=?)", Boolean.class, pluginId, version));
+    }
+
     private PluginRow findPlugin(String id) {
         return jdbc.query("SELECT manifest,public_configuration,encrypted_secrets,lifecycle_state,configuration_version,credential_generation,rotation_was_enabled,rotation_previous_state FROM extension_plugins WHERE plugin_id=?",
                 (rs, row) -> new PluginRow(read(rs.getString("manifest"), PluginManifest.class),
@@ -334,6 +408,24 @@ public class ExtensionManagementController {
     private String write(Object value) {
         try { return mapper.writeValueAsString(value); }
         catch (JsonProcessingException exception) { throw new IllegalStateException("Extension metadata could not be serialized", exception); }
+    }
+
+    private static int compareVersions(String left, String right) {
+        String[] l = left.split("[-+]")[0].split("\\."), r = right.split("[-+]")[0].split("\\.");
+        for (int i = 0; i < 3; i++) {
+            int compared = Integer.compare(Integer.parseInt(l[i]), Integer.parseInt(r[i]));
+            if (compared != 0) return compared;
+        }
+        return left.compareTo(right);
+    }
+
+    private static Map<String, String> retainedSecrets(PluginManifest manifest, Map<String, String> current) {
+        Map<String, String> retained = new HashMap<>();
+        current.forEach((key, ciphertext) -> {
+            var field = manifest.configuration().get(key);
+            if (field != null && "secret".equals(field.type())) retained.put(key, ciphertext);
+        });
+        return Map.copyOf(retained);
     }
 
     private <T> T read(String json, Class<T> type) {

@@ -48,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(24);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("24");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(25);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("25");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('catalog_product_translations')")) {
             assertThat(result.next()).isTrue();
@@ -74,6 +74,11 @@ class MigrationIntegrationTests {
                 var result = statement.executeQuery("SELECT to_regclass('extension_plugins')")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getString(1)).isEqualTo("extension_plugins");
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT to_regclass('extension_plugin_releases')")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("extension_plugin_releases");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT column_name FROM information_schema.columns WHERE table_name='extension_plugins' AND column_name IN ('credential_generation','rotation_was_enabled','rotation_previous_state')")) {

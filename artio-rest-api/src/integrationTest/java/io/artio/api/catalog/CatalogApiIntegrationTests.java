@@ -316,6 +316,15 @@ class CatalogApiIntegrationTests {
         assertThat(unavailableRotation.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(jdbc.queryForObject("SELECT credential_generation FROM extension_plugins WHERE plugin_id=?", Integer.class, base.id())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, base.id())).isEqualTo("INSTALLED");
+        var update = new io.artio.extensions.PluginManifest("1", dependent.id(), dependent.name(), dependent.vendor(), "1.1.0",
+                dependent.description(), dependent.minimumCoreVersion(), dependent.maximumCoreVersion(),
+                "ghcr.io/artio/example-shipping@sha256:" + "e".repeat(64), dependent.dependencies(), dependent.permissions(),
+                dependent.configuration(), dependent.extensionPoints(), dependent.healthPath(), dependent.diagnosticsPath());
+        var unavailableUpdate = adminExchange("/api/v1/admin/extensions/{id}/update", HttpMethod.POST, update, ApiError.class, dependent.id());
+        assertThat(unavailableUpdate.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(jdbc.queryForObject("SELECT manifest->>'version' FROM extension_plugins WHERE plugin_id=?", String.class, dependent.id())).isEqualTo("1.0.0");
+        var noRollback = adminExchange("/api/v1/admin/extensions/{id}/rollback", HttpMethod.POST, null, Map.class, dependent.id());
+        assertThat(noRollback.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         var enable = adminExchange("/api/v1/admin/extensions/{id}/enable", HttpMethod.POST, null, Map.class, dependent.id());
         assertThat(enable.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(enable.getBody()).containsEntry("message", "Plugin dependencies are not ready");

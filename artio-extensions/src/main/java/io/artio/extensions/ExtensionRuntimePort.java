@@ -7,6 +7,7 @@ import java.util.UUID;
 /** Core-owned boundary to an isolated extension process; the Docker adapter is outside this module. */
 public interface ExtensionRuntimePort {
     void install(PluginManifest manifest);
+    default void update(PluginManifest manifest) { install(manifest); }
     void enable(PluginManifest manifest);
     default void enable(PluginManifest manifest, int credentialGeneration) { enable(manifest); }
     void disable(String pluginId);

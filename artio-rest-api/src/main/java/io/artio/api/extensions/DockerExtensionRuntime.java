@@ -54,6 +54,13 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
     }
 
+    @Override
+    public void update(PluginManifest manifest) {
+        requirePinnedImage(manifest.image());
+        install(manifest); // Pull first: a failed download leaves the current stopped runtime intact.
+        removeStoppedManagedContainer(manifest.id());
+    }
+
     public void enable(PluginManifest manifest) {
         enable(manifest, 1);
     }
@@ -114,6 +121,24 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             // A stopped or not-yet-created extension has no old runtime credential to revoke.
         }
         if (restartIfEnabled) enable(manifest, credentialGeneration);
+    }
+
+    private void removeStoppedManagedContainer(String pluginId) {
+        String name = containerName(pluginId);
+        try {
+            InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
+            if (current.getConfig() == null || current.getConfig().getLabels() == null
+                    || !"true".equals(current.getConfig().getLabels().get("io.artio.managed"))
+                    || !pluginId.equals(current.getConfig().getLabels().get("io.artio.extension"))) {
+                throw new IllegalStateException("Refusing to replace an unmanaged extension container");
+            }
+            if (Boolean.TRUE.equals(current.getState().getRunning())) {
+                throw new IllegalStateException("Disable the extension before updating its image");
+            }
+            docker.removeContainerCmd(name).withForce(false).exec();
+        } catch (NotFoundException ignored) {
+            // Install-only plugins have no container to replace.
+        }
     }
 
     @Override
