@@ -160,7 +160,7 @@ public class ExtensionManagementController {
         }
         try {
             ExtensionRuntimePort.validateInvocation(request.extensionPoint(), request.operation(), request.idempotencyKey(),
-                    write(request.payload()), java.time.Duration.ofMillis(request.deadlineMillis()));
+                    "{}", write(request.payload()), java.time.Duration.ofMillis(request.deadlineMillis()));
         } catch (IllegalArgumentException invalidRequest) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, invalidRequest.getMessage());
         }
@@ -168,9 +168,12 @@ public class ExtensionManagementController {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Extension point is not declared by this plugin");
         }
         String payload = write(request.payload());
+        Map<String, Object> providerConfiguration = new HashMap<>(row.publicConfiguration());
+        row.encryptedSecrets().forEach((key, ciphertext) -> providerConfiguration.put(key, encryption.decrypt(ciphertext)));
+        String configuration = write(providerConfiguration);
         try {
             var result = runtime().invoke(pluginId, request.extensionPoint(), request.operation(), request.idempotencyKey(),
-                    payload, java.time.Duration.ofMillis(request.deadlineMillis()));
+                    configuration, payload, java.time.Duration.ofMillis(request.deadlineMillis()));
             JsonNode response = mapper.readTree(result.responseJson());
             audit(pluginId, actor, "INVOKE", Map.of("extensionPoint", request.extensionPoint(),
                     "operation", request.operation(), "statusCode", result.statusCode()));

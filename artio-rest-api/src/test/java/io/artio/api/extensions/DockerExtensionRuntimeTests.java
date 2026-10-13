@@ -35,11 +35,13 @@ class DockerExtensionRuntimeTests {
     @Test
     void invocationPayloadMustFitWithinOneMiB() {
         io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1", "authorize",
-                "00000000-0000-0000-0000-000000000001", "x".repeat(1_048_576), Duration.ofSeconds(1));
+                "00000000-0000-0000-0000-000000000001", "{}", "small", Duration.ofSeconds(1));
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation(
-                "payment.provider.v1", "authorize", "00000000-0000-0000-0000-000000000001", "x".repeat(1_048_577), Duration.ofSeconds(1)));
+                "payment.provider.v1", "authorize", "00000000-0000-0000-0000-000000000001", "{}", "x".repeat(1_048_577), Duration.ofSeconds(1)));
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation(
-                "payment.provider.v1", "authorize", "00000000-0000-0000-0000-000000000001", "", Duration.ofSeconds(1)));
+                "payment.provider.v1", "authorize", "00000000-0000-0000-0000-000000000001", "{}", "x".repeat(1_048_576), Duration.ofSeconds(1)));
+        assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation(
+                "payment.provider.v1", "authorize", "00000000-0000-0000-0000-000000000001", "{}", "", Duration.ofSeconds(1)));
     }
 
     @Test
@@ -60,13 +62,13 @@ class DockerExtensionRuntimeTests {
     @Test
     void invocationEnvelopeHasStrictBoundsAndStableRequestIdentity() {
         io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1", "authorize", "00000000-0000-0000-0000-000000000001",
-                "{\"amount\":100}", java.time.Duration.ofSeconds(5));
+                "{}", "{\"amount\":100}", java.time.Duration.ofSeconds(5));
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1",
-                "authorize", "invalid", "{}", java.time.Duration.ofSeconds(5)));
+                "authorize", "invalid", "{}", "{}", java.time.Duration.ofSeconds(5)));
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1",
-                "authorize", "00000000-0000-0000-0000-000000000001", "{}", java.time.Duration.ofSeconds(31)));
+                "authorize", "00000000-0000-0000-0000-000000000001", "{}", "{}", java.time.Duration.ofSeconds(31)));
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation("../../host",
-                "authorize", "00000000-0000-0000-0000-000000000001", "{}", java.time.Duration.ofSeconds(5)));
+                "authorize", "00000000-0000-0000-0000-000000000001", "{}", "{}", java.time.Duration.ofSeconds(5)));
     }
 
     @Test
@@ -116,7 +118,7 @@ class DockerExtensionRuntimeTests {
             var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(), encryption);
             String key = "00000000-0000-0000-0000-000000000001";
             var result = runtime.invoke("payments.example", "payment.provider.v1", "authorize", key,
-                    "{\"amount\":125}", Duration.ofSeconds(2));
+                    "{\"apiKey\":\"provider-secret\"}", "{\"amount\":125}", Duration.ofSeconds(2));
 
             assertThat(result.statusCode()).isEqualTo(200);
             assertThat(new ObjectMapper().readTree(result.responseJson()).get("authorized").asBoolean()).isTrue();
@@ -128,6 +130,7 @@ class DockerExtensionRuntimeTests {
             assertThat(envelope.get("extensionPoint").asText()).isEqualTo("payment.provider.v1");
             assertThat(envelope.get("operation").asText()).isEqualTo("authorize");
             assertThat(envelope.get("idempotencyKey").asText()).isEqualTo(key);
+            assertThat(envelope.at("/configuration/apiKey").asText()).isEqualTo("provider-secret");
             assertThat(envelope.get("payload").get("amount").asInt()).isEqualTo(125);
         } finally {
             server.stop(0);

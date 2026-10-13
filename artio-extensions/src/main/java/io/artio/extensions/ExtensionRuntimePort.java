@@ -11,18 +11,25 @@ public interface ExtensionRuntimePort {
     void disable(String pluginId);
     RuntimeHealth health(String pluginId, String healthPath);
     InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
-                            String requestJson, Duration deadline);
+                            String configurationJson, String requestJson, Duration deadline);
 
     static void validateInvocation(String extensionPoint, String operation, String idempotencyKey,
-                                   String requestJson, Duration deadline) {
+                                   String configurationJson, String requestJson, Duration deadline) {
         if (extensionPoint == null || !extensionPoint.matches("[a-z][a-z0-9.-]{1,120}\\.v[1-9][0-9]*"))
             throw new IllegalArgumentException("Extension point must be a versioned identifier");
         if (operation == null || !operation.matches("[a-z][a-zA-Z0-9_.-]{0,63}"))
             throw new IllegalArgumentException("Invalid extension operation");
         try { UUID.fromString(idempotencyKey); }
         catch (RuntimeException invalid) { throw new IllegalArgumentException("Idempotency key must be a UUID", invalid); }
-        if (requestJson == null || requestJson.isBlank() || requestJson.getBytes(StandardCharsets.UTF_8).length > 1_048_576)
-            throw new IllegalArgumentException("Extension invocation must be between 1 byte and 1 MiB");
+        if (requestJson == null || requestJson.isBlank() || requestJson.getBytes(StandardCharsets.UTF_8).length > 1_048_576
+                || configurationJson == null || configurationJson.isBlank()
+                || configurationJson.getBytes(StandardCharsets.UTF_8).length > 1_048_576)
+            throw new IllegalArgumentException("Extension configuration and invocation must each be between 1 byte and 1 MiB");
+        String envelope = "{\"protocolVersion\":1,\"extensionPoint\":\"" + extensionPoint + "\",\"operation\":\""
+                + operation + "\",\"idempotencyKey\":\"" + idempotencyKey + "\",\"configuration\":"
+                + configurationJson + ",\"payload\":" + requestJson + "}";
+        if (envelope.getBytes(StandardCharsets.UTF_8).length > 1_048_576)
+            throw new IllegalArgumentException("Extension invocation envelope exceeds 1 MiB");
         if (deadline == null || deadline.compareTo(Duration.ofMillis(100)) < 0 || deadline.compareTo(Duration.ofSeconds(30)) > 0)
             throw new IllegalArgumentException("Extension deadline must be between 100 ms and 30 s");
     }

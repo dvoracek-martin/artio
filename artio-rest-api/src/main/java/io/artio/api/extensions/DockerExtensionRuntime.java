@@ -118,13 +118,13 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     @Override
     public ExtensionRuntimePort.InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
-                                   String requestJson, Duration deadline) {
-        ExtensionRuntimePort.validateInvocation(extensionPoint, operation, idempotencyKey, requestJson, deadline);
+                                   String configurationJson, String requestJson, Duration deadline) {
+        ExtensionRuntimePort.validateInvocation(extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);
         ExtensionCircuitBreaker breaker = circuits.computeIfAbsent(pluginId,
                 ignored -> new ExtensionCircuitBreaker(5, Duration.ofSeconds(30)));
         try {
             breaker.acquire();
-            var result = invokeOnce(pluginId, extensionPoint, operation, idempotencyKey, requestJson, deadline);
+            var result = invokeOnce(pluginId, extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);
             breaker.succeeded();
             return result;
         } catch (ExtensionRuntimePort.ExtensionCallException providerFailure) {
@@ -140,7 +140,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     private ExtensionRuntimePort.InvocationResult invokeOnce(String pluginId, String extensionPoint, String operation,
-            String idempotencyKey, String requestJson, Duration deadline) {
+            String idempotencyKey, String configurationJson, String requestJson, Duration deadline) {
         try {
             InspectContainerResponse container = docker.inspectContainerCmd(containerName(pluginId)).exec();
             if (!Boolean.TRUE.equals(container.getState().getRunning())) throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension is stopped");
@@ -149,7 +149,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             if (address == null || address.isBlank()) throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension has no runtime network address");
             String envelope = "{\"protocolVersion\":1,\"extensionPoint\":\"" + jsonEscape(extensionPoint)
                     + "\",\"operation\":\"" + jsonEscape(operation) + "\",\"idempotencyKey\":\""
-                    + jsonEscape(idempotencyKey) + "\",\"payload\":" + requestJson + "}";
+                    + jsonEscape(idempotencyKey) + "\",\"configuration\":" + configurationJson
+                    + ",\"payload\":" + requestJson + "}";
             byte[] body = envelope.getBytes(StandardCharsets.UTF_8);
             if (body.length > MAX_REQUEST_BYTES) throw new IllegalArgumentException("Extension invocation exceeds 1 MiB");
             HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + address + ":" + port + "/v1/invoke"))
