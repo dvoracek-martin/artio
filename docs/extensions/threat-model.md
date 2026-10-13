@@ -1,0 +1,50 @@
+# Docker extension threat model
+
+## Scope and security objective
+
+This review covers the Artio Core API, PostgreSQL extension registry, optional Docker Engine runtime, extension containers, and the Backoffice operator surface. The goal is to let a store administrator run a separately deployed extension while limiting its access to the Core host, other extensions, and customer data. The extension platform is opt-in; the default deployment does not mount the Docker socket or enable the Docker runtime.
+
+## Assets
+
+- Customer, order, catalog, inventory, and payment data held by Core.
+- Extension configuration, provider credentials, and the encryption key used to protect secrets.
+- Docker daemon, host filesystem, container network, image registry credentials, and deployment configuration.
+- Plugin lifecycle state, release history, credential generation, and append-only operator audit history.
+- Availability and integrity of Core API and enabled extension operations.
+
+## Trust boundaries
+
+1. **Administrator to Backoffice/API:** JWT authentication and administrator authorization protect registration, configuration, lifecycle, update, rollback, rotation, invocation, health, and audit routes. Manifest and configuration input is treated as untrusted.
+2. **Core to PostgreSQL:** Persistent plugin data and audit records are stored through parameterized SQL. Secret values are encrypted with AES-GCM. API views and audit details omit secret values and request/response bodies.
+3. **Core to Docker daemon:** The daemon is a host-administrator boundary. Anyone able to control it can start privileged workloads or access the host. Artio does not make an untrusted Docker socket safe; operators must protect it as root-equivalent access.
+4. **Core to extension container:** The authenticated v1 invocation uses a plugin-scoped HMAC-derived bearer token over a private Docker network. The network is trusted and traffic is not encrypted with TLS.
+5. **Image registry to runtime:** Images must be digest-pinned and from an explicitly trusted registry. Image provenance/signature verification is not implemented; allowlisting and digest pinning provide identity and immutability, not publisher assurance.
+6. **Extension to provider/customer systems:** A plugin can use the secrets Core sends to it and may perform external provider side effects. Core cannot guarantee exactly-once effects or prevent a plugin from misusing credentials granted to it.
+
+## Threats and controls
+
+| Threat | Controls in place | Residual risk |
+|---|---|---|
+| Malicious manifest requests unsafe image or unsupported capability | Structural/schema validation, compatible Core-version bounds, registry allowlist, sha256 image pin, declared permissions and extension points; no manifest-provided Docker flags or commands | Trusted registry administrators can publish malicious content; signatures and provenance attestations are not checked |
+| Compromised extension escapes container or accesses host | Non-root UID, read-only root filesystem, no host mounts, no published production ports, dropped Linux capabilities, `no-new-privileges`, memory/CPU/PID limits, bounded `/tmp`, private network | Container isolation depends on Docker/Linux kernel and daemon configuration; resource ceilings do not stop every denial-of-service vector |
+| Extension calls another service or another plugin | Private internal extension network; no direct egress or host ports in production runtime configuration | Core API is not attached to the extension network by default, but host/daemon operators can change topology; no separate network policy engine |
+| Secret exposure through management responses, audit, or logs | AES-GCM encrypted storage, secrets represented by configured field names, secret-free audit metadata, no invocation payload/body audit, bounded generic API errors | Secrets are decrypted into Core memory and sent to the plugin; a malicious plugin can retain or exfiltrate any secret it receives through its allowed provider access |
+| Stolen or reused plugin credential | Per-plugin HMAC credential, generation-based rotation, generation 1 compatibility, explicit rotation audit without token value | Bearer token is not TLS-protected inside the trusted Docker network; rotating the application encryption key changes derived credentials and requires a coordinated restart |
+| Replayed or retried invocation causes duplicate provider action | Required UUID idempotency key, the same key reused across one Core retry, deadline and 1 MiB request/response bounds | Exactly-once execution is not promised; each plugin must persist/deduplicate idempotency keys, and provider outcomes can be ambiguous |
+| Slow, broken, or failing plugin harms Core availability | 100 ms–30 s deadline, bounded HTTP body, bounded readiness/health polling, one retry for transient gateway failure, per-process circuit breaker, generic 502/503/504 mapping | Circuit state is per API process, so a multi-instance deployment can continue sending calls from another process; cross-instance breaker state is not implemented |
+| Operator cannot diagnose failed lifecycle action | Lifecycle failure audit stores action and exception class only; Backoffice shows the recent bounded audit timeline, health result, and safe API detail; explicit live diagnostic invocation uses declared extension point | Exception classes are coarse diagnostics; detailed daemon logs remain deployment-side and should be access-controlled |
+| Rollback/update corrupts state or secrets | Immutable release history; update pulls before replacing stopped container; only stopped plugins update/rollback; configuration is validated against target schema; incompatible secret/public values block, removed secret fields are purged | External provider side effects from the prior release cannot be reversed by image rollback |
+| Unauthorized administrator changes plugin | Admin-only endpoints and audit actor identity; runtime disabled by default | Compromised administrator account or bearer token can still change extension behavior; deployment should use MFA and least-privilege account access |
+
+## Operational guidance
+
+- Keep `ARTIO_EXTENSION_DOCKER_ENABLED=false` unless extension execution is required. Do not expose the Docker socket to general application users.
+- Use a registry controlled by the operator, configure `ARTIO_EXTENSION_TRUSTED_REGISTRIES` narrowly, and review the exact image digest and manifest before registration.
+- Grant each plugin only the provider credentials and extension points it needs. Rotate a credential after suspected exposure and remove the plugin if trust is lost.
+- Treat Backoffice diagnostic invocation as a real operation. Use a non-destructive operation and synthetic payload; the endpoint is intentionally admin-only and is not a customer workflow API.
+- Restrict access to Docker daemon logs and host monitoring. Do not put provider credentials or request bodies in extension logs.
+- Before enabling multi-instance traffic for a plugin, account for the documented per-process circuit breaker limitation and implement shared breaker state if the deployment requires global suppression.
+
+## Phase 2 acceptance evidence
+
+`scripts/verify-extension-runtime.ps1` builds two reference images with immutable registry digests and runs the Docker lifecycle integration test against an isolated temporary registry. The integration test installs, enables, authenticates an invocation, updates, invokes the replacement, rolls back, and invokes the restored release. The integration test uses a dedicated non-internal bridge and loopback-only dynamic published port solely because the test JVM runs on the host; production containers retain the private internal network and publish no ports.

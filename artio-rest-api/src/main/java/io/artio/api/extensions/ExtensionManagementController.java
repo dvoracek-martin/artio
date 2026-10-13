@@ -347,7 +347,7 @@ public class ExtensionManagementController {
     @Transactional(readOnly = true)
     public List<AuditView> audit(@PathVariable String pluginId) {
         findPlugin(pluginId);
-        return jdbc.query("SELECT actor_user_id,action,details,occurred_at FROM extension_audit_events WHERE plugin_id=? ORDER BY occurred_at DESC",
+        return jdbc.query("SELECT actor_user_id,action,details,occurred_at FROM extension_audit_events WHERE plugin_id=? ORDER BY occurred_at DESC LIMIT 100",
                 (rs, row) -> new AuditView(rs.getObject("actor_user_id", UUID.class), rs.getString("action"),
                         read(rs.getString("details"), OBJECT_MAP), rs.getTimestamp("occurred_at").toInstant()), pluginId);
     }
