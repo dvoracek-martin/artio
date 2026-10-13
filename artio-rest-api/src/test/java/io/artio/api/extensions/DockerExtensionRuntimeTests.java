@@ -66,6 +66,8 @@ class DockerExtensionRuntimeTests {
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1",
                 "authorize", "invalid", "{}", "{}", java.time.Duration.ofSeconds(5)));
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1",
+                "authorize", "1-1-1-1-1", "{}", "{}", java.time.Duration.ofSeconds(5)));
+        assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1",
                 "authorize", "00000000-0000-0000-0000-000000000001", "{}", "{}", java.time.Duration.ofSeconds(31)));
         assertThatIllegalArgumentException().isThrownBy(() -> io.artio.extensions.ExtensionRuntimePort.validateInvocation("../../host",
                 "authorize", "00000000-0000-0000-0000-000000000001", "{}", "{}", java.time.Duration.ofSeconds(5)));

@@ -99,14 +99,21 @@ public class ExtensionManagementController {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> install(@PathVariable String pluginId, JwtAuthenticationToken actor) {
         PluginRow row = findPlugin(pluginId);
-        if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED").contains(row.lifecycleState())) {
+        if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(row.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be configured or stopped before installation"));
         }
         List<String> errors = manifestValidator.validate(row.manifest(), coreVersion, registeredPluginIds());
         errors = new java.util.ArrayList<>(errors);
         errors.addAll(dependencyErrors(row.manifest(), false));
         if (!errors.isEmpty()) return ResponseEntity.badRequest().body(new ManifestValidationResponse(false, coreVersion, errors));
-        runtime().install(row.manifest());
+        ExtensionRuntimePort runtime = runtime();
+        try {
+            runtime.install(row.manifest());
+        } catch (RuntimeException failure) {
+            jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
+            audit(pluginId, actor, "INSTALL_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension image could not be installed"));
+        }
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", pluginId);
         audit(pluginId, actor, "INSTALL", Map.of("image", row.manifest().image()));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "INSTALLED"));
@@ -122,7 +129,14 @@ public class ExtensionManagementController {
         List<String> dependencyErrors = dependencyErrors(row.manifest(), true);
         if (!dependencyErrors.isEmpty()) return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("message", "Plugin dependencies are not ready", "errors", dependencyErrors));
-        runtime().enable(row.manifest());
+        ExtensionRuntimePort runtime = runtime();
+        try {
+            runtime.enable(row.manifest());
+        } catch (RuntimeException failure) {
+            jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
+            audit(pluginId, actor, "ENABLE_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension did not become available"));
+        }
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED',updated_at=now() WHERE plugin_id=?", pluginId);
         audit(pluginId, actor, "ENABLE", Map.of("image", row.manifest().image()));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "ENABLED"));
@@ -131,13 +145,23 @@ public class ExtensionManagementController {
     @PostMapping("/{pluginId}/disable")
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> disable(@PathVariable String pluginId, JwtAuthenticationToken actor) {
-        findPlugin(pluginId);
+        PluginRow row = findPlugin(pluginId);
+        if (!Set.of("ENABLED", "INSTALLED", "DISABLED", "FAILED").contains(row.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin is not installed"));
+        }
         List<PluginManifest> enabled = jdbc.query("SELECT manifest FROM extension_plugins WHERE lifecycle_state='ENABLED' AND plugin_id<>?",
-                (rs, row) -> read(rs.getString("manifest"), PluginManifest.class), pluginId);
+                (rs, rowNumber) -> read(rs.getString("manifest"), PluginManifest.class), pluginId);
         List<String> dependents = PluginDependencyPolicy.enabledDependents(pluginId, enabled);
         if (!dependents.isEmpty()) return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("message", "Enabled plugins depend on this plugin", "dependents", dependents));
-        runtime().disable(pluginId);
+        ExtensionRuntimePort runtime = runtime();
+        try {
+            runtime.disable(pluginId);
+        } catch (RuntimeException failure) {
+            jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
+            audit(pluginId, actor, "DISABLE_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension could not be stopped"));
+        }
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='DISABLED',updated_at=now() WHERE plugin_id=?", pluginId);
         audit(pluginId, actor, "DISABLE", Map.of());
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "DISABLED"));

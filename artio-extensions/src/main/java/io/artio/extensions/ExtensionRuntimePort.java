@@ -19,8 +19,10 @@ public interface ExtensionRuntimePort {
             throw new IllegalArgumentException("Extension point must be a versioned identifier");
         if (operation == null || !operation.matches("[a-z][a-zA-Z0-9_.-]{0,63}"))
             throw new IllegalArgumentException("Invalid extension operation");
-        try { UUID.fromString(idempotencyKey); }
-        catch (RuntimeException invalid) { throw new IllegalArgumentException("Idempotency key must be a UUID", invalid); }
+        try {
+            if (!UUID.fromString(idempotencyKey).toString().equalsIgnoreCase(idempotencyKey))
+                throw new IllegalArgumentException("Idempotency key must use canonical UUID form");
+        } catch (RuntimeException invalid) { throw new IllegalArgumentException("Idempotency key must be a canonical UUID", invalid); }
         if (requestJson == null || requestJson.isBlank() || requestJson.getBytes(StandardCharsets.UTF_8).length > 1_048_576
                 || configurationJson == null || configurationJson.isBlank()
                 || configurationJson.getBytes(StandardCharsets.UTF_8).length > 1_048_576)
