@@ -324,6 +324,9 @@ class CatalogApiIntegrationTests {
         assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PENDING");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
+        var duplicateExpiry = signedStripeWebhook("checkout.session.expired", sessionId, "unpaid");
+        assertThat(duplicateExpiry.getBody()).contains("duplicate");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE provider='STRIPE'", Integer.class)).isEqualTo(1);
 
         var lateSuccess = signedStripeWebhook("checkout.session.completed", sessionId, "paid");
         assertThat(lateSuccess.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -335,7 +338,8 @@ class CatalogApiIntegrationTests {
     }
 
     private ResponseEntity<String> signedStripeWebhook(String type, String sessionId, String paymentStatus) throws Exception {
-        String body = "{\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
+        String eventId = "evt_test_" + UUID.nameUUIDFromBytes((type + ":" + sessionId).getBytes(StandardCharsets.UTF_8));
+        String body = "{\"id\":\"" + eventId + "\",\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
                 + "\",\"payment_status\":\"" + paymentStatus + "\"}}}";
         String timestamp = Long.toString(java.time.Instant.now().getEpochSecond());
         Mac mac = Mac.getInstance("HmacSHA256");
@@ -546,7 +550,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE", String.class);
-        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15");
+        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
