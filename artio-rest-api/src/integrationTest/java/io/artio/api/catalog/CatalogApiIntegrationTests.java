@@ -62,6 +62,9 @@ class CatalogApiIntegrationTests {
     private io.artio.api.inventory.ReservationExpiryScheduler reservationExpiryScheduler;
 
     @Autowired
+    private io.artio.api.notifications.OrderEventOutboxPublisher orderEventOutboxPublisher;
+
+    @Autowired
     private io.artio.api.security.EncryptionService encryption;
 
     private String adminToken;
@@ -75,6 +78,7 @@ class CatalogApiIntegrationTests {
         registry.add("artio.security.encryption-key", () -> "integration-test-encryption-key-value-32-bytes-minimum");
         registry.add("artio.extensions.trusted-registries", () -> "ghcr.io");
         registry.add("artio.inventory.expiry-interval-ms", () -> "3600000");
+        registry.add("artio.events.outbox-poll-interval-ms", () -> "3600000");
         registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
         registry.add("artio.payments.stripe-webhook-secret", () -> "whsec_integration_test_secret");
     }
@@ -337,6 +341,20 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
     }
 
+    @Test
+    void retainsOrderOutboxEventAndSchedulesRetryWhenKafkaIsUnavailable() {
+        UUID eventId = UUID.randomUUID();
+        jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload) "
+                        + "VALUES (?,'ORDER_CREATED','ORDER',?,'{}'::jsonb)", eventId, UUID.randomUUID().toString());
+
+        orderEventOutboxPublisher.publishPending();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM event_outbox WHERE id=?", String.class, eventId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT attempts FROM event_outbox WHERE id=?", Integer.class, eventId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT available_at>now() FROM event_outbox WHERE id=?", Boolean.class, eventId)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT last_error IS NOT NULL FROM event_outbox WHERE id=?", Boolean.class, eventId)).isTrue();
+    }
+
     private ResponseEntity<String> signedStripeWebhook(String type, String sessionId, String paymentStatus) throws Exception {
         String eventId = "evt_test_" + UUID.nameUUIDFromBytes((type + ":" + sessionId).getBytes(StandardCharsets.UTF_8));
         String body = "{\"id\":\"" + eventId + "\",\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
@@ -527,11 +545,15 @@ class CatalogApiIntegrationTests {
         assertThat(taxSnapshot.path("lines").get(0).path("taxCategory").asText()).isEqualTo("STANDARD");
         assertThat(mapper.writeValueAsString(firstBody.taxSnapshot().get("bundles")))
                 .contains(bundleResponse.getBody().id().toString(), variant.getBody().id().toString(), "configuredTotal", "componentAdjustmentFactor");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CREATED'", Integer.class,
+                firstBody.orderId().toString())).isEqualTo(1);
 
         var replay = http.exchange("/api/v1/cart/checkout", HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
         assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(readOrder(replay.getBody()).orderId()).isEqualTo(firstBody.orderId());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE idempotency_key=?", Integer.class, key)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_outbox WHERE aggregate_id=?", Integer.class,
+                firstBody.orderId().toString())).isEqualTo(1);
     }
 
     private io.artio.api.orders.CartController.OrderView readOrder(String json) {
@@ -592,7 +614,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE", String.class);
-        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17");
+        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "

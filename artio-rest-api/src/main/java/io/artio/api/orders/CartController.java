@@ -128,6 +128,11 @@ public class CartController {
         order.items().forEach(i->jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,?,?,?,?)",UUID.randomUUID(),order.getId().value(),i.variantId(),i.quantity().value(),i.unitPrice().amount(),i.unitPrice().currency().getCurrencyCode(),i.bundleId()));
         var warehouses=inventory.warehouses().stream().filter(InventoryApplicationService.WarehouseView::active).toList();
         for(var requirement:requirements.entrySet()){var selected=warehouses.stream().filter(w->inventory.stockByWarehouse(w.id()).stream().anyMatch(s->s.sellableId().equals(requirement.getKey())&&s.available().compareTo(requirement.getValue())>=0)).findFirst().orElseThrow(()->new IllegalStateException("Insufficient inventory for item "+requirement.getKey()));inventory.reserve(new InventoryApplicationService.ReserveRequest(order.getId().value(),selected.id(),requirement.getKey(),requirement.getValue()));}
+        UUID eventId=UUID.randomUUID();
+        String eventPayload;
+        try{eventPayload=mapper.writeValueAsString(Map.of("eventId",eventId,"type","ORDER_CREATED","occurredAt",Instant.now(),"orderId",order.getId().value(),"userId",userId));}
+        catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Order event could not be serialized",e);}
+        jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload) VALUES (?,'ORDER_CREATED','ORDER',?,?::jsonb)",eventId,order.getId().value().toString(),eventPayload);
         events.publishEvent(new io.artio.orders.OrderCreated(order.getId(),userId));jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
         return org.springframework.http.ResponseEntity.status(HttpStatus.CREATED).body(new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null,request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshot));
     }
