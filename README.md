@@ -88,6 +88,8 @@ Orders preserve the checkout shipping country, market, tax jurisdiction and a ve
 
 ## Configurable bundles
 
+Administrators can store DE/IT/FR/EN bundle names and option-group labels with `PUT /api/v1/bundles/{id}/translations/{locale}`. Consumers can request resolved labels from `GET /api/v1/bundles/localized?locale=de` or `GET /api/v1/bundles/{id}/localized?locale=de`; resolution uses requested locale, then English, then the bundle's base labels.
+
 `POST /api/v1/bundles` creates a fixed or configurable bundle. A configurable bundle defines option groups and choice sellables with minimum/maximum selection rules. `POST /api/v1/bundles/{id}/configure` validates selections and returns merged inventory requirements. `POST /api/v1/bundles/{id}/quote` accepts selected options and market/channel/jurisdiction, then retrieves component prices from the pricing application; callers cannot inject price values. Pricing strategies support component sum, fixed price and percentage off. The Angular storefront lets customers configure, quote and add bundles to their cart. Checkout revalidates the choices and price, reserves the underlying component stock, and stores each component with its originating bundle ID in order lines.
 
 ## Storefront, backoffice and operations

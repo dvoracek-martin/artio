@@ -660,6 +660,41 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void bundleConfiguratorResolvesLocalizedLabelsWithEnglishAndBaseFallback() {
+        var created = adminExchange("/api/bundles", HttpMethod.POST,
+                new io.artio.api.bundles.BundleApplicationService.BundleRequest("Choose your items", "LOCAL-BUNDLE-1",
+                        io.artio.bundles.BundleType.CONFIGURABLE, List.of(),
+                        List.of(new io.artio.api.bundles.BundleApplicationService.OptionGroupRequest("choices",
+                                "Select components", 1, 1,
+                                List.of(new io.artio.api.bundles.BundleApplicationService.ChoiceRequest(UUID.randomUUID(), BigDecimal.ONE)))),
+                        new io.artio.api.bundles.BundleApplicationService.PricingRuleRequest(
+                                io.artio.bundles.BundlePricingRule.Mode.COMPONENT_SUM, null, null, null)),
+                io.artio.api.bundles.BundleApplicationService.BundleView.class);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID bundleId = created.getBody().id();
+        var saved = adminExchange("/api/bundles/{id}/translations/{locale}", HttpMethod.PUT,
+                new io.artio.api.bundles.BundleLocalizationApplicationService.TranslationRequest("Wähle deine Artikel",
+                        Map.of("choices", "Komponenten auswählen")),
+                io.artio.api.bundles.BundleLocalizationApplicationService.TranslationView.class, bundleId, "de");
+        assertThat(saved.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM commerce_bundle_option_group_translations WHERE bundle_id=? AND group_code='choices' AND locale='de'", Integer.class, bundleId)).isEqualTo(1);
+        assertThat(saved.getBody().optionGroupNames()).containsEntry("choices", "Komponenten auswählen");
+
+        var german = http.getForObject("/api/v1/bundles/{id}/localized?locale=de",
+                io.artio.api.bundles.BundleLocalizationApplicationService.LocalizedBundleView.class, bundleId);
+        assertThat(german.localizedName()).isEqualTo("Wähle deine Artikel");
+        assertThat(german.optionGroups()).singleElement().extracting(
+                io.artio.api.bundles.BundleLocalizationApplicationService.LocalizedOptionGroup::localizedName)
+                .isEqualTo("Komponenten auswählen");
+        var italian = http.getForObject("/api/v1/bundles/{id}/localized?locale=it",
+                io.artio.api.bundles.BundleLocalizationApplicationService.LocalizedBundleView.class, bundleId);
+        assertThat(italian.localizedName()).isEqualTo("Choose your items");
+        assertThat(italian.optionGroups()).singleElement().extracting(
+                io.artio.api.bundles.BundleLocalizationApplicationService.LocalizedOptionGroup::localizedName)
+                .isEqualTo("Select components");
+    }
+
+    @Test
     void mailOutboxWorkerDeliversAndRedactsSuccessfulDelivery() throws Exception {
         UUID orderId = UUID.randomUUID();
         UUID deliveryId = UUID.randomUUID();
