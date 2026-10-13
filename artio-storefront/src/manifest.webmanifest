@@ -1,0 +1,12 @@
+{
+  "name": "Artio Commerce",
+  "short_name": "Artio",
+  "description": "Thoughtful commerce and configurable bundles",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f6f2",
+  "theme_color": "#f3f6f2",
+  "orientation": "portrait-primary",
+  "icons": [{ "src": "/assets/icons/artio.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

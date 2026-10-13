@@ -2,6 +2,8 @@
 
 Artio is a modular commerce platform built with Java 21, Spring Boot, PostgreSQL, Redis, Kafka, OpenSearch and Angular 17. The Gradle project is a modular monolith: bounded contexts have separate domain and persistence modules, with a single REST application coordinating workflows. Configurable bundles remain their own aggregate and are quoted from current component prices.
 
+> **Architecture status:** this README describes the current checkout, not full product readiness. The binding target is a self-hosted single-merchant installation with a proprietary Community/Enterprise edition model, an included Backoffice, an optional headless Storefront, and Docker-only provider plugins. See [the target architecture](docs/ARCHITECTURE.md), [repository audit](docs/REPOSITORY_AUDIT.md), and [phase/task ledger](docs/ROADMAP.md). Current code still has documented conflicts and unverified migration/deployment behavior.
+
 ## Local development
 
 Install Java 21, Node.js 20 and Docker Compose. Create a `.env` file beside the compose file (or export these values) before starting the stack:
@@ -43,7 +45,7 @@ Gradle plugins and Java dependencies resolve from Maven Central. npm dependencie
 - Domains: `artio-catalog`, `artio-pricing`, `artio-inventory`, `artio-bundles`, `artio-orders`, `artio-users`, `artio-payments`, `artio-notifications`
 - Adapters: PostgreSQL modules for catalog, pricing, inventory and bundles; OpenSearch catalog adapter
 - Applications: `artio-rest-api`, `artio-storefront`, `artio-backoffice`
-- Runtime and deployment: `artio-docker`, `artio-kubernetes`
+- Runtime and deployment: `artio-docker` (Docker Compose)
 
 ## Authentication and access
 
@@ -81,9 +83,11 @@ Create an active warehouse, receive stock for each variant and create an active 
 
 The storefront includes responsive catalog browsing, search, bundle configuration, account registration/login, cart, Stripe checkout, order history and order-status views. The backoffice includes product/variant management, bundle setup, price management, customer activation/email-verification, reporting summaries and shipment updates. Both are strict-mode Angular applications with responsive layouts and dark-mode support.
 
-Compose starts PostgreSQL, Redis, Kafka in single-node KRaft mode, OpenSearch, the REST API and both Angular frontends. Kubernetes manifests in `artio-kubernetes` deploy the API and frontends; PostgreSQL, Redis, Kafka and OpenSearch are expected to be provided by the cluster or managed services. Supply the `artio-secrets` Secret and replace the example domains and image tags before deployment.
+Compose starts PostgreSQL, Redis, Kafka in single-node KRaft mode, OpenSearch, the REST API and both Angular frontends. Docker Compose is the supported deployment path in the current implementation.
 
 ## API examples
+
+The REST surface is generated as OpenAPI at `http://localhost:8080/v3/api-docs` (also served through the frontend reverse proxy). Use `/api/v1` as the canonical versioned API. Unversioned `/api` routes remain compatibility aliases. API errors use a stable JSON envelope with timestamp, HTTP status, reason, safe message, and request path.
 
 Price request:
 

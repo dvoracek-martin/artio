@@ -1,0 +1,15 @@
+spring:
+  config:
+    activate:
+      on-profile: oauth2
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${ARTIO_OAUTH_GOOGLE_CLIENT_ID}
+            client-secret: ${ARTIO_OAUTH_GOOGLE_CLIENT_SECRET}
+            scope: openid,email,profile
+artio:
+  security:
+    oauth2-enabled: true

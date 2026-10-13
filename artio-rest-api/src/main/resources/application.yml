@@ -24,7 +24,14 @@ spring:
       mail.smtp.starttls.enable: ${ARTIO_SMTP_STARTTLS:false}
 server:
   port: ${PORT:8080}
+  forward-headers-strategy: framework
 management:
+  tracing:
+    sampling:
+      probability: ${ARTIO_TRACING_SAMPLE_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${ARTIO_OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
   endpoints:
     web:
       exposure:
@@ -37,6 +44,9 @@ artio:
   mail-from: ${ARTIO_MAIL_FROM:no-reply@artio.local}
   security:
     jwt-secret: ${ARTIO_JWT_SECRET:local-development-secret-change-this-32-bytes-minimum}
+    encryption-key: ${ARTIO_ENCRYPTION_KEY:local-development-encryption-secret-change-before-deploy}
+    allowed-origins: ${ARTIO_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4201}
+    oauth2-enabled: ${ARTIO_OAUTH2_ENABLED:false}
   search:
     enabled: ${ARTIO_SEARCH_ENABLED:false}
     url: ${ARTIO_SEARCH_URL:http://localhost:9200}

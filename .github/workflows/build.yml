@@ -24,8 +24,10 @@ jobs:
             artio-storefront/package-lock.json
             artio-backoffice/package-lock.json
       - uses: gradle/actions/setup-gradle@v4
+      - name: Require Docker for PostgreSQL integration tests
+        run: docker info
       - name: Build, run tests and generate coverage
-        run: ./gradlew --no-daemon clean build jacocoTestReport
+        run: ./gradlew --no-daemon clean build integrationTest jacocoTestReport
       - name: Build API container
         run: docker build -f artio-docker/Dockerfile -t artio/api:${GITHUB_SHA} .
       - name: Build storefront container

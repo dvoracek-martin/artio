@@ -1,8 +1,8 @@
 plugins { id("artio.java-library") }
 
 val integrationTest by sourceSets.creating {
-    compileClasspath += sourceSets.main.get().output
-    runtimeClasspath += output + compileClasspath
+    compileClasspath += sourceSets.main.get().output + sourceSets.main.get().compileClasspath
+    runtimeClasspath += output + sourceSets.main.get().output + sourceSets.main.get().runtimeClasspath
 }
 
 configurations[integrationTest.implementationConfigurationName].extendsFrom(configurations.testImplementation.get())

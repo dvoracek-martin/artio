@@ -1,0 +1,21 @@
+type Query {
+  products(search: String, first: Int = 20): [Product!]!
+  product(id: ID!): Product
+}
+
+type Product {
+  id: ID!
+  name: String!
+  description: String
+  sku: String!
+  active: Boolean!
+  variants: [Variant!]!
+}
+
+type Variant {
+  id: ID!
+  productId: ID!
+  name: String!
+  sku: String!
+  active: Boolean!
+}

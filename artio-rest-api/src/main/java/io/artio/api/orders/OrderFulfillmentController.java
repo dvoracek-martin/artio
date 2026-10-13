@@ -14,7 +14,8 @@ import org.springframework.web.server.ResponseStatusException;
 public class OrderFulfillmentController {
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;
-    public OrderFulfillmentController(JdbcTemplate jdbc,InventoryApplicationService inventory){this.jdbc=jdbc;this.inventory=inventory;}
+    private final OrderUpdatePublisher orderUpdates;
+    public OrderFulfillmentController(JdbcTemplate jdbc,InventoryApplicationService inventory,OrderUpdatePublisher orderUpdates){this.jdbc=jdbc;this.inventory=inventory;this.orderUpdates=orderUpdates;}
 
     @PostMapping("/{id}/ship") @Transactional
     public FulfillmentView ship(@PathVariable UUID id,@RequestBody ShipRequest request){
@@ -25,6 +26,7 @@ public class OrderFulfillmentController {
         jdbc.update("UPDATE orders SET status='SHIPPED',tracking_number=? WHERE id=?",request.trackingNumber(),id);
         UUID userId=jdbc.queryForObject("SELECT user_id FROM orders WHERE id=?",UUID.class,id);
         jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,'Order shipped',?,false,?,?) ON CONFLICT (dedupe_key) DO NOTHING",UUID.randomUUID(),userId,"ORDER_SHIPPED","Your order "+id+" is on the way. Tracking: "+request.trackingNumber(),"order-shipped:"+id,java.sql.Timestamp.from(Instant.now()));
+        orderUpdates.publish(id);
         return new FulfillmentView(id,"SHIPPED",request.trackingNumber());
     }
 
@@ -32,6 +34,7 @@ public class OrderFulfillmentController {
     public FulfillmentView deliver(@PathVariable UUID id){
         if(!"SHIPPED".equals(status(id)))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only shipped orders can be delivered");
         jdbc.update("UPDATE orders SET status='DELIVERED' WHERE id=?",id);
+        orderUpdates.publish(id);
         return new FulfillmentView(id,"DELIVERED",jdbc.queryForObject("SELECT tracking_number FROM orders WHERE id=?",String.class,id));
     }
     private String status(UUID id){var statuses=jdbc.query("SELECT status FROM orders WHERE id=?",(rs,n)->rs.getString(1),id);if(statuses.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");return statuses.getFirst();}

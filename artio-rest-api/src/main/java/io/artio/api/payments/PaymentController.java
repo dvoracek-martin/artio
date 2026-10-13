@@ -3,6 +3,7 @@ package io.artio.api.payments;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.inventory.InventoryApplicationService;
+import io.artio.api.orders.OrderUpdatePublisher;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,17 +28,18 @@ import org.springframework.web.server.ResponseStatusException;
 public class PaymentController {
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;
+    private final OrderUpdatePublisher orderUpdates;
     private final RestClient stripe = RestClient.create();
     private final ObjectMapper mapper;
     private final String stripeKey;
     private final String webhookSecret;
     private final String storefrontUrl;
 
-    public PaymentController(JdbcTemplate jdbc, InventoryApplicationService inventory, ObjectMapper mapper,
+    public PaymentController(JdbcTemplate jdbc, InventoryApplicationService inventory, OrderUpdatePublisher orderUpdates, ObjectMapper mapper,
             @Value("${artio.payments.stripe-secret-key:}") String stripeKey,
             @Value("${artio.payments.stripe-webhook-secret:}") String webhookSecret,
             @Value("${artio.storefront-url:http://localhost:4200}") String storefrontUrl) {
-        this.jdbc=jdbc; this.inventory=inventory; this.mapper=mapper; this.stripeKey=stripeKey; this.webhookSecret=webhookSecret; this.storefrontUrl=storefrontUrl;
+        this.jdbc=jdbc; this.inventory=inventory; this.orderUpdates=orderUpdates; this.mapper=mapper; this.stripeKey=stripeKey; this.webhookSecret=webhookSecret; this.storefrontUrl=storefrontUrl;
     }
 
     @PostMapping("/orders/{orderId}/checkout-session")
@@ -76,6 +78,7 @@ public class PaymentController {
                 if(!pendingOrder.isEmpty()){
                     UUID orderId=pendingOrder.getFirst();jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'",orderId);
                     for(var reservation:inventory.reservationsByOrder(orderId))if(reservation.state()==io.artio.inventory.ReservationState.RESERVED)inventory.release(reservation.id());
+                    orderUpdates.publish(orderId);
                 }
                 return Map.of("status","expired");
             }
@@ -83,6 +86,8 @@ public class PaymentController {
             if(!"paid".equals(paymentStatus)) return Map.of("status","pending");
             jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now() WHERE provider_reference=? AND status<>'CAPTURED'",sessionId);
             jdbc.update("UPDATE orders SET status='PAID' WHERE id=(SELECT order_id FROM payments WHERE provider_reference=?) AND status='PENDING'",sessionId);
+            jdbc.query("SELECT order_id FROM payments WHERE provider_reference=?",rs->{if(rs.next())orderUpdates.publish(rs.getObject(1,UUID.class));return null;},sessionId);
+            jdbc.update("INSERT INTO product_interactions(id,tenant_id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),u.tenant_id,o.user_id,oi.variant_id,'PURCHASE',o.id FROM payments p JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=o.user_id JOIN order_items oi ON oi.order_id=o.id WHERE p.provider_reference=? AND o.status='PAID' ON CONFLICT DO NOTHING",sessionId);
             jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||order_id,false,now() FROM payments WHERE provider_reference=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||payments.order_id)",UUID.randomUUID(),sessionId);
             return Map.of("status","processed");
         } catch(Exception e) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid webhook payload"); }

@@ -50,6 +50,42 @@ services:
       timeout: 5s
       retries: 20
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ../artio-observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../artio-observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - artio-prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - rest-api
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-this-local-password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../artio-observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../artio-observability/grafana/provisioning/dashboards/artio-overview.json:/var/lib/grafana/dashboards/artio-overview.json:ro
+      - artio-grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -77,11 +113,14 @@ services:
       ARTIO_SEARCH_ENABLED: "true"
       ARTIO_SEARCH_URL: http://opensearch:9200
       ARTIO_JWT_SECRET: ${ARTIO_JWT_SECRET:-replace-this-local-secret-with-at-least-32-random-bytes}
+      ARTIO_ENCRYPTION_KEY: ${ARTIO_ENCRYPTION_KEY:-replace-this-local-encryption-secret-before-deployment}
+      ARTIO_ALLOWED_ORIGINS: ${ARTIO_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4201}
       ARTIO_BOOTSTRAP_ADMIN_EMAIL: ${ARTIO_BOOTSTRAP_ADMIN_EMAIL:-}
       ARTIO_BOOTSTRAP_ADMIN_PASSWORD: ${ARTIO_BOOTSTRAP_ADMIN_PASSWORD:-}
       ARTIO_STRIPE_SECRET_KEY: ${ARTIO_STRIPE_SECRET_KEY:-}
       ARTIO_STRIPE_WEBHOOK_SECRET: ${ARTIO_STRIPE_WEBHOOK_SECRET:-}
       ARTIO_STOREFRONT_URL: http://localhost:4200
+      ARTIO_OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
       ARTIO_SMTP_HOST: ${ARTIO_SMTP_HOST:-localhost}
       ARTIO_SMTP_PORT: ${ARTIO_SMTP_PORT:-1025}
       ARTIO_SMTP_USERNAME: ${ARTIO_SMTP_USERNAME:-}
@@ -102,6 +141,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      jaeger:
+        condition: service_started
 
   storefront:
     build:
@@ -132,3 +173,5 @@ services:
 volumes:
   artio-postgres-data:
   artio-redis-data:
+  artio-prometheus-data:
+  artio-grafana-data:
