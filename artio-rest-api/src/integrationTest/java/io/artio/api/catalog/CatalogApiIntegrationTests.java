@@ -611,6 +611,13 @@ class CatalogApiIntegrationTests {
         adminExchange("/api/v1/tax-rules/sellables/{sellableId}/category", HttpMethod.PUT,
                 new io.artio.api.pricing.PricingController.TaxCategoryRequest(io.artio.pricing.TaxCategory.REDUCED),
                 io.artio.api.pricing.PricingController.TaxCategoryView.class, variant.getBody().id());
+        var assignments = adminExchange("/api/v1/tax-rules/sellables/categories", HttpMethod.GET, null,
+                io.artio.api.pricing.PricingController.TaxCategoryView[].class);
+        assertThat(assignments.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(assignments.getBody()).anySatisfy(assignment -> {
+            assertThat(assignment.sellableId()).isEqualTo(variant.getBody().id());
+            assertThat(assignment.category()).isEqualTo(io.artio.pricing.TaxCategory.REDUCED);
+        });
         var reduced = http.postForEntity("/api/pricing/quote",
                 new io.artio.api.pricing.PricingApplicationService.QuoteRequest(variant.getBody().id(), "CH", "WEB", "CH", BigDecimal.ONE, null),
                 String.class);
