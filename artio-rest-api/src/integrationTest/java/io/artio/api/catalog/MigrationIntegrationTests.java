@@ -16,6 +16,32 @@ class MigrationIntegrationTests {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
     @Test
+    void sharedCatalogWriteLockBlocksExclusiveIndexRebuildAcrossConnections() throws Exception {
+        try (var writer = POSTGRES.createConnection(""); var rebuild = POSTGRES.createConnection("")) {
+            writer.setAutoCommit(false);
+            rebuild.setAutoCommit(false);
+            try (var statement = writer.createStatement()) {
+                statement.executeQuery("SELECT pg_advisory_xact_lock_shared(" + CatalogSearchIndexLock.LOCK_NAMESPACE
+                        + ", " + CatalogSearchIndexLock.LOCK_ID + ")").close();
+            }
+            try (var statement = rebuild.createStatement();
+                    var result = statement.executeQuery("SELECT pg_try_advisory_xact_lock(" + CatalogSearchIndexLock.LOCK_NAMESPACE
+                            + ", " + CatalogSearchIndexLock.LOCK_ID + ")")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getBoolean(1)).isFalse();
+            }
+            writer.rollback();
+            try (var statement = rebuild.createStatement();
+                    var result = statement.executeQuery("SELECT pg_try_advisory_xact_lock(" + CatalogSearchIndexLock.LOCK_NAMESPACE
+                            + ", " + CatalogSearchIndexLock.LOCK_ID + ")")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getBoolean(1)).isTrue();
+            }
+            rebuild.rollback();
+        }
+    }
+
+    @Test
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();

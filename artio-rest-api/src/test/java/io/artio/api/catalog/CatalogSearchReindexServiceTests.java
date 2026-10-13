@@ -40,11 +40,13 @@ class CatalogSearchReindexServiceTests {
             return replay.apply(mock(ProductSearch.class));
         });
 
-        var result = new CatalogSearchReindexService(repository, searchProvider, mock(JdbcTemplate.class)).reindex();
+        CatalogSearchIndexLock lock = mock(CatalogSearchIndexLock.class);
+        var result = new CatalogSearchReindexService(repository, searchProvider, mock(JdbcTemplate.class), lock).reindex();
 
         assertThat(result.productsIndexed()).isZero();
         assertThat(result.translationsIndexed()).isZero();
         verify(search).rebuild(any());
+        verify(lock).lockFullRebuild();
     }
 
     @Test
@@ -70,12 +72,14 @@ class CatalogSearchReindexServiceTests {
             return extractor.extractData(rows);
         });
 
-        var result = new CatalogSearchReindexService(repository, searchProvider, jdbc).reindex();
+        CatalogSearchIndexLock lock = mock(CatalogSearchIndexLock.class);
+        var result = new CatalogSearchReindexService(repository, searchProvider, jdbc, lock).reindex();
 
         assertThat(result.productsIndexed()).isEqualTo(1);
         assertThat(result.translationsIndexed()).isEqualTo(1);
         verify(search).index(product);
         verify(search).indexLocalized(id, "COFFEE-1", true,
                 new io.artio.catalog.LocaleCode("de"), "Kaffee", "Geröstete Bohnen");
+        verify(lock).lockFullRebuild();
     }
 }

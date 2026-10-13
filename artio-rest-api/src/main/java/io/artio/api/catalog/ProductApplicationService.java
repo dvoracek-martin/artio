@@ -31,19 +31,23 @@ public class ProductApplicationService {
     private final BrandRepository brands;
     private final CategoryRepository categories;
     private final AttributeDefinitionRepository attributeDefinitions;
+    private final CatalogSearchIndexLock searchIndexLock;
 
     public ProductApplicationService(ProductRepository products, ObjectProvider<ProductSearch> search,
                                      BrandRepository brands, CategoryRepository categories,
-                                     AttributeDefinitionRepository attributeDefinitions) {
+                                     AttributeDefinitionRepository attributeDefinitions,
+                                     CatalogSearchIndexLock searchIndexLock) {
         this.products = products;
         this.search = search;
         this.brands = brands;
         this.categories = categories;
         this.attributeDefinitions = attributeDefinitions;
+        this.searchIndexLock = searchIndexLock;
     }
 
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
     public ProductResponse create(ProductRequest request) {
+        searchIndexLock.lockCatalogWrite();
         var product = Product.create(new ProductId(UUID.randomUUID()), new ProductName(request.name()),
                 new ProductDescription(request.description()), new Sku(request.sku()));
         products.save(product);
@@ -79,6 +83,7 @@ public class ProductApplicationService {
 
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
     public ProductResponse update(UUID id, UpdateProductRequest request) {
+        searchIndexLock.lockCatalogWrite();
         var product = findProduct(id);
         product.rename(new ProductName(request.name()));
         product.updateDescription(new ProductDescription(request.description()));
@@ -89,6 +94,7 @@ public class ProductApplicationService {
 
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
     public ProductResponse setActive(UUID id, boolean active) {
+        searchIndexLock.lockCatalogWrite();
         var product = findProduct(id);
         if (active != product.isActive()) {
             if (active) product.activate();
@@ -101,6 +107,7 @@ public class ProductApplicationService {
 
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
     public ProductResponse updateCatalogMetadata(UUID id, CatalogMetadataRequest request) {
+        searchIndexLock.lockCatalogWrite();
         var product = findProduct(id);
         BrandId brandId = request.brandId() == null ? null : new BrandId(request.brandId());
         if (brandId != null && brands.findById(brandId).isEmpty()) throw new CatalogNotFoundException("Brand not found: " + brandId.value());

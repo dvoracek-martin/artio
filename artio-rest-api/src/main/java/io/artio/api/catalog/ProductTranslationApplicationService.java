@@ -17,15 +17,18 @@ public class ProductTranslationApplicationService {
     private final JdbcTemplate jdbc;
     private final ProductApplicationService products;
     private final ObjectProvider<io.artio.catalog.ports.ProductSearch> search;
+    private final CatalogSearchIndexLock searchIndexLock;
 
     public ProductTranslationApplicationService(JdbcTemplate jdbc, ProductApplicationService products,
-            ObjectProvider<io.artio.catalog.ports.ProductSearch> search) {
+            ObjectProvider<io.artio.catalog.ports.ProductSearch> search, CatalogSearchIndexLock searchIndexLock) {
         this.jdbc = jdbc;
         this.products = products;
         this.search = search;
+        this.searchIndexLock = searchIndexLock;
     }
 
     public TranslationView upsert(UUID productId, String locale, TranslationRequest request) {
+        searchIndexLock.lockCatalogWrite();
         products.findById(productId);
         var content = new LocalizedProductContent(new LocaleCode(locale), request.name(), request.description());
         jdbc.update("""

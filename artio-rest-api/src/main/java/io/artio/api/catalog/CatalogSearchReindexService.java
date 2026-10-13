@@ -16,20 +16,23 @@ public class CatalogSearchReindexService {
     private final ProductRepository products;
     private final ObjectProvider<ProductSearch> searchProvider;
     private final JdbcTemplate jdbc;
+    private final CatalogSearchIndexLock searchIndexLock;
 
     public CatalogSearchReindexService(ProductRepository products,
-            ObjectProvider<ProductSearch> searchProvider, JdbcTemplate jdbc) {
+            ObjectProvider<ProductSearch> searchProvider, JdbcTemplate jdbc, CatalogSearchIndexLock searchIndexLock) {
         this.products = products;
         this.searchProvider = searchProvider;
         this.jdbc = jdbc;
+        this.searchIndexLock = searchIndexLock;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ReindexResult reindex() {
         ProductSearch search = searchProvider.getIfAvailable();
         if (search == null) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "Product search is not enabled");
 
+        searchIndexLock.lockFullRebuild();
         if (search instanceof RebuildableProductSearch rebuildable) {
             return rebuildable.rebuild(this::indexCatalog);
         }
