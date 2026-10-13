@@ -117,6 +117,8 @@ services:
       ARTIO_JWT_SECRET: "${ARTIO_JWT_SECRET:?Set ARTIO_JWT_SECRET in .env}"
       ARTIO_ENCRYPTION_KEY: "${ARTIO_ENCRYPTION_KEY:?Set ARTIO_ENCRYPTION_KEY in .env}"
       ARTIO_EXTENSION_TRUSTED_REGISTRIES: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-}
+      ARTIO_EXTENSION_DOCKER_ENABLED: ${ARTIO_EXTENSION_DOCKER_ENABLED:-false}
+      ARTIO_EXTENSION_DOCKER_NETWORK: artio-extensions
       ARTIO_INVENTORY_RESERVATION_TTL: ${ARTIO_INVENTORY_RESERVATION_TTL:-PT30M}
       ARTIO_INVENTORY_EXPIRY_INTERVAL_MS: ${ARTIO_INVENTORY_EXPIRY_INTERVAL_MS:-60000}
       ARTIO_ALLOWED_ORIGINS: ${ARTIO_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4201}
@@ -139,6 +141,9 @@ services:
       KAFKA_BROKERS: kafka:9092
     ports:
       - "8080:8080"
+    networks:
+      - default
+      - extensions
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,3 +187,9 @@ volumes:
   artio-redis-data:
   artio-prometheus-data:
   artio-grafana-data:
+
+networks:
+  default: {}
+  extensions:
+    name: artio-extensions
+    internal: true

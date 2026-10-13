@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -39,17 +40,20 @@ public class ExtensionManagementController {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final String coreVersion;
+    private final ObjectProvider<DockerExtensionRuntime> dockerRuntime;
 
     public ExtensionManagementController(PluginManifestValidator manifestValidator,
             PluginConfigurationValidator configurationValidator, EncryptionService encryption,
             JdbcTemplate jdbc, ObjectMapper mapper,
-            @Value("${artio.extensions.core-version:0.1.0}") String coreVersion) {
+            @Value("${artio.extensions.core-version:0.1.0}") String coreVersion,
+            ObjectProvider<DockerExtensionRuntime> dockerRuntime) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
         this.encryption = encryption;
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.coreVersion = coreVersion;
+        this.dockerRuntime = dockerRuntime;
     }
 
     @PostMapping("/validate")
@@ -88,10 +92,58 @@ public class ExtensionManagementController {
         return view(row);
     }
 
+    @PostMapping("/{pluginId}/install")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> install(@PathVariable String pluginId, JwtAuthenticationToken actor) {
+        PluginRow row = findPlugin(pluginId);
+        if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED").contains(row.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be configured or stopped before installation"));
+        }
+        List<String> errors = manifestValidator.validate(row.manifest(), coreVersion, registeredPluginIds());
+        if (!errors.isEmpty()) return ResponseEntity.badRequest().body(new ManifestValidationResponse(false, coreVersion, errors));
+        runtime().install(row.manifest());
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", pluginId);
+        audit(pluginId, actor, "INSTALL", Map.of("image", row.manifest().image()));
+        return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "INSTALLED"));
+    }
+
+    @PostMapping("/{pluginId}/enable")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> enable(@PathVariable String pluginId, JwtAuthenticationToken actor) {
+        PluginRow row = findPlugin(pluginId);
+        if (!Set.of("INSTALLED", "DISABLED").contains(row.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be installed and stopped before enabling"));
+        }
+        runtime().enable(row.manifest());
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED',updated_at=now() WHERE plugin_id=?", pluginId);
+        audit(pluginId, actor, "ENABLE", Map.of("image", row.manifest().image()));
+        return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "ENABLED"));
+    }
+
+    @PostMapping("/{pluginId}/disable")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> disable(@PathVariable String pluginId, JwtAuthenticationToken actor) {
+        findPlugin(pluginId);
+        runtime().disable(pluginId);
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state='DISABLED',updated_at=now() WHERE plugin_id=?", pluginId);
+        audit(pluginId, actor, "DISABLE", Map.of());
+        return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "DISABLED"));
+    }
+
+    @GetMapping("/{pluginId}/health")
+    @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public DockerExtensionRuntime.RuntimeHealth health(@PathVariable String pluginId) {
+        PluginRow row = findPlugin(pluginId);
+        return runtime().health(pluginId, row.manifest().healthPath());
+    }
+
     @PutMapping("/{pluginId}/configuration")
     public ResponseEntity<?> saveConfiguration(@PathVariable String pluginId, @RequestBody Map<String, Object> submitted,
                                                JwtAuthenticationToken actor) {
         PluginRow row = findPlugin(pluginId);
+        if ("ENABLED".equals(row.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the plugin before changing its configuration"));
+        }
         Map<String, String> encrypted = row.encryptedSecrets();
         var validation = configurationValidator.validate(row.manifest(), submitted, encrypted.keySet());
         if (!validation.valid()) return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(validation.errors()));
@@ -147,6 +199,13 @@ public class ExtensionManagementController {
     private void audit(String pluginId, JwtAuthenticationToken actor, String action, Map<String, Object> details) {
         jdbc.update("INSERT INTO extension_audit_events(id,plugin_id,actor_user_id,action,details) VALUES (?,?,?, ?,?::jsonb)",
                 UUID.randomUUID(), pluginId, UUID.fromString(actor.getToken().getSubject()), action, write(details));
+    }
+
+    private DockerExtensionRuntime runtime() {
+        DockerExtensionRuntime runtime = dockerRuntime.getIfAvailable();
+        if (runtime == null) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "Docker extension runtime is disabled");
+        return runtime;
     }
 
     private String write(Object value) {
