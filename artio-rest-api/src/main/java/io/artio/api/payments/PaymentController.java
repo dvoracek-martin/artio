@@ -24,6 +24,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/payments")
@@ -74,16 +75,18 @@ public class PaymentController {
 
     @PostMapping(value="/stripe/webhook", consumes=MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.OK)
+    @Transactional
     public Map<String,String> webhook(@RequestHeader(value="Stripe-Signature",required=false) String signature,@RequestBody String body) {
         if(webhookSecret.isBlank()||!verifySignature(body,signature)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid webhook signature");
         try {
             JsonNode event=mapper.readTree(body); String eventType=event.path("type").asText();
             JsonNode session=event.path("data").path("object"); String sessionId=session.path("id").asText(); String paymentStatus=session.path("payment_status").asText();
             if("checkout.session.expired".equals(eventType)){
+                UUID orderId=lockOrderForSession(sessionId);
+                if(orderId==null) return Map.of("status","ignored");
                 jdbc.update("UPDATE payments SET status='FAILED',updated_at=now() WHERE provider_reference=? AND status='PENDING'",sessionId);
-                var pendingOrder=jdbc.query("SELECT order_id FROM payments p WHERE p.provider_reference=? AND NOT EXISTS (SELECT 1 FROM payments later WHERE later.order_id=p.order_id AND later.status='PENDING')",(rs,n)->rs.getObject(1,UUID.class),sessionId);
-                if(!pendingOrder.isEmpty()){
-                    UUID orderId=pendingOrder.getFirst();jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'",orderId);
+                boolean hasPendingPayment=Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payments WHERE order_id=? AND status='PENDING')",Boolean.class,orderId));
+                if(!hasPendingPayment && jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'",orderId)>0){
                     for(var reservation:inventory.reservationsByOrder(orderId))if(reservation.state()==io.artio.inventory.ReservationState.RESERVED)inventory.release(reservation.id());
                     orderUpdates.publish(orderId);
                 }
@@ -91,13 +94,26 @@ public class PaymentController {
             }
             if(!"checkout.session.completed".equals(eventType)) return Map.of("status","ignored");
             if(!"paid".equals(paymentStatus)) return Map.of("status","pending");
-            jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now() WHERE provider_reference=? AND status<>'CAPTURED'",sessionId);
-            jdbc.update("UPDATE orders SET status='PAID' WHERE id=(SELECT order_id FROM payments WHERE provider_reference=?) AND status='PENDING'",sessionId);
-            jdbc.query("SELECT order_id FROM payments WHERE provider_reference=?",rs->{if(rs.next())orderUpdates.publish(rs.getObject(1,UUID.class));return null;},sessionId);
+            UUID orderId=lockOrderForSession(sessionId);
+            if(orderId==null) return Map.of("status","ignored");
+            String orderStatus=jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId);
+            if("CANCELLED".equals(orderStatus)) return Map.of("status","cancelled");
+            if(!"PENDING".equals(orderStatus)&&!"PAID".equals(orderStatus)) return Map.of("status","order_not_payable");
+            jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now() WHERE provider_reference=? AND status IN ('PENDING','CAPTURED')",sessionId);
+            String persistedPaymentStatus=jdbc.queryForObject("SELECT status FROM payments WHERE provider_reference=?",String.class,sessionId);
+            if(!"CAPTURED".equals(persistedPaymentStatus)) return Map.of("status","payment_not_payable");
+            jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'",orderId);
+            orderUpdates.publish(orderId);
             jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM payments p JOIN orders o ON o.id=p.order_id JOIN order_items oi ON oi.order_id=o.id WHERE p.provider_reference=? AND o.status='PAID' ON CONFLICT DO NOTHING",sessionId);
             jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||order_id,false,now() FROM payments WHERE provider_reference=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||payments.order_id)",UUID.randomUUID(),sessionId);
             return Map.of("status","processed");
         } catch(Exception e) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid webhook payload"); }
+    }
+
+    private UUID lockOrderForSession(String sessionId) {
+        var orders=jdbc.query("SELECT o.id FROM orders o JOIN payments p ON p.order_id=o.id WHERE p.provider_reference=? FOR UPDATE OF o",
+                (rs,row)->rs.getObject(1,UUID.class),sessionId);
+        return orders.isEmpty()?null:orders.getFirst();
     }
 
     @PostMapping("/{paymentId}/refund")

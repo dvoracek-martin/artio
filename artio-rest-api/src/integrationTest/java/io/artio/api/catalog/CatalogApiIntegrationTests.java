@@ -8,6 +8,10 @@ import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -55,6 +59,9 @@ class CatalogApiIntegrationTests {
     private io.artio.api.inventory.InventoryApplicationService inventory;
 
     @Autowired
+    private io.artio.api.inventory.ReservationExpiryScheduler reservationExpiryScheduler;
+
+    @Autowired
     private io.artio.api.security.EncryptionService encryption;
 
     private String adminToken;
@@ -69,6 +76,7 @@ class CatalogApiIntegrationTests {
         registry.add("artio.extensions.trusted-registries", () -> "ghcr.io");
         registry.add("artio.inventory.expiry-interval-ms", () -> "3600000");
         registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
+        registry.add("artio.payments.stripe-webhook-secret", () -> "whsec_integration_test_secret");
     }
 
     @BeforeEach
@@ -264,6 +272,89 @@ class CatalogApiIntegrationTests {
                     assertThat(stock.reserved()).isEqualByComparingTo("0");
                     assertThat(stock.available()).isEqualByComparingTo("5");
                 });
+    }
+
+    @Test
+    void expiryJobCancelsUnpaidOrdersOnlyAfterEveryReservationHasExpired() {
+        var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                        "CANCEL-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Cancellation warehouse", "CH-ZH"),
+                io.artio.api.inventory.InventoryApplicationService.WarehouseView.class);
+        UUID warehouseId = warehouse.getBody().id();
+        UUID sellableId = UUID.randomUUID();
+        adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(BigDecimal.ONE),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouseId, sellableId);
+
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID unpaidOrderId = insertPendingOrder(userId);
+        var reservation = inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                unpaidOrderId, warehouseId, sellableId, BigDecimal.ONE));
+        jdbc.update("UPDATE inventory_reservation SET expires_at=now()-interval '1 second' WHERE id=?", reservation.id());
+        UUID paymentId = UUID.randomUUID();
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','STRIPE','PENDING',?,now(),now())",
+                paymentId, unpaidOrderId, userId, "cs_expired_" + paymentId);
+
+        reservationExpiryScheduler.releaseExpiredReservations();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, unpaidOrderId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
+        assertThat(inventory.reservationsByOrder(unpaidOrderId)).singleElement()
+                .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
+                .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
+    }
+
+    @Test
+    void signedStripeExpiryWebhookCancelsOrderAndFailsItsPayment() throws Exception {
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID orderId = insertPendingOrder(userId);
+        UUID paymentId = UUID.randomUUID();
+        String sessionId = "cs_expired_" + paymentId;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','STRIPE','PENDING',?,now(),now())",
+                paymentId, orderId, userId, sessionId);
+        UUID secondPaymentId = UUID.randomUUID();
+        String secondSessionId = "cs_second_" + secondPaymentId;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','STRIPE','PENDING',?,now(),now())",
+                secondPaymentId, orderId, userId, secondSessionId);
+
+        var expired = signedStripeWebhook("checkout.session.expired", sessionId, "unpaid");
+        assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
+
+        var lateSuccess = signedStripeWebhook("checkout.session.completed", sessionId, "paid");
+        assertThat(lateSuccess.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PENDING");
+
+        signedStripeWebhook("checkout.session.expired", secondSessionId, "unpaid");
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
+    }
+
+    private ResponseEntity<String> signedStripeWebhook(String type, String sessionId, String paymentStatus) throws Exception {
+        String body = "{\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
+                + "\",\"payment_status\":\"" + paymentStatus + "\"}}}";
+        String timestamp = Long.toString(java.time.Instant.now().getEpochSecond());
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec("whsec_integration_test_secret".getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        String signature = HexFormat.of().formatHex(mac.doFinal((timestamp + "." + body).getBytes(StandardCharsets.UTF_8)));
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        headers.set("Stripe-Signature", "t=" + timestamp + ",v1=" + signature);
+        return http.exchange("/api/v1/payments/stripe/webhook", HttpMethod.POST,
+                new HttpEntity<>(body, headers), String.class);
+    }
+
+    private UUID insertPendingOrder(UUID userId) {
+        UUID orderId = UUID.randomUUID();
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,"
+                        + "shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                        + "VALUES (?,?,'PENDING',1,0,0,1,'USD','Test address','Test address',now(),'US','US','US','{}'::jsonb,?)",
+                orderId, userId, "expiry-test-" + orderId);
+        return orderId;
     }
 
     @Test
