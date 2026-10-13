@@ -8,6 +8,7 @@ import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.HostConfig;
 import io.artio.api.security.EncryptionService;
 import io.artio.extensions.PluginManifest;
+import io.artio.extensions.ExtensionRuntimePort;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
@@ -23,8 +24,8 @@ import org.springframework.stereotype.Component;
 /** Restricted Docker runtime for digest-pinned extensions. The Docker daemon is an administrative trust boundary. */
 @Component
 @ConditionalOnProperty(prefix = "artio.extensions.docker", name = "enabled", havingValue = "true")
-public final class DockerExtensionRuntime {
-    private static final int PORT = 8080;
+public final class DockerExtensionRuntime implements ExtensionRuntimePort {
+    private final int port;
     private static final long MAX_REQUEST_BYTES = 1_048_576;
     private static final long MAX_RESPONSE_BYTES = 1_048_576;
     private final DockerClient docker;
@@ -34,9 +35,11 @@ public final class DockerExtensionRuntime {
 
     public DockerExtensionRuntime(DockerClient docker,
             @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.network:artio-extensions}") String network,
+            @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.port:8080}") int port,
             EncryptionService encryption) {
         this.docker = docker;
         this.network = network;
+        this.port = port;
         this.encryption = encryption;
     }
 
@@ -63,7 +66,7 @@ public final class DockerExtensionRuntime {
         }
         HostConfig host = restrictedHostConfig(network);
         docker.createContainerCmd(manifest.image()).withName(name).withHostConfig(host)
-                .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(PORT))
+                .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(port))
                 .withEnv("ARTIO_EXTENSION_TOKEN=" + encryption.deriveExtensionCredential(manifest.id()), "ARTIO_EXTENSION_API_VERSION=1")
                 .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.managed", "true"))
                 .exec();
@@ -87,91 +90,73 @@ public final class DockerExtensionRuntime {
         }
     }
 
-    public RuntimeHealth health(String pluginId, String healthPath) {
+    @Override
+    public ExtensionRuntimePort.RuntimeHealth health(String pluginId, String healthPath) {
         try {
             InspectContainerResponse container = docker.inspectContainerCmd(containerName(pluginId)).exec();
-            if (!Boolean.TRUE.equals(container.getState().getRunning())) return new RuntimeHealth(false, "STOPPED");
+            if (!Boolean.TRUE.equals(container.getState().getRunning())) return new ExtensionRuntimePort.RuntimeHealth(false, "STOPPED");
             var networks = container.getNetworkSettings().getNetworks();
             var networkInfo = networks == null ? null : networks.get(network);
             String address = networkInfo == null ? null : networkInfo.getIpAddress();
-            if (address == null || address.isBlank()) return new RuntimeHealth(false, "NO_NETWORK_ADDRESS");
-            HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + address + ":" + PORT + safeHealthPath(healthPath)))
+            if (address == null || address.isBlank()) return new ExtensionRuntimePort.RuntimeHealth(false, "NO_NETWORK_ADDRESS");
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + address + ":" + port + safeHealthPath(healthPath)))
                     .timeout(Duration.ofSeconds(5)).GET().build();
             HttpResponse<Void> response = http.send(request, HttpResponse.BodyHandlers.discarding());
-            return new RuntimeHealth(response.statusCode() >= 200 && response.statusCode() < 300,
+            return new ExtensionRuntimePort.RuntimeHealth(response.statusCode() >= 200 && response.statusCode() < 300,
                     "HTTP_" + response.statusCode());
         } catch (NotFoundException missing) {
-            return new RuntimeHealth(false, "NOT_INSTALLED");
+            return new ExtensionRuntimePort.RuntimeHealth(false, "NOT_INSTALLED");
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            return new RuntimeHealth(false, "INTERRUPTED");
+            return new ExtensionRuntimePort.RuntimeHealth(false, "INTERRUPTED");
         } catch (Exception failure) {
-            return new RuntimeHealth(false, "UNAVAILABLE");
+            return new ExtensionRuntimePort.RuntimeHealth(false, "UNAVAILABLE");
         }
     }
 
-    public InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
+    @Override
+    public ExtensionRuntimePort.InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                                    String requestJson, Duration deadline) {
-        validateInvocation(extensionPoint, operation, idempotencyKey, requestJson, deadline);
+        ExtensionRuntimePort.validateInvocation(extensionPoint, operation, idempotencyKey, requestJson, deadline);
         try {
             InspectContainerResponse container = docker.inspectContainerCmd(containerName(pluginId)).exec();
-            if (!Boolean.TRUE.equals(container.getState().getRunning())) throw new ExtensionUnavailableException("Extension is stopped");
+            if (!Boolean.TRUE.equals(container.getState().getRunning())) throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension is stopped");
             var networkInfo = container.getNetworkSettings().getNetworks().get(network);
             String address = networkInfo == null ? null : networkInfo.getIpAddress();
-            if (address == null || address.isBlank()) throw new ExtensionUnavailableException("Extension has no runtime network address");
+            if (address == null || address.isBlank()) throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension has no runtime network address");
             byte[] payload = requestJson.getBytes(StandardCharsets.UTF_8);
             String envelope = "{\"protocolVersion\":1,\"extensionPoint\":\"" + jsonEscape(extensionPoint)
                     + "\",\"operation\":\"" + jsonEscape(operation) + "\",\"idempotencyKey\":\""
                     + jsonEscape(idempotencyKey) + "\",\"payload\":" + requestJson + "}";
             byte[] body = envelope.getBytes(StandardCharsets.UTF_8);
             if (body.length > MAX_REQUEST_BYTES) throw new IllegalArgumentException("Extension invocation exceeds 1 MiB");
-            HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + address + ":" + PORT + "/v1/invoke"))
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + address + ":" + port + "/v1/invoke"))
                     .timeout(deadline).header("Authorization", "Bearer " + encryption.deriveExtensionCredential(pluginId))
                     .header("Content-Type", "application/json").header("X-Artio-Extension-Api", "1")
                     .header("Idempotency-Key", idempotencyKey).POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
             HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (InputStream stream = response.body()) {
                 byte[] responseBody = stream.readNBytes((int) MAX_RESPONSE_BYTES + 1);
-                if (responseBody.length > MAX_RESPONSE_BYTES) throw new ExtensionProtocolException("Extension response exceeds 1 MiB");
+                if (responseBody.length > MAX_RESPONSE_BYTES) throw new ExtensionRuntimePort.ExtensionProtocolException("Extension response exceeds 1 MiB");
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    throw new ExtensionCallException(response.statusCode());
+                    throw new ExtensionRuntimePort.ExtensionCallException(response.statusCode());
                 }
-                return new InvocationResult(response.statusCode(), new String(responseBody, StandardCharsets.UTF_8));
+                return new ExtensionRuntimePort.InvocationResult(response.statusCode(), new String(responseBody, StandardCharsets.UTF_8));
             }
         } catch (NotFoundException missing) {
-            throw new ExtensionUnavailableException("Extension is not installed");
+            throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension is not installed");
         } catch (java.net.http.HttpTimeoutException timeout) {
-            throw new ExtensionTimeoutException("Extension invocation exceeded its deadline");
+            throw new ExtensionRuntimePort.ExtensionTimeoutException("Extension invocation exceeded its deadline");
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            throw new ExtensionUnavailableException("Extension invocation was interrupted");
+            throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension invocation was interrupted");
         } catch (java.io.IOException failure) {
-            throw new ExtensionUnavailableException("Extension could not be reached");
+            throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension could not be reached");
         }
-    }
-
-    static void validateInvocation(String extensionPoint, String operation, String idempotencyKey,
-                                           String requestJson, Duration deadline) {
-        if (extensionPoint == null || !extensionPoint.matches("[a-z][a-z0-9.-]{1,120}\\.v[1-9][0-9]*"))
-            throw new IllegalArgumentException("Extension point must be a versioned identifier");
-        if (operation == null || !operation.matches("[a-z][a-zA-Z0-9_.-]{0,63}"))
-            throw new IllegalArgumentException("Invalid extension operation");
-        try { java.util.UUID.fromString(idempotencyKey); }
-        catch (RuntimeException invalid) { throw new IllegalArgumentException("Idempotency key must be a UUID", invalid); }
-        validateInvocationSize(requestJson == null ? null : requestJson.getBytes(StandardCharsets.UTF_8));
-        if (deadline == null || deadline.compareTo(Duration.ofMillis(100)) < 0 || deadline.compareTo(Duration.ofSeconds(30)) > 0)
-            throw new IllegalArgumentException("Extension deadline must be between 100 ms and 30 s");
     }
 
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    /** Checks request framing limits for the invocation adapter; transport is intentionally a separate API contract. */
-    public static void validateInvocationSize(byte[] request) {
-        if (request == null || request.length == 0 || request.length > MAX_REQUEST_BYTES) {
-            throw new IllegalArgumentException("Extension invocation must be between 1 byte and 1 MiB");
-        }
     }
 
     static String containerName(String pluginId) {
@@ -202,14 +187,4 @@ public final class DockerExtensionRuntime {
         }
     }
 
-    public record RuntimeHealth(boolean healthy, String status) { }
-    public record InvocationResult(int statusCode, String responseJson) { }
-    public static class ExtensionUnavailableException extends RuntimeException { public ExtensionUnavailableException(String message) { super(message); } }
-    public static class ExtensionTimeoutException extends RuntimeException { public ExtensionTimeoutException(String message) { super(message); } }
-    public static class ExtensionProtocolException extends RuntimeException { public ExtensionProtocolException(String message) { super(message); } }
-    public static class ExtensionCallException extends RuntimeException {
-        private final int statusCode;
-        ExtensionCallException(int statusCode) { super("Extension returned an unsuccessful status"); this.statusCode = statusCode; }
-        public int statusCode() { return statusCode; }
-    }
 }

@@ -8,6 +8,7 @@ import io.artio.api.security.EncryptionService;
 import io.artio.extensions.PluginConfigurationValidator;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.PluginManifestValidator;
+import io.artio.extensions.ExtensionRuntimePort;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,13 +42,13 @@ public class ExtensionManagementController {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final String coreVersion;
-    private final ObjectProvider<DockerExtensionRuntime> dockerRuntime;
+    private final ObjectProvider<ExtensionRuntimePort> dockerRuntime;
 
     public ExtensionManagementController(PluginManifestValidator manifestValidator,
             PluginConfigurationValidator configurationValidator, EncryptionService encryption,
             JdbcTemplate jdbc, ObjectMapper mapper,
             @Value("${artio.extensions.core-version:0.1.0}") String coreVersion,
-            ObjectProvider<DockerExtensionRuntime> dockerRuntime) {
+            ObjectProvider<ExtensionRuntimePort> dockerRuntime) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
         this.encryption = encryption;
@@ -133,7 +134,7 @@ public class ExtensionManagementController {
 
     @GetMapping("/{pluginId}/health")
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
-    public DockerExtensionRuntime.RuntimeHealth health(@PathVariable String pluginId) {
+    public ExtensionRuntimePort.RuntimeHealth health(@PathVariable String pluginId) {
         PluginRow row = findPlugin(pluginId);
         return runtime().health(pluginId, row.manifest().healthPath());
     }
@@ -147,7 +148,7 @@ public class ExtensionManagementController {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, "Plugin is not enabled");
         }
         try {
-            DockerExtensionRuntime.validateInvocation(request.extensionPoint(), request.operation(), request.idempotencyKey(),
+            ExtensionRuntimePort.validateInvocation(request.extensionPoint(), request.operation(), request.idempotencyKey(),
                     write(request.payload()), java.time.Duration.ofMillis(request.deadlineMillis()));
         } catch (IllegalArgumentException invalidRequest) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, invalidRequest.getMessage());
@@ -163,11 +164,11 @@ public class ExtensionManagementController {
             audit(pluginId, actor, "INVOKE", Map.of("extensionPoint", request.extensionPoint(),
                     "operation", request.operation(), "statusCode", result.statusCode()));
             return new InvocationResponse(result.statusCode(), response);
-        } catch (DockerExtensionRuntime.ExtensionTimeoutException timeout) {
+        } catch (ExtensionRuntimePort.ExtensionTimeoutException timeout) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "Extension deadline exceeded");
-        } catch (DockerExtensionRuntime.ExtensionCallException | DockerExtensionRuntime.ExtensionProtocolException failure) {
+        } catch (ExtensionRuntimePort.ExtensionCallException | ExtensionRuntimePort.ExtensionProtocolException failure) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_GATEWAY, "Extension returned an invalid or unsuccessful response");
-        } catch (DockerExtensionRuntime.ExtensionUnavailableException unavailable) {
+        } catch (ExtensionRuntimePort.ExtensionUnavailableException unavailable) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Extension is unavailable");
         } catch (JsonProcessingException invalidJson) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_GATEWAY, "Extension response was not valid JSON");
@@ -240,8 +241,8 @@ public class ExtensionManagementController {
                 UUID.randomUUID(), pluginId, UUID.fromString(actor.getToken().getSubject()), action, write(details));
     }
 
-    private DockerExtensionRuntime runtime() {
-        DockerExtensionRuntime runtime = dockerRuntime.getIfAvailable();
+    private ExtensionRuntimePort runtime() {
+        ExtensionRuntimePort runtime = dockerRuntime.getIfAvailable();
         if (runtime == null) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                 "Docker extension runtime is disabled");
         return runtime;
