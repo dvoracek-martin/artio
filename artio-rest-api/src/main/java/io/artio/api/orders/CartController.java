@@ -132,11 +132,11 @@ public class CartController {
         catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Order event could not be serialized",e);}
         jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload) VALUES (?,'ORDER_CREATED','ORDER',?,?::jsonb)",eventId,order.getId().value().toString(),eventPayload);
         String orderNumber=order.getId().value().toString();
-        jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,'Order received',?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
-                UUID.randomUUID(),userId,"ORDER_CREATED","Your order "+orderNumber+" has been received.","order-created:"+orderNumber);
+        var confirmation = io.artio.api.notifications.OrderConfirmationTemplates.confirmation(request.locale(), orderNumber);
+        jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,?,?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
+                UUID.randomUUID(),userId,"ORDER_CREATED",confirmation.subject(),confirmation.body(),"order-created:"+orderNumber);
         jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body) VALUES (?,?,?,?,?,?) ON CONFLICT (event_key) DO NOTHING",
-                UUID.randomUUID(),"order-email:"+orderNumber,userId,order.getId().value(),"Artio order received",
-                "Your order "+orderNumber+" has been received. Thank you for shopping with Artio.");
+                UUID.randomUUID(),"order-email:"+orderNumber,userId,order.getId().value(),confirmation.subject(),confirmation.body());
         jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
         return org.springframework.http.ResponseEntity.status(HttpStatus.CREATED).body(new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null,request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshot));
     }
@@ -163,7 +163,11 @@ public class CartController {
 
     public record AddItemRequest(UUID variantId, BigDecimal quantity, String market, String channel, String jurisdiction) { }
     public record AddBundleRequest(UUID bundleId,Map<String,Set<UUID>> selectedOptions,BigDecimal bundleQuantity,String market,String channel,String jurisdiction){}
-    public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry) { }
+    public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale) {
+        public CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry) {
+            this(shippingAddress, billingAddress, shippingCountry, "en");
+        }
+    }
     public record ItemView(UUID variantId, BigDecimal quantity, BigDecimal unitPrice, String currency,UUID bundleId) { }
     public record CartView(UUID cartId, List<ItemView> items) { }
     public record OrderView(UUID orderId, String status, BigDecimal subtotal, BigDecimal tax, BigDecimal shipping, BigDecimal total, String currency,String trackingNumber,String shippingCountry,String market,String taxJurisdiction,Map<String,Object> taxSnapshot) { }

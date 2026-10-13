@@ -684,7 +684,7 @@ class CatalogApiIntegrationTests {
         var headers = new HttpHeaders();
         headers.setBearerAuth(adminToken);
         headers.set("Idempotency-Key", key);
-        var body = new io.artio.api.orders.CartController.CheckoutRequest("1 Main Street, Zurich", null, "US");
+        var body = new io.artio.api.orders.CartController.CheckoutRequest("1 Main Street, Zurich", null, "US", "de-CH");
         var first = http.exchange("/api/v1/cart/checkout", HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
         assertThat(first.getStatusCode()).withFailMessage("Checkout response: %s", first.getBody()).isEqualTo(HttpStatus.CREATED);
         var firstBody = readOrder(first.getBody());
@@ -700,6 +700,10 @@ class CatalogApiIntegrationTests {
                 firstBody.orderId().toString())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
                 "order-email:" + firstBody.orderId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT subject FROM notification_delivery_outbox WHERE event_key=?", String.class,
+                "order-email:" + firstBody.orderId())).isEqualTo("Bestellung eingegangen");
+        assertThat(jdbc.queryForObject("SELECT body FROM notification_delivery_outbox WHERE event_key=?", String.class,
+                "order-email:" + firstBody.orderId())).contains(firstBody.orderId().toString(), "Vielen Dank");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE dedupe_key=?", Integer.class,
                 "order-created:" + firstBody.orderId())).isEqualTo(1);
 
