@@ -74,3 +74,5 @@ Backoffice bundle localization verification (2026-10-13): .\gradlew.bat :artio-b
 Extension retry verification (2026-10-13): .\gradlew.bat :artio-rest-api:test --tests io.artio.api.extensions.DockerExtensionRuntimeTests exited 0 (8 tests). A local HTTP server returns 503 then 200; runtime retries once and reuses the identical UUID idempotency key. git diff --check exited 0.
 
 Bundle locale fallback verification (2026-10-13): .\gradlew.bat :artio-rest-api:integrationTest --tests io.artio.api.catalog.CatalogApiIntegrationTests.bundleConfiguratorResolvesLocalizedLabelsWithEnglishAndBaseFallback exited 0. The PostgreSQL-backed API test verifies requested German, English fallback for untranslated Italian bundle name, and base fallback for the untranslated Italian option-group label. git diff --check exited 0.
+
+Outbox diagnostic retention-window verification (2026-10-13): .\gradlew.bat :artio-rest-api:integrationTest --tests io.artio.api.catalog.CatalogApiIntegrationTests.outboxDiagnosticsAreAdminOnlyAndExposeAggregateCounts exited 0 after binding the diagnostic count to the configurable receipt-retention period. git diff --check exited 0.
