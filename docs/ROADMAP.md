@@ -5,7 +5,7 @@ This is the canonical phase/task ledger. Detailed baseline is in [REPOSITORY_AUD
 ## Current state
 
 - **Current phase:** 2 — Core/Extension API and Docker plugin lifecycle proof; manifest, persistent registration, schema-backed configuration, encrypted secrets, and audit are implemented. Phases 3, 4, 5, 6 and 7 have also progressed where independent.
-- **Outstanding tasks:** complete the bounded Docker invocation contract, reference-container end-to-end lifecycle, update/rollback, and remaining durable notification/webhook delivery work. Phase 3 search reindex now atomically replaces its index. Hosted-CI status remains a separate operational check.
+- **Outstanding tasks:** complete the runnable reference-container Docker lifecycle proof, retry/credential-rotation/update/rollback, and remaining durable notification/webhook delivery work. The initial bounded invocation contract is implemented. Phase 3 search reindex now atomically replaces its index. Hosted-CI status remains a separate operational check.
 - **Repository state:** `main` is ahead of `origin/main`; all changes remain local and nothing was pushed.
 - **Latest verification:** The most recent focused API unit and PostgreSQL Testcontainers results are recorded immediately below the task ledger heading; an earlier full API run passed 8 unit and 16 integration tests. An asynchronous Kafka producer shutdown warning remains a separate event-delivery test-lifecycle cleanup item.
 
