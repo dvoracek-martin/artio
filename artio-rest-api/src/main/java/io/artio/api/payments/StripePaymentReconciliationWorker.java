@@ -37,12 +37,13 @@ public class StripePaymentReconciliationWorker {
 
     public StripePaymentReconciliationWorker(JdbcTemplate jdbc, InventoryApplicationService inventory,
             OrderUpdatePublisher orderUpdates, ObjectMapper mapper, PlatformTransactionManager transactionManager,
-            @Value("${artio.payments.stripe-secret-key:}") String stripeKey) {
+            RestClient.Builder stripeBuilder, @Value("${artio.payments.stripe-secret-key:}") String stripeKey,
+            @Value("${artio.payments.stripe-api-url:https://api.stripe.com}") String stripeApiUrl) {
         this.jdbc = jdbc;
         this.inventory = inventory;
         this.orderUpdates = orderUpdates;
         this.mapper = mapper;
-        this.stripe = RestClient.create();
+        this.stripe = stripeBuilder.baseUrl(stripeApiUrl).build();
         this.stripeKey = stripeKey;
         this.transactions = new TransactionTemplate(transactionManager);
     }
@@ -73,7 +74,7 @@ public class StripePaymentReconciliationWorker {
     private void reconcile(PaymentSession payment) {
         try {
             Map<?, ?> body = stripe.get()
-                    .uri("https://api.stripe.com/v1/checkout/sessions/{id}", payment.sessionId())
+                    .uri("/v1/checkout/sessions/{id}", payment.sessionId())
                     .headers(headers -> headers.setBearerAuth(stripeKey))
                     .retrieve().body(Map.class);
             JsonNode session = mapper.valueToTree(body);

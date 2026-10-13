@@ -16,6 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterAll;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -38,6 +39,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import io.artio.api.error.ApiError;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.io.IOException;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -45,6 +50,8 @@ import io.artio.api.error.ApiError;
 class CatalogApiIntegrationTests {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    private static final AtomicReference<String> STRIPE_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\"}");
+    private static final HttpServer MOCK_STRIPE = startMockStripe();
 
     @Autowired
     private TestRestTemplate http;
@@ -70,6 +77,9 @@ class CatalogApiIntegrationTests {
     @Autowired
     private io.artio.api.payments.CheckoutFailureCompensation checkoutFailureCompensation;
 
+    @Autowired
+    private io.artio.api.payments.StripePaymentReconciliationWorker stripePaymentReconciliationWorker;
+
     private String adminToken;
     private UUID adminUserId;
 
@@ -85,6 +95,30 @@ class CatalogApiIntegrationTests {
         registry.add("artio.events.outbox-poll-interval-ms", () -> "3600000");
         registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
         registry.add("artio.payments.stripe-webhook-secret", () -> "whsec_integration_test_secret");
+        registry.add("artio.payments.stripe-api-url", () -> "http://127.0.0.1:" + MOCK_STRIPE.getAddress().getPort());
+    }
+
+    private static HttpServer startMockStripe() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/v1/checkout/sessions/", exchange -> {
+                exchange.getRequestBody().readAllBytes();
+                byte[] response = STRIPE_RESPONSE.get().getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, response.length);
+                exchange.getResponseBody().write(response);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
+    }
+
+    @AfterAll
+    static void stopMockStripe() {
+        MOCK_STRIPE.stop(0);
     }
 
     @BeforeEach
@@ -716,6 +750,49 @@ class CatalogApiIntegrationTests {
         assertThat(response.getBody().emailDead()).isGreaterThanOrEqualTo(0);
         assertThat(response.getBody().webhookUnprocessed()).isGreaterThanOrEqualTo(0);
         assertThat(response.getBody().webhookOlderThanRetention()).isEqualTo(oldProcessedReceipts + 1);
+    }
+
+    @Test
+    void reconciliationMarksLostPaidWebhookAsCapturedAndPaid() {
+        UUID orderId = createStaleStripeOrder("cs_reconcile_paid_" + UUID.randomUUID());
+        STRIPE_RESPONSE.set("{\"status\":\"complete\",\"payment_status\":\"paid\"}");
+
+        stripePaymentReconciliationWorker.reconcileDueSessions();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PAID");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("CAPTURED");
+        assertThat(jdbc.queryForObject("SELECT reconciliation_claimed_at IS NULL FROM payments WHERE order_id=?", Boolean.class, orderId)).isTrue();
+    }
+
+    @Test
+    void reconciliationExpiresLostSessionAndReleasesReservations() {
+        UUID orderId = createStaleStripeOrder("cs_reconcile_expired_" + UUID.randomUUID());
+        UUID sellableId = UUID.randomUUID();
+        var warehouse = inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "RECON-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Reconciliation", "CH-ZH"));
+        inventory.receive(warehouse.id(), sellableId, BigDecimal.ONE);
+        var reservation = inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                orderId, warehouse.id(), sellableId, BigDecimal.ONE));
+        STRIPE_RESPONSE.set("{\"status\":\"expired\",\"payment_status\":\"unpaid\"}");
+
+        stripePaymentReconciliationWorker.reconcileDueSessions();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("FAILED");
+        assertThat(inventory.reservationsByOrder(orderId)).singleElement()
+                .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
+                .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
+    }
+
+    private UUID createStaleStripeOrder(String sessionId) {
+        UUID orderId = UUID.randomUUID();
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                        + "VALUES (?,?,'PENDING',12.50,0,0,12.50,'CHF','address','address',now()-interval '45 minutes','CH','CH','CH','{}'::jsonb,?)",
+                orderId, adminUserId, "reconciliation-" + orderId);
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,12.50,'CHF','STRIPE','PENDING',?,now()-interval '45 minutes',now())",
+                UUID.randomUUID(), orderId, adminUserId, sessionId);
+        return orderId;
     }
 
     @Test
