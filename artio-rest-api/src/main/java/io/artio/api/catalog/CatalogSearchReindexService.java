@@ -3,6 +3,7 @@ package io.artio.api.catalog;
 import io.artio.catalog.LocaleCode;
 import io.artio.catalog.ports.ProductRepository;
 import io.artio.catalog.ports.ProductSearch;
+import io.artio.catalog.ports.RebuildableProductSearch;
 import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,6 +30,13 @@ public class CatalogSearchReindexService {
         if (search == null) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "Product search is not enabled");
 
+        if (search instanceof RebuildableProductSearch rebuildable) {
+            return rebuildable.rebuild(this::indexCatalog);
+        }
+        return indexCatalog(search);
+    }
+
+    private ReindexResult indexCatalog(ProductSearch search) {
         int productCount = 0;
         int translationCount = 0;
         for (var product : products.findAll()) {

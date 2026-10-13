@@ -15,16 +15,38 @@ import io.artio.catalog.ProductName;
 import io.artio.catalog.Sku;
 import io.artio.catalog.ports.ProductRepository;
 import io.artio.catalog.ports.ProductSearch;
+import io.artio.catalog.ports.RebuildableProductSearch;
 import java.sql.ResultSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 
 class CatalogSearchReindexServiceTests {
+    @Test
+    void rebuildsThroughGenerationCapableSearchAdapter() {
+        ProductRepository repository = mock(ProductRepository.class);
+        RebuildableProductSearch search = mock(RebuildableProductSearch.class);
+        ObjectProvider<ProductSearch> searchProvider = mock(ObjectProvider.class);
+        when(repository.findAll()).thenReturn(List.of());
+        when(searchProvider.getIfAvailable()).thenReturn(search);
+        when(search.rebuild(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Function<ProductSearch, CatalogSearchReindexService.ReindexResult> replay = invocation.getArgument(0);
+            return replay.apply(mock(ProductSearch.class));
+        });
+
+        var result = new CatalogSearchReindexService(repository, searchProvider, mock(JdbcTemplate.class)).reindex();
+
+        assertThat(result.productsIndexed()).isZero();
+        assertThat(result.translationsIndexed()).isZero();
+        verify(search).rebuild(any());
+    }
+
     @Test
     void indexesProductsAndEveryPersistedLocaleDocument() throws Exception {
         UUID id = UUID.randomUUID();
