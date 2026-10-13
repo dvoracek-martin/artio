@@ -38,7 +38,7 @@ public class StripePaymentReconciliationWorker {
     public StripePaymentReconciliationWorker(JdbcTemplate jdbc, InventoryApplicationService inventory,
             OrderUpdatePublisher orderUpdates, ObjectMapper mapper, PlatformTransactionManager transactionManager,
             RestClient.Builder stripeBuilder, @Value("${artio.payments.stripe-secret-key:}") String stripeKey,
-            @Value("${artio.payments.stripe-api-url:https://api.stripe.com}") String stripeApiUrl) {
+            @Value("${artio.payments.reconciliation-api-url:https://api.stripe.com}") String stripeApiUrl) {
         this.jdbc = jdbc;
         this.inventory = inventory;
         this.orderUpdates = orderUpdates;

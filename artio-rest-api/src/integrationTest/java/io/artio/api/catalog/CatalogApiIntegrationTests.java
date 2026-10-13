@@ -95,7 +95,7 @@ class CatalogApiIntegrationTests {
         registry.add("artio.events.outbox-poll-interval-ms", () -> "3600000");
         registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
         registry.add("artio.payments.stripe-webhook-secret", () -> "whsec_integration_test_secret");
-        registry.add("artio.payments.stripe-api-url", () -> "http://127.0.0.1:" + MOCK_STRIPE.getAddress().getPort());
+        registry.add("artio.payments.reconciliation-api-url", () -> "http://127.0.0.1:" + MOCK_STRIPE.getAddress().getPort());
     }
 
     private static HttpServer startMockStripe() {
