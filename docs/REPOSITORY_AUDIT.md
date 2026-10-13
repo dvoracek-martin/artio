@@ -9,7 +9,7 @@
 
 The project owner closed `P1-02` as **closed – not applicable**: no production or other external data ever existed. V10 was therefore aligned directly to the single-installation product architecture; no legacy database compatibility or preservation migration is required. Tenant runtime context, tenant administration, JWT claims, schema, and tenant-scoped queries are removed. The migration acceptance is a clean V1–V15 PostgreSQL install. The V9-to-V15 data-preservation test was removed because that compatibility is explicitly out of scope.
 
-Latest focused verification in progress/recorded in `ROADMAP.md`: `:artio-rest-api:test :artio-rest-api:integrationTest` is being run against Docker Testcontainers after the schema and runtime changes. Do not interpret the historical audit sections below as current statements when contradicted by this update.
+The API unit and integration tasks passed after the schema/runtime changes; clean install and no-oversell parallel reservations are proven using Docker Testcontainers. The exact commands and the remaining Kafka test teardown log are recorded in `ROADMAP.md`. Do not interpret the historical audit sections below as current statements when contradicted by this update.
 
 ## 1. Repository identity and baseline
 

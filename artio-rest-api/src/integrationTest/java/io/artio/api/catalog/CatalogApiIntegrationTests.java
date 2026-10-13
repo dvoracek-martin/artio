@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 import java.math.BigDecimal;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -262,6 +264,41 @@ class CatalogApiIntegrationTests {
                     assertThat(stock.reserved()).isEqualByComparingTo("0");
                     assertThat(stock.available()).isEqualByComparingTo("5");
                 });
+    }
+
+    @Test
+    void concurrentReservationsCannotOversellSharedStock() throws Exception {
+        var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                        "CONC-" + UUID.randomUUID().toString().substring(0, 8), "Concurrency warehouse", "CH-ZH"),
+                io.artio.api.inventory.InventoryApplicationService.WarehouseView.class);
+        assertThat(warehouse.getBody()).isNotNull();
+        UUID warehouseId = warehouse.getBody().id();
+        UUID sellableId = UUID.randomUUID();
+        adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(new BigDecimal("5")),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouseId, sellableId);
+
+        var first = CompletableFuture.supplyAsync(() -> reserveIfAvailable(UUID.randomUUID(), warehouseId, sellableId));
+        var second = CompletableFuture.supplyAsync(() -> reserveIfAvailable(UUID.randomUUID(), warehouseId, sellableId));
+        CompletableFuture.allOf(first, second).get(10, TimeUnit.SECONDS);
+
+        assertThat(List.of(first.join(), second.join())).containsExactlyInAnyOrder(true, false);
+        assertThat(inventory.stockBySellable(sellableId)).singleElement().satisfies(stock -> {
+            assertThat(stock.onHand()).isEqualByComparingTo("5");
+            assertThat(stock.reserved()).isEqualByComparingTo("3");
+            assertThat(stock.available()).isEqualByComparingTo("2");
+        });
+    }
+
+    private boolean reserveIfAvailable(UUID orderId, UUID warehouseId, UUID sellableId) {
+        try {
+            inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                    orderId, warehouseId, sellableId, new BigDecimal("3")));
+            return true;
+        } catch (IllegalStateException insufficientStock) {
+            return false;
+        }
     }
 
     @Test
