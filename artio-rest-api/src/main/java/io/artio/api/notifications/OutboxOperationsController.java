@@ -29,7 +29,7 @@ public class OutboxOperationsController {
                     (SELECT count(*) FROM notification_delivery_outbox WHERE status='PROCESSING' AND locked_at < now()-interval '5 minutes') AS email_stale_claims,
                     (SELECT count(*) FROM notification_delivery_outbox WHERE status='DEAD') AS email_dead,
                     (SELECT count(*) FROM payment_webhook_receipts WHERE processed_at IS NULL) AS webhook_unprocessed,
-                    (SELECT count(*) FROM payment_webhook_receipts WHERE received_at < now() - (? * interval '1 day')) AS webhook_older_than_retention
+                    (SELECT count(*) FROM payment_webhook_receipts WHERE processed_at IS NOT NULL AND processed_at < now() - (? * interval '1 day')) AS webhook_older_than_retention
                 """, (rs, row) -> new OutboxSummary(rs.getLong("event_pending"), rs.getLong("event_stale_claims"),
                 rs.getLong("email_pending"), rs.getLong("email_stale_claims"), rs.getLong("email_dead"),
                 rs.getLong("webhook_unprocessed"), rs.getLong("webhook_older_than_retention")), webhookReceiptRetentionDays);

@@ -699,6 +699,10 @@ class CatalogApiIntegrationTests {
 
     @Test
     void outboxDiagnosticsAreAdminOnlyAndExposeAggregateCounts() {
+        long oldProcessedReceipts = jdbc.queryForObject("SELECT count(*) FROM payment_webhook_receipts WHERE processed_at IS NOT NULL AND processed_at < now()-interval '90 days'", Long.class);
+        String eventPrefix = "diagnostic-" + UUID.randomUUID();
+        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('STRIPE',?,'completed',now()-interval '120 days',now()-interval '5 days')", eventPrefix + "-recently-processed");
+        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('STRIPE',?,'completed',now()-interval '1 day',now()-interval '120 days')", eventPrefix + "-old-processed");
         var anonymous = http.getForEntity("/api/v1/admin/operations/outbox",
                 io.artio.api.notifications.OutboxOperationsController.OutboxSummary.class);
         assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -711,6 +715,7 @@ class CatalogApiIntegrationTests {
         assertThat(response.getBody().eventPending()).isGreaterThanOrEqualTo(0);
         assertThat(response.getBody().emailDead()).isGreaterThanOrEqualTo(0);
         assertThat(response.getBody().webhookUnprocessed()).isGreaterThanOrEqualTo(0);
+        assertThat(response.getBody().webhookOlderThanRetention()).isEqualTo(oldProcessedReceipts + 1);
     }
 
     @Test

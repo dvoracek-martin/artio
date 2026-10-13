@@ -78,3 +78,5 @@ Bundle locale fallback verification (2026-10-13): .\gradlew.bat :artio-rest-api:
 Outbox diagnostic retention-window verification (2026-10-13): .\gradlew.bat :artio-rest-api:integrationTest --tests io.artio.api.catalog.CatalogApiIntegrationTests.outboxDiagnosticsAreAdminOnlyAndExposeAggregateCounts exited 0 after binding the diagnostic count to the configurable receipt-retention period. git diff --check exited 0.
 
 Backoffice outbox diagnostics verification (2026-10-13): .\gradlew.bat :artio-backoffice:npmBuild exited 0 after adding the Operations screen for event/email queues, stale claims, dead email and webhook-retention counts. git diff --check exited 0.
+
+Outbox retention metric accuracy verification (2026-10-13): .\gradlew.bat :artio-rest-api:integrationTest --tests io.artio.api.catalog.CatalogApiIntegrationTests.outboxDiagnosticsAreAdminOnlyAndExposeAggregateCounts exited 0. The test distinguishes receipt age from processing age and confirms that retention diagnostics count processed_at, matching the cleanup worker. git diff --check exited 0.
