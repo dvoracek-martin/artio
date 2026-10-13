@@ -51,6 +51,7 @@ public class EnterpriseFeaturesController {
     public Map<String,String> eraseAccount(JwtAuthenticationToken auth){UUID id=user(auth);String anonymous="deleted+"+UUID.randomUUID()+"@privacy.artio.invalid";String randomPassword=Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes(48));
         jdbc.update("DELETE FROM carts WHERE user_id=?",id);
         jdbc.update("UPDATE orders SET shipping_address='[redacted]',billing_address='[redacted]' WHERE user_id=?",id);
+        jdbc.update("UPDATE notification_delivery_outbox SET status='DEAD',locked_at=NULL,last_error_class='ACCOUNT_ERASED',subject='',body='' WHERE user_id=? AND status IN ('PENDING','PROCESSING')",id);
         jdbc.update("UPDATE users SET email=?,password_hash=?,first_name='Deleted',last_name='Customer',active=FALSE,email_verified=FALSE,permissions='' WHERE id=?",anonymous,new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().encode(randomPassword),id);
         return Map.of("status","ANONYMIZED","message","Account access is disabled. Legally required order records remain with personal address fields redacted.");}
 

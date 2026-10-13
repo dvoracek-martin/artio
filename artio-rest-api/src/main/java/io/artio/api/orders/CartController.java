@@ -22,7 +22,6 @@ import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -32,13 +31,12 @@ import org.springframework.web.bind.annotation.*;
 public class CartController {
     private final JdbcTemplate jdbc;
     private final PricingApplicationService pricing;
-    private final ApplicationEventPublisher events;
     private final InventoryApplicationService inventory;
     private final BundleApplicationService bundles;
     private final ObjectMapper mapper;
     private final BigDecimal shippingCost;
     private final String stripeKey;
-    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, ApplicationEventPublisher events, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey) { this.jdbc = jdbc; this.pricing = pricing; this.events=events; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey; }
+    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey; }
 
     @GetMapping
     public CartView get(JwtAuthenticationToken auth) {
@@ -133,7 +131,13 @@ public class CartController {
         try{eventPayload=mapper.writeValueAsString(Map.of("eventId",eventId,"type","ORDER_CREATED","occurredAt",Instant.now(),"orderId",order.getId().value(),"userId",userId));}
         catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Order event could not be serialized",e);}
         jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload) VALUES (?,'ORDER_CREATED','ORDER',?,?::jsonb)",eventId,order.getId().value().toString(),eventPayload);
-        events.publishEvent(new io.artio.orders.OrderCreated(order.getId(),userId));jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
+        String orderNumber=order.getId().value().toString();
+        jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,'Order received',?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
+                UUID.randomUUID(),userId,"ORDER_CREATED","Your order "+orderNumber+" has been received.","order-created:"+orderNumber);
+        jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body) VALUES (?,?,?,?,?,?) ON CONFLICT (event_key) DO NOTHING",
+                UUID.randomUUID(),"order-email:"+orderNumber,userId,order.getId().value(),"Artio order received",
+                "Your order "+orderNumber+" has been received. Thank you for shopping with Artio.");
+        jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
         return org.springframework.http.ResponseEntity.status(HttpStatus.CREATED).body(new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null,request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshot));
     }
 

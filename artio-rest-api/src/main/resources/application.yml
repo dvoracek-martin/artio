@@ -44,6 +44,10 @@ management:
         enabled: true
 artio:
   mail-from: ${ARTIO_MAIL_FROM:no-reply@artio.local}
+  notifications:
+    email:
+      enabled: ${ARTIO_EMAIL_ENABLED:false}
+      poll-interval-ms: ${ARTIO_EMAIL_POLL_INTERVAL_MS:30000}
   security:
     jwt-secret: ${ARTIO_JWT_SECRET}
     encryption-key: ${ARTIO_ENCRYPTION_KEY}
