@@ -686,9 +686,12 @@ class CatalogApiIntegrationTests {
         assertThat(german.optionGroups()).singleElement().extracting(
                 io.artio.api.bundles.BundleLocalizationApplicationService.LocalizedOptionGroup::localizedName)
                 .isEqualTo("Komponenten auswählen");
+        adminExchange("/api/bundles/{id}/translations/{locale}", HttpMethod.PUT,
+                new io.artio.api.bundles.BundleLocalizationApplicationService.TranslationRequest("Bundle contents", Map.of()),
+                io.artio.api.bundles.BundleLocalizationApplicationService.TranslationView.class, bundleId, "en");
         var italian = http.getForObject("/api/v1/bundles/{id}/localized?locale=it",
                 io.artio.api.bundles.BundleLocalizationApplicationService.LocalizedBundleView.class, bundleId);
-        assertThat(italian.localizedName()).isEqualTo("Choose your items");
+        assertThat(italian.localizedName()).isEqualTo("Bundle contents");
         assertThat(italian.optionGroups()).singleElement().extracting(
                 io.artio.api.bundles.BundleLocalizationApplicationService.LocalizedOptionGroup::localizedName)
                 .isEqualTo("Select components");
