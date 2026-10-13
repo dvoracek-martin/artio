@@ -41,6 +41,7 @@ services:
     environment:
       discovery.type: single-node
       plugins.security.disabled: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD:?Set ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD in .env}"
       OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
     ports:
       - "9200:9200"

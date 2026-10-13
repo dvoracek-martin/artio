@@ -155,7 +155,8 @@ public class OpenSearchProductSearch implements RebuildableProductSearch {
 
     private List<ProductSearchResult> searchLocale(String query, int limit, String locale) {
         JsonNode response = client.post().uri("/{index}/_search", INDEX)
-                .body(new SearchRequest(new BoolQuery(new MultiMatch(query), new TermClause(java.util.Map.of("locale", locale))), Math.max(1, Math.min(limit, 100))))
+                .body(new SearchRequest(new BoolQuery(new BoolClause(new MultiMatch(query),
+                        new TermClause(java.util.Map.of("locale", locale)))), Math.max(1, Math.min(limit, 100))))
                 .retrieve().body(JsonNode.class);
         if (response == null) return List.of();
         JsonNode hits = response.path("hits").path("hits");
@@ -173,7 +174,8 @@ public class OpenSearchProductSearch implements RebuildableProductSearch {
                                    UUID brandId, List<UUID> categoryIds, java.util.Map<String, String> attributes,
                                    String attributeText, String locale) {}
     private record SearchRequest(BoolQuery query, int size) {}
-    private record BoolQuery(MultiMatch must, TermClause filter) {}
+    private record BoolQuery(BoolClause bool) {}
+    private record BoolClause(MultiMatch must, TermClause filter) {}
     private record TermClause(java.util.Map<String, String> term) {}
     private record MultiMatch(MultiMatchQuery multi_match) { MultiMatch(String text) { this(new MultiMatchQuery(text, List.of("name^3", "sku^2", "description", "attributeText"))); } }
     private record MultiMatchQuery(String query, List<String> fields) {}
