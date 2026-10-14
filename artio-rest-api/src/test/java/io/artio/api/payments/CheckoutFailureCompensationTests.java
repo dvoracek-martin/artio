@@ -28,8 +28,9 @@ class CheckoutFailureCompensationTests {
         InventoryApplicationService inventory = mock(InventoryApplicationService.class);
         var reservation = new InventoryApplicationService.ReservationView(reservationId, orderId,
                 UUID.randomUUID(), UUID.randomUUID(), BigDecimal.ONE, ReservationState.RESERVED, Instant.now());
-        when(jdbc.query(anyString(), any(RowMapper.class), eq(orderId))).thenReturn(List.of(
-                new CheckoutFailureCompensation.OrderState("PENDING", UUID.randomUUID())));
+        when(jdbc.query(anyString(), any(RowMapper.class), eq(orderId))).thenAnswer(invocation ->
+                invocation.<String>getArgument(0).startsWith("SELECT status,user_id")
+                        ? List.of(new CheckoutFailureCompensation.OrderState("PENDING", UUID.randomUUID())) : List.of());
         when(jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'", orderId)).thenReturn(1);
         when(inventory.reservationsByOrder(orderId)).thenReturn(List.of(reservation));
 
@@ -45,8 +46,9 @@ class CheckoutFailureCompensationTests {
         UUID orderId = UUID.randomUUID();
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         InventoryApplicationService inventory = mock(InventoryApplicationService.class);
-        when(jdbc.query(anyString(), any(RowMapper.class), eq(orderId))).thenReturn(List.of(
-                new CheckoutFailureCompensation.OrderState("PAID", UUID.randomUUID())));
+        when(jdbc.query(anyString(), any(RowMapper.class), eq(orderId))).thenAnswer(invocation ->
+                invocation.<String>getArgument(0).startsWith("SELECT status,user_id")
+                        ? List.of(new CheckoutFailureCompensation.OrderState("PAID", UUID.randomUUID())) : List.of());
 
         new CheckoutFailureCompensation(jdbc, inventory, mock(OrderUpdatePublisher.class))
                 .cancelRejectedCheckout(orderId);

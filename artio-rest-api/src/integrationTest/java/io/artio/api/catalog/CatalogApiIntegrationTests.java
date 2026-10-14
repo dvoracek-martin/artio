@@ -873,8 +873,15 @@ class CatalogApiIntegrationTests {
         var reservation = inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
                 orderId, warehouseId, sellableId, BigDecimal.ONE));
         jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
-                        + "VALUES (?,?,'PENDING',1,0,0,1,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
+                        + "VALUES (?,?,'PENDING',6,0,0,6,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
                 orderId, adminUserId, "compensation-" + orderId);
+        UUID giftCardId = UUID.randomUUID();
+        jdbc.update("INSERT INTO gift_cards(id,code_hash,initial_balance,balance,currency,active) VALUES (?,?,5,0,'CHF',false)",
+                giftCardId, "a".repeat(64));
+        UUID giftCardPaymentId = UUID.randomUUID();
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,gift_card_id,created_at,updated_at) "
+                        + "VALUES (?,?,?,5,'CHF','GIFT_CARD','CAPTURED',?,?,now(),now())",
+                giftCardPaymentId, orderId, adminUserId, "giftcard-compensation-" + orderId, giftCardId);
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
                         + "VALUES (?,?,?,1,'CHF','EXTENSION','PENDING',?,now(),now())",
                 UUID.randomUUID(), orderId, adminUserId, "cs_compensation_" + orderId);
@@ -882,7 +889,13 @@ class CatalogApiIntegrationTests {
         checkoutFailureCompensation.cancelRejectedCheckout(orderId);
 
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
-        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=? AND method='EXTENSION'", String.class, orderId)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT balance FROM gift_cards WHERE id=?", BigDecimal.class, giftCardId)).isEqualByComparingTo("5.00");
+        assertThat(jdbc.queryForObject("SELECT active FROM gift_cards WHERE id=?", Boolean.class, giftCardId)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, giftCardPaymentId)).isEqualTo("REFUNDED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gift_card_transactions WHERE payment_refund_id IN " +
+                "(SELECT id FROM payment_refunds WHERE payment_id=?) AND kind='REFUND'", Integer.class, giftCardPaymentId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM payment_refunds WHERE payment_id=?", String.class, giftCardPaymentId)).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM order_timeline_events WHERE order_id=? AND event_type='ORDER_CANCELLED' AND customer_visible", Integer.class, orderId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CANCELLED'", Integer.class, orderId.toString())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE user_id=? AND dedupe_key=?", Integer.class,

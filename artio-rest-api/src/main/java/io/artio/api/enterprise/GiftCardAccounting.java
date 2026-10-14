@@ -67,6 +67,18 @@ public final class GiftCardAccounting {
                 UUID.randomUUID(),giftCardId,userId,orderId,paymentRefundId,amount);
     }
 
+    /** Restores stored value after an external checkout is definitively rejected, even if the card was disabled meanwhile. */
+    public static void restoreRejectedCheckout(JdbcTemplate jdbc,UUID giftCardId,UUID userId,UUID orderId,
+            UUID paymentRefundId,BigDecimal amount){
+        int inserted=jdbc.update("INSERT INTO gift_card_transactions(id,gift_card_id,user_id,order_id,payment_refund_id,amount,kind) " +
+                        "VALUES (?,?,?,?,?,?,'REFUND') ON CONFLICT (payment_refund_id) WHERE payment_refund_id IS NOT NULL DO NOTHING",
+                UUID.randomUUID(),giftCardId,userId,orderId,paymentRefundId,amount);
+        if(inserted==0)return;
+        int updated=jdbc.update("UPDATE gift_cards SET balance=balance+?,expires_at=CASE WHEN expires_at IS NOT NULL AND expires_at<=now() " +
+                "THEN now()+interval '365 days' ELSE expires_at END WHERE id=?",amount,giftCardId);
+        if(updated==0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Stored-value card is unavailable; checkout cancellation requires review");
+    }
+
     private static BigDecimal remainingDue(JdbcTemplate jdbc,UUID orderId,BigDecimal total){
         BigDecimal captured=jdbc.queryForObject("SELECT COALESCE(sum(amount),0) FROM payments WHERE order_id=? AND status='CAPTURED'",BigDecimal.class,orderId);
         return total.subtract(captured==null?BigDecimal.ZERO:captured).max(BigDecimal.ZERO);
