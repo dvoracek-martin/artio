@@ -16,6 +16,7 @@ Thumbs.db
 *.local
 secrets/
 var/artio/media/
+/backup/
 **/.angular/cache/
 __pycache__/
 *.py[cod]

@@ -12,7 +12,7 @@ Install Docker Compose. The default installation generates unique database, JWT,
 docker compose exec rest-api cat /run/artio-secrets/setup-token
 ```
 
-Installation credentials are generated once and persist with the `artio-installation-secrets` volume. Back up that volume together with PostgreSQL; losing the AES key makes encrypted plugin secrets unrecoverable. Plugin authentication uses a separate stable key so AES rotation does not reset installed plugins. Follow the [backup, recovery and key rotation procedure](docs/operations/backup-recovery.md). Optional `.env` values can override generated credentials on the first boot only. Never commit `.env`.
+Installation credentials are generated once and persist with the `artio-installation-secrets` volume. Back up that volume, PostgreSQL, and the `artio-catalog-media` volume together; otherwise encrypted plugin credentials or product image blobs may be lost. Plugin authentication uses a separate stable key so AES rotation does not reset installed plugins. Follow the [backup, recovery and key rotation procedure](docs/operations/backup-recovery.md). Optional `.env` values can override generated credentials on the first boot only. Never commit `.env`.
 
 For IntelliJ development, run the API with `SPRING_PROFILES_ACTIVE=dev`. The `dev` profile supplies local-only credentials so the API can run without optional plugins. Set `ARTIO_SETUP_SKIP=true` to initialize the local SUPERADMIN automatically; its local-only login is `admin@artio.local` / `ArtioDevOnly!ChangeMe2026`. The skip is rejected unless `dev` is active and is always rejected when `production` is active. Omit the skip flag to use the setup wizard. Never reuse these values outside a local development environment.
 

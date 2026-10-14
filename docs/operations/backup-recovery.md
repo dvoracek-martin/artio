@@ -1,37 +1,66 @@
 # Backup and recovery for a single Artio installation
 
-Artio stores commerce records in PostgreSQL and installation credentials in the `artio-installation-secrets` named volume. The secrets volume contains the database password, JWT signing secret, active AES-GCM encryption key, stable extension-authentication key and first-run setup token. Back up both; a database dump without the matching keys cannot decrypt saved plugin secrets or preserve plugin credentials.
+Artio stores commerce records in PostgreSQL, installation credentials in the `artio-installation-secrets` named volume, and product image blobs in the `artio-catalog-media` named volume. A complete recovery set must contain the database dump and both volumes. The secrets volume contains the database password, JWT signing secret, active AES-GCM encryption key, stable extension-authentication key and first-run setup token. A database dump without the matching keys cannot decrypt saved plugin secrets or preserve plugin credentials; a dump without the media volume leaves product image records with missing files.
 
-Run commands from the repository root with the normal Compose project name (`artio`). Keep the database dump and secrets archive in encrypted, access-controlled storage outside the machine running Artio. Do not commit either archive.
+Run commands from the repository root with the normal Compose project name (`artio`). Keep the database dump and both volume archives in encrypted, access-controlled storage outside the machine running Artio. Do not commit any backup artifact.
 
 ## Create a backup
 
 ```powershell
+docker compose stop rest-api event-worker notification-worker
 New-Item -ItemType Directory -Force .\backup | Out-Null
 $postgres = (docker compose ps -q postgres).Trim()
 docker compose exec -T postgres pg_dump -U artio -d artio -Fc -f /tmp/artio-postgres.dump
 docker cp "${postgres}:/tmp/artio-postgres.dump" .\backup\artio-postgres.dump
-docker run --rm -v artio_artio-installation-secrets:/source:ro -v "${PWD}:/backup" alpine:3.20 `
+docker run --rm -v artio_artio-installation-secrets:/source:ro -v "${PWD}/backup:/backup" alpine:3.20 `
   tar czf /backup/artio-installation-secrets.tar.gz -C /source .
+docker run --rm -v artio_artio-catalog-media:/source:ro -v "${PWD}/backup:/backup" alpine:3.20 `
+  tar czf /backup/artio-catalog-media.tar.gz -C /source .
+Get-FileHash .\backup\artio-postgres.dump, .\backup\artio-installation-secrets.tar.gz, .\backup\artio-catalog-media.tar.gz -Algorithm SHA256 | Format-Table
+docker compose start rest-api event-worker notification-worker
 ```
 
-The PostgreSQL custom-format dump is transaction-consistent. Back up the secret volume immediately after the dump, and retain both files as one recovery set. Keep multiple generations and test restores in an isolated Compose project before relying on a backup.
+The PostgreSQL custom-format dump is transaction-consistent. Stopping the API and both workers also prevents media/database changes while archives are captured. Keep multiple generations, copy the checksum-verified set to encrypted storage outside the host, and test restores in an isolated Compose project before relying on a backup.
 
 ## Restore to the same Compose installation
 
-Stop the API so it cannot write while the database is restored. Restore the exact matching secret volume first, then restore the database dump into the existing PostgreSQL volume:
+Stop the API and both database workers so no application transaction can race the restore. Restore the exact matching secret volume first, then restore the database dump into the existing PostgreSQL volume:
 
 ```powershell
-docker compose stop rest-api backoffice storefront
-docker run --rm -v artio_artio-installation-secrets:/target -v "${PWD}:/backup" alpine:3.20 `
+docker compose stop rest-api event-worker notification-worker
+docker run --rm -v artio_artio-installation-secrets:/target -v "${PWD}/backup:/backup" alpine:3.20 `
   sh -c 'tar xzf /backup/artio-installation-secrets.tar.gz -C /target && chmod 700 /target && chmod 600 /target/*'
+docker run --rm -v artio_artio-catalog-media:/target -v "${PWD}/backup:/backup" alpine:3.20 `
+  tar xzf /backup/artio-catalog-media.tar.gz -C /target
+docker compose run --rm installation-secrets
 $postgres = (docker compose ps -q postgres).Trim()
 docker cp .\backup\artio-postgres.dump "${postgres}:/tmp/artio-postgres.dump"
-docker compose exec -T postgres pg_restore -U artio -d artio --clean --if-exists /tmp/artio-postgres.dump
+docker compose exec -T postgres dropdb -U artio --if-exists artio
+docker compose exec -T postgres createdb -U artio -O artio artio
+docker compose exec -T postgres pg_restore -U artio -d artio --no-owner --no-privileges /tmp/artio-postgres.dump
 docker compose up -d
 ```
 
-The command above assumes a matching database schema and named volumes. For recovery on a new host, create the installation using Compose first, stop the API, restore the secrets into the newly created `artio_artio-installation-secrets` volume, restore PostgreSQL, then start the stack. Verify readiness, setup status, login, and decryption of an existing plugin configuration before routing traffic.
+The same-host procedure drops and recreates the `artio` database so objects created after the backup cannot survive restoration. It assumes the PostgreSQL data volume and database role match the backup set. The explicit `installation-secrets` run refreshes the separate extension-controller secret volume from the restored key material before the controller starts.
+
+For a new host, restore the installation secrets **before PostgreSQL's first initialization**, otherwise PostgreSQL will initialize its role with a newly generated password that does not match the restored secret. From the repository root, create the Compose volumes/containers without starting them, restore the secret and media archives, initialize the controller secret copy, then start only PostgreSQL:
+
+```powershell
+docker compose create
+docker run --rm -v artio_artio-installation-secrets:/target -v "${PWD}/backup:/backup" alpine:3.20 `
+  sh -c 'tar xzf /backup/artio-installation-secrets.tar.gz -C /target && chmod 700 /target && chmod 600 /target/*'
+docker run --rm -v artio_artio-catalog-media:/target -v "${PWD}/backup:/backup" alpine:3.20 `
+  tar xzf /backup/artio-catalog-media.tar.gz -C /target
+docker compose run --rm installation-secrets
+docker compose up -d postgres
+docker compose ps postgres
+$postgres = (docker compose ps -q postgres).Trim()
+docker cp .\backup\artio-postgres.dump "${postgres}:/tmp/artio-postgres.dump"
+docker compose exec -T postgres pg_restore -U artio -d artio --no-owner --no-privileges /tmp/artio-postgres.dump
+docker compose up -d
+```
+
+Do not continue until PostgreSQL reports healthy. Verify readiness, setup status, login, product image retrieval, and decryption of an existing plugin configuration before routing traffic.
 
 ## Key loss and rotation
 
