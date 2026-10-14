@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.artio.api.security.EncryptionService;
+import io.artio.api.distributions.DistributionPluginProvisioningService;
 import io.artio.extensions.PluginConfigurationValidator;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.PluginManifestValidator;
@@ -47,12 +48,13 @@ public class ExtensionManagementController {
     private final ObjectMapper mapper;
     private final String coreVersion;
     private final ObjectProvider<ExtensionRuntimePort> dockerRuntime;
+    private final DistributionPluginProvisioningService provisioning;
 
     public ExtensionManagementController(PluginManifestValidator manifestValidator,
             PluginConfigurationValidator configurationValidator, EncryptionService encryption,
             JdbcTemplate jdbc, ObjectMapper mapper,
             @Value("${artio.extensions.core-version:0.1.0}") String coreVersion,
-            ObjectProvider<ExtensionRuntimePort> dockerRuntime) {
+            ObjectProvider<ExtensionRuntimePort> dockerRuntime, DistributionPluginProvisioningService provisioning) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
         this.encryption = encryption;
@@ -60,6 +62,7 @@ public class ExtensionManagementController {
         this.mapper = mapper;
         this.coreVersion = coreVersion;
         this.dockerRuntime = dockerRuntime;
+        this.provisioning = provisioning;
     }
 
     @PostMapping("/validate")
@@ -95,6 +98,7 @@ public class ExtensionManagementController {
                 manifest.id(), write(manifest), manifest.image());
         jdbc.update("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) VALUES (?,?,?,?::jsonb)",
                 manifest.id(), manifest.version(), manifest.image(), write(manifest));
+        refreshProvisioning(manifest.id());
         audit(manifest.id(), actor, "REGISTER", Map.of("version", manifest.version(), "image", manifest.image()));
         return ResponseEntity.status(HttpStatus.CREATED).body(new PluginView(manifest, "VALIDATED", Map.of(), Set.of(), 0));
     }
@@ -122,10 +126,12 @@ public class ExtensionManagementController {
             runtime.install(row.manifest());
         } catch (RuntimeException failure) {
             jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
+            refreshProvisioning(pluginId);
             audit(pluginId, actor, "INSTALL_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension image could not be installed"));
         }
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", pluginId);
+        refreshProvisioning(pluginId);
         audit(pluginId, actor, "INSTALL", Map.of("image", row.manifest().image()));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "INSTALLED"));
     }
@@ -145,10 +151,12 @@ public class ExtensionManagementController {
             runtime.enable(row.manifest(), row.credentialGeneration(), runtimeConfiguration(row));
         } catch (RuntimeException failure) {
             jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
+            refreshProvisioning(pluginId);
             audit(pluginId, actor, "ENABLE_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension did not become available"));
         }
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED',updated_at=now() WHERE plugin_id=?", pluginId);
+        refreshProvisioning(pluginId);
         audit(pluginId, actor, "ENABLE", Map.of("image", row.manifest().image()));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "ENABLED"));
     }
@@ -178,11 +186,13 @@ public class ExtensionManagementController {
             runtime.rotateCredentials(row.manifest(), generation, wasEnabled, runtimeConfiguration(row));
         } catch (RuntimeException failure) {
             jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',rotation_was_enabled=false,rotation_previous_state=NULL,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING'", pluginId);
+            refreshProvisioning(pluginId);
             audit(pluginId, actor, "CREDENTIAL_ROTATION_FAILED", Map.of("errorClass", failure.getClass().getSimpleName(), "generation", generation));
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension credentials could not be rotated"));
         }
         String state = restoreState == null ? (wasEnabled ? "ENABLED" : "DISABLED") : restoreState;
         jdbc.update("UPDATE extension_plugins SET lifecycle_state=?,rotation_was_enabled=false,rotation_previous_state=NULL,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING'", state, pluginId);
+        refreshProvisioning(pluginId);
         audit(pluginId, actor, "CREDENTIAL_ROTATED", Map.of("generation", generation));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", state, "credentialGeneration", generation));
     }
@@ -220,6 +230,7 @@ public class ExtensionManagementController {
         Map<String, String> retainedSecrets = retainedSecrets(replacement, current.encryptedSecrets());
         jdbc.update("UPDATE extension_plugins SET manifest=?::jsonb,image_reference=?,public_configuration=?::jsonb,encrypted_secrets=?::jsonb,configuration_version=configuration_version+1,lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?",
                 write(replacement), replacement.image(), write(configuration.publicValues()), write(retainedSecrets), pluginId);
+        refreshProvisioning(pluginId);
         audit(pluginId, actor, "UPDATE", Map.of("fromVersion", current.manifest().version(), "toVersion", replacement.version()));
         return ResponseEntity.ok(new PluginView(replacement, "INSTALLED", configuration.publicValues(),
                 Set.copyOf(retainedSecrets.keySet()), current.configurationVersion() + 1));
@@ -250,6 +261,7 @@ public class ExtensionManagementController {
         Map<String, String> retainedSecrets = retainedSecrets(previous, current.encryptedSecrets());
         jdbc.update("UPDATE extension_plugins SET manifest=?::jsonb,image_reference=?,public_configuration=?::jsonb,encrypted_secrets=?::jsonb,configuration_version=configuration_version+1,lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?",
                 write(previous), previous.image(), write(configuration.publicValues()), write(retainedSecrets), pluginId);
+        refreshProvisioning(pluginId);
         audit(pluginId, actor, "ROLLBACK", Map.of("fromVersion", current.manifest().version(), "toVersion", previous.version()));
         return ResponseEntity.ok(new PluginView(previous, "INSTALLED", configuration.publicValues(),
                 Set.copyOf(retainedSecrets.keySet()), current.configurationVersion() + 1));
@@ -272,10 +284,12 @@ public class ExtensionManagementController {
             runtime.disable(pluginId);
         } catch (RuntimeException failure) {
             jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
+            refreshProvisioning(pluginId);
             audit(pluginId, actor, "DISABLE_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Extension could not be stopped"));
         }
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='DISABLED',updated_at=now() WHERE plugin_id=?", pluginId);
+        refreshProvisioning(pluginId);
         audit(pluginId, actor, "DISABLE", Map.of());
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "DISABLED"));
     }
@@ -305,6 +319,7 @@ public class ExtensionManagementController {
         }
         jdbc.update("UPDATE extension_plugins SET public_configuration='{}'::jsonb,encrypted_secrets='{}'::jsonb,lifecycle_state='UNINSTALLED',updated_at=now() WHERE plugin_id=?",
                 pluginId);
+        refreshProvisioning(pluginId);
         audit(pluginId, actor, "UNINSTALL", Map.of("configurationPurged", true));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "UNINSTALLED"));
     }
@@ -379,6 +394,7 @@ public class ExtensionManagementController {
         String secretJson = write(updatedSecrets);
         jdbc.update("UPDATE extension_plugins SET public_configuration=?::jsonb,encrypted_secrets=?::jsonb,lifecycle_state='CONFIGURED',configuration_version=configuration_version+1,updated_at=now() WHERE plugin_id=?",
                 publicJson, secretJson, pluginId);
+        refreshProvisioning(pluginId);
         List<String> changedPublicFields = validation.publicValues().keySet().stream().sorted().toList();
         List<String> configuredSecretFields = updatedSecrets.keySet().stream().sorted().toList();
         audit(pluginId, actor, "CONFIGURE", Map.of("publicFields", changedPublicFields, "configuredSecretFields", configuredSecretFields));
@@ -399,6 +415,8 @@ public class ExtensionManagementController {
         List<String> errors = manifestValidator.validate(manifest, coreVersion, installed);
         return new ManifestValidationResponse(errors.isEmpty(), coreVersion, errors);
     }
+
+    private void refreshProvisioning(String pluginId) { provisioning.refreshPlugin(pluginId); }
 
     private Set<String> registeredPluginIds() {
         return Set.copyOf(jdbc.queryForList("SELECT plugin_id FROM extension_plugins WHERE lifecycle_state<>'UNINSTALLED'", String.class));

@@ -650,6 +650,19 @@ CREATE TABLE artio_installation_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE artio_distribution_plugin_provisioning (
+    distribution_id VARCHAR(120) NOT NULL,
+    plugin_id VARCHAR(160) NOT NULL,
+    optional BOOLEAN NOT NULL,
+    provisioning_status VARCHAR(40) NOT NULL CHECK (provisioning_status IN (
+        'WAITING_FOR_RELEASE','CONFIGURATION_REQUIRED','READY_TO_INSTALL','RETRY_REQUIRED',
+        'INSTALLED_DISABLED','ACTIVE','UNINSTALLED_BY_ADMIN','LIFECYCLE_IN_PROGRESS')),
+    lifecycle_state VARCHAR(32),
+    reason VARCHAR(500) NOT NULL,
+    last_checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (distribution_id, plugin_id)
+);
+
 
 -- ===== Legacy V27__system_settings =====
 ALTER TABLE artio_installation_settings

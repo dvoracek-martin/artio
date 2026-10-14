@@ -3,6 +3,7 @@ package io.artio.api.users;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.users.Email;
+import io.artio.api.distributions.DistributionPluginProvisioningService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -34,11 +35,13 @@ public class FirstRunSetupController {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final Environment environment;
+    private final DistributionPluginProvisioningService provisioning;
 
-    public FirstRunSetupController(JdbcTemplate jdbc, ObjectMapper mapper, Environment environment) {
+    public FirstRunSetupController(JdbcTemplate jdbc, ObjectMapper mapper, Environment environment, DistributionPluginProvisioningService provisioning) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.environment = environment;
+        this.provisioning = provisioning;
     }
 
     @GetMapping("/status")
@@ -114,6 +117,7 @@ public class FirstRunSetupController {
                     mapper.writeValueAsString(List.of(draft.get("availableLanguages").split(","))), draft.get("timezone"),
                     draft.get("externalBaseUrl"), draft.get("distributionId"));
         } catch (Exception failure) { throw new IllegalStateException("Could not persist installation settings", failure); }
+        provisioning.initialize(draft.get("distributionId"));
         jdbc.update("UPDATE artio_first_run_setup SET completed_at=now(),draft='{}'::jsonb,failed_attempts=0,locked_until=NULL,updated_at=now() WHERE singleton_id=true");
         return new SetupCompleted(true, "SUPERADMIN", draft.get("countryCode"), draft.get("currencyCode"), draft.get("locale"), draft.get("timezone"));
     }
