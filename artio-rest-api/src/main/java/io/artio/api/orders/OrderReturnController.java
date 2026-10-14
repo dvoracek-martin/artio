@@ -63,7 +63,7 @@ public class OrderReturnController {
                     (rs, row) -> rs.getInt(1), line.orderItemId(), orderId).stream().findFirst()
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Return line does not belong to this order"));
             Integer shipped = "PARTIALLY_SHIPPED".equals(orderStatus)
-                    ? jdbc.queryForObject("SELECT COALESCE(sum(si.quantity),0)::integer FROM order_shipment_items si "
+                    ? jdbc.queryForObject("SELECT floor(COALESCE(sum(si.quantity),0))::integer FROM order_shipment_items si "
                             + "JOIN order_shipments s ON s.id=si.shipment_id WHERE s.order_id=? AND si.order_item_id=?",
                             Integer.class, orderId, line.orderItemId())
                     : ordered;

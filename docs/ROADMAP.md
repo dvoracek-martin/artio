@@ -4,7 +4,9 @@ This is the canonical phase/task ledger. Detailed baseline is in [REPOSITORY_AUD
 
 ## Current state
 
-- **Returns from partial shipments (2026-10-14):** Customers may request returns while an order is `PARTIALLY_SHIPPED`, but only up to the quantity present in its shipment records. Existing pending/approved/completed return quantities reduce that cap; unshipped quantity cannot be returned. Fully shipped orders continue to cap returns at purchased quantity. API contract updated in `docs/orders/returns-v1.md`; `git diff --check` exited 0. Tests were not run; Docker-backed behavior remains unverified.
+- **Storefront partial-shipment return flow (2026-10-14):** The owner-only order-items response now includes shipped and currently returnable quantities. Storefront exposes return history/actions for `PARTIALLY_SHIPPED`, displays its localized status in EN/DE/FR/IT, and caps the return prompt to each line returnable quantity. Lines with no returnable balance are excluded. API contract updated in `docs/orders/returns-v1.md`; `git diff --check` exited 0. Build was not run.
+
+- **Returns from partial shipments (2026-10-14):** Customers may request returns while an order is `PARTIALLY_SHIPPED`, but only up to the whole-unit floor of the quantity present in shipment records, because return lines use integer units and must never round a fractional shipment upward. Existing pending/approved/completed return quantities reduce that cap; unshipped quantity cannot be returned. Fully shipped orders continue to cap returns at purchased quantity. API contract updated in `docs/orders/returns-v1.md`; `git diff --check` exited 0. Tests were not run; Docker-backed behavior remains unverified.
 
 - **Return restock audit attribution (2026-10-14):** Stock receipts created by staff return intake now include the return UUID as the movement reason and the authenticated staff user as actor, using the inventory application's audited receipt operation. `git diff --check` exited 0. Tests/build were not run; Docker-backed persistence acceptance remains unavailable.
 

@@ -4,11 +4,11 @@ Artio separates merchandise returns from payment refunds. A return request track
 
 ## Customer routes
 
-`POST /api/v1/orders/{orderId}/returns` creates a return request for an authenticated order owner. It requires an `Idempotency-Key` (1–128 characters) and a body with a nonblank `reason`, optional `customerNote`, and 1–50 `{ "orderItemId": "…", "quantity": 1 }` lines. The order must have shipped items (`PARTIALLY_SHIPPED`, `SHIPPED`, `DELIVERED`, or `RETURNED`). The server checks order ownership and verifies each line belongs to the order. For a partially shipped order, returnable quantity is capped at the quantity recorded in shipment items; for fully shipped orders it is capped at the purchased quantity. Quantities already requested, approved, or completed are reserved against that shipped quantity. Repeating a key with identical lines returns the existing request; reusing it with a different order or line set returns `409`.
+`POST /api/v1/orders/{orderId}/returns` creates a return request for an authenticated order owner. It requires an `Idempotency-Key` (1–128 characters) and a body with a nonblank `reason`, optional `customerNote`, and 1–50 `{ "orderItemId": "…", "quantity": 1 }` lines. The order must have shipped items (`PARTIALLY_SHIPPED`, `SHIPPED`, `DELIVERED`, or `RETURNED`). The server checks order ownership and verifies each line belongs to the order. For a partially shipped order, returnable quantity is capped at the whole-unit floor of the quantity recorded in shipment items (partial fractional units are not returnable through this integer-unit API); for fully shipped orders it is capped at the purchased quantity. Quantities already requested, approved, or completed are reserved against that shipped quantity. Repeating a key with identical lines returns the existing request; reusing it with a different order or line set returns `409`.
 
 `GET /api/v1/orders/{orderId}/returns` lists return requests only for the authenticated order owner.
 
-`GET /api/v1/orders/{orderId}/items` provides the order line identifiers needed to create a return request; it is restricted to the owner. The Storefront order history exposes shipment history and a customer return request flow for eligible order states.
+`GET /api/v1/orders/{orderId}/items` provides owner-scoped order lines with purchased, shipped, and returnable quantities. Returnable quantity excludes shipments not yet made and quantities already requested, approved, or completed; the Storefront uses this value as the request limit. The Storefront order history exposes shipment history and a customer return request flow for eligible order states.
 
 ## Staff routes
 

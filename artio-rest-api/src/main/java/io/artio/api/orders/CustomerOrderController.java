@@ -21,9 +21,20 @@ public class CustomerOrderController {
         UUID customerId=UUID.fromString(auth.getToken().getSubject());
         if(jdbc.query("SELECT 1 FROM orders WHERE id=? AND user_id=?",(rs,row)->rs.getInt(1),orderId,customerId).isEmpty())
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");
-        return jdbc.query("SELECT id,variant_id,bundle_id,quantity,unit_price,currency FROM order_items WHERE order_id=? ORDER BY id",
+        return jdbc.query("SELECT oi.id,oi.variant_id,oi.bundle_id,oi.quantity,oi.unit_price,oi.currency,"
+                        + "CASE WHEN o.status IN ('SHIPPED','DELIVERED','RETURNED') THEN oi.quantity ELSE "
+                        + "floor(COALESCE((SELECT sum(si.quantity) FROM order_shipment_items si JOIN order_shipments s ON s.id=si.shipment_id "
+                        + "WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0)) END AS shipped_quantity,"
+                        + "GREATEST((CASE WHEN o.status IN ('SHIPPED','DELIVERED','RETURNED') THEN oi.quantity ELSE "
+                        + "floor(COALESCE((SELECT sum(si.quantity) FROM order_shipment_items si JOIN order_shipments s ON s.id=si.shipment_id "
+                        + "WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0) END)-COALESCE((SELECT sum(ri.quantity) "
+                        + "FROM order_return_items ri JOIN order_returns r ON r.id=ri.return_id WHERE ri.order_item_id=oi.id "
+                        + "AND r.status IN ('REQUESTED','APPROVED','COMPLETED')),0),0) AS returnable_quantity "
+                        + "FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.order_id=? ORDER BY oi.id",
                 (rs,row)->new CustomerOrderLine(rs.getObject("id",UUID.class),rs.getObject("variant_id",UUID.class),rs.getObject("bundle_id",UUID.class),
-                        rs.getBigDecimal("quantity"),rs.getBigDecimal("unit_price"),rs.getString("currency").trim()),orderId);
+                        rs.getBigDecimal("quantity"),rs.getBigDecimal("shipped_quantity"),rs.getBigDecimal("returnable_quantity"),
+                        rs.getBigDecimal("unit_price"),rs.getString("currency").trim()),orderId);
     }
-    public record CustomerOrderLine(UUID orderItemId,UUID variantId,UUID bundleId,BigDecimal quantity,BigDecimal unitPrice,String currency){}
+    public record CustomerOrderLine(UUID orderItemId,UUID variantId,UUID bundleId,BigDecimal quantity,BigDecimal shippedQuantity,
+            BigDecimal returnableQuantity,BigDecimal unitPrice,String currency){}
 }
