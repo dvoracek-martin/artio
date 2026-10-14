@@ -125,7 +125,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
         HostConfig host = restrictedHostConfig(network, service.memoryBytes());
         if (!service.persistentPaths().isEmpty()) host.withBinds(persistentBinds(manifest.id(), service));
-        if (hostLoopbackTestAccess && service.primary()) {
+        if (hostLoopbackTestAccess) {
             var bindings = new com.github.dockerjava.api.model.Ports();
             bindings.bind(ExposedPort.tcp(service.port()), com.github.dockerjava.api.model.Ports.Binding.bindIp("127.0.0.1"));
             host.withPortBindings(bindings);
