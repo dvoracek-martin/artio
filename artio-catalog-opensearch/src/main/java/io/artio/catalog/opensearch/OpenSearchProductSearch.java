@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 @Component
 @ConditionalOnProperty(name = "artio.search.enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnExpression("'${artio.search.provider:opensearch}' != 'extension'")
 public class OpenSearchProductSearch implements RebuildableProductSearch {
     private static final String INDEX = "artio-products";
     private final RestClient client;

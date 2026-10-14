@@ -17,6 +17,16 @@ class PluginManifestValidatorTests {
     }
 
     @Test
+    void acceptsVersionedCatalogSearchExtensionPoint() {
+        var manifest = validManifest();
+        var search = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), List.of(), List.of("catalog.read"), manifest.configuration(),
+                List.of("catalog.search.v1"), manifest.healthPath(), manifest.diagnosticsPath());
+        assertThat(validator.validate(search, "0.1.0", Set.of())).isEmpty();
+    }
+
+    @Test
     void validatesOptionalBundleServicesWithoutChangingSingleImagePlugins() {
         var manifest = validManifest();
         var bundle = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),

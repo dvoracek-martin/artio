@@ -90,6 +90,8 @@ artio:
     oauth2-enabled: ${ARTIO_OAUTH2_ENABLED:false}
   search:
     enabled: ${ARTIO_SEARCH_ENABLED:false}
+    provider: ${ARTIO_SEARCH_PROVIDER:opensearch}
+    extension-plugin-id: ${ARTIO_SEARCH_EXTENSION_PLUGIN_ID:}
     url: ${ARTIO_SEARCH_URL:http://localhost:9200}
   rate-limit:
     enabled: ${ARTIO_RATE_LIMIT_ENABLED:true}

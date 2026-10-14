@@ -17,7 +17,7 @@ public final class PluginManifestValidator {
             "catalog.read", "orders.read", "orders.write", "notifications.send");
     private static final Set<String> FIELD_TYPES = Set.of("text", "secret", "boolean", "enum", "number", "url", "json");
     private static final Set<String> EXTENSION_POINTS = Set.of("payment.provider.v1", "shipping.provider.v1",
-            "catalog.enrichment.v1", "notification.channel.v1");
+            "catalog.enrichment.v1", "catalog.search.v1", "notification.channel.v1");
     private final Set<String> trustedRegistries;
 
     public PluginManifestValidator(Set<String> trustedRegistries) {
