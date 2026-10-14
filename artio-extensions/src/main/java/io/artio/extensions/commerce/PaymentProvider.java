@@ -37,6 +37,12 @@ public interface PaymentProvider {
     record PaymentResult(String providerReference, PaymentState state, BigDecimal amount, String currency,
                          String failureCode) { }
     record WebhookResult(String providerEventId, String eventType, String providerReference,
-                         PaymentState state, boolean verified) { }
+                         PaymentState state, BigDecimal amount, String currency, boolean verified) {
+        /** Compatibility constructor for non-settlement events that do not carry an amount. */
+        public WebhookResult(String providerEventId, String eventType, String providerReference,
+                PaymentState state, boolean verified) {
+            this(providerEventId, eventType, providerReference, state, null, null, verified);
+        }
+    }
     enum PaymentState { PENDING, AUTHORIZED, CAPTURED, CANCELLED, REFUNDED, FAILED, EXPIRED }
 }

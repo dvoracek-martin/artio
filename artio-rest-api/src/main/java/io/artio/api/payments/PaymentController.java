@@ -204,6 +204,19 @@ public class PaymentController {
             return Map.of("status", "ignored");
         }
         if (event.state() == PaymentProvider.PaymentState.CAPTURED) {
+            var settlements = jdbc.query("SELECT amount,currency FROM payments WHERE provider_reference=? AND method='EXTENSION'",
+                    (rs, row) -> new java.util.AbstractMap.SimpleImmutableEntry<>(rs.getBigDecimal("amount"), rs.getString("currency").trim()),
+                    event.providerReference());
+            if (settlements.isEmpty()) {
+                markProviderWebhookProcessed(providerKey, event.providerEventId());
+                return Map.of("status", "payment_not_found");
+            }
+            var settlement = settlements.getFirst();
+            if (event.amount() == null || event.currency() == null
+                    || settlement.getKey().compareTo(event.amount()) != 0
+                    || !settlement.getValue().equalsIgnoreCase(event.currency())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provider settlement amount or currency does not match the payment");
+            }
             String orderStatus = jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId);
             if ("CANCELLED".equals(orderStatus)) {
                 markProviderWebhookProcessed(providerKey, event.providerEventId());

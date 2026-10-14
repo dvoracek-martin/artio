@@ -61,11 +61,11 @@ public class PaymentReconciliationWorker {
                     ORDER BY reconciliation_available_at, created_at
                     LIMIT ? FOR UPDATE SKIP LOCKED
                 )
-                RETURNING id, order_id, provider_reference, reconciliation_attempts, method
+                RETURNING id, order_id, provider_reference, reconciliation_attempts, method, amount, currency
                 """;
         List<PaymentSession> claimed = transactions.execute(status -> jdbc.query(claimSql, (rs, row) -> new PaymentSession(rs.getObject("id", UUID.class),
                 rs.getObject("order_id", UUID.class), rs.getString("provider_reference"),
-                rs.getInt("reconciliation_attempts"), rs.getString("method")), SESSION_LIFETIME_MINUTES,
+                rs.getInt("reconciliation_attempts"), rs.getString("method"), rs.getBigDecimal("amount"), rs.getString("currency").trim()), SESSION_LIFETIME_MINUTES,
                 CLAIM_LEASE.toSeconds(), BATCH_SIZE));
         if (claimed == null) return;
         for (PaymentSession payment : claimed) reconcile(payment);
@@ -78,7 +78,14 @@ public class PaymentReconciliationWorker {
             var result = provider.reconcile(payment.sessionId(), "artio-reconcile-" + payment.id());
             if (result.isEmpty()) { retry(payment, "PROVIDER_PENDING"); return; }
             switch (result.get().state()) {
-                case CAPTURED -> applyPaid(payment);
+                case CAPTURED -> {
+                    var settlement = result.get();
+                    if (!payment.sessionId().equals(settlement.providerReference()) || settlement.amount() == null
+                            || payment.amount().compareTo(settlement.amount()) != 0 || settlement.currency() == null
+                            || !payment.currency().equalsIgnoreCase(settlement.currency())) {
+                        retry(payment, "PROVIDER_SETTLEMENT_MISMATCH");
+                    } else applyPaid(payment);
+                }
                 case EXPIRED, FAILED, CANCELLED -> applyExpired(payment);
                 default -> retry(payment, "PROVIDER_" + result.get().state().name());
             }
@@ -144,5 +151,6 @@ public class PaymentReconciliationWorker {
         jdbc.update("UPDATE payments SET reconciliation_claimed_at=NULL WHERE id=?", paymentId);
     }
 
-    private record PaymentSession(UUID id, UUID orderId, String sessionId, int attempts, String method) { }
+    private record PaymentSession(UUID id, UUID orderId, String sessionId, int attempts, String method,
+                                  java.math.BigDecimal amount, String currency) { }
 }

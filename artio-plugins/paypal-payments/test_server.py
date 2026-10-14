@@ -32,6 +32,24 @@ class PayPalTests(unittest.TestCase):
         with self.assertRaises(server.ProviderError):
             server.amount_text("10.001", "CHF")
 
+    def test_reconciliation_returns_exact_provider_amount_and_currency(self):
+        response = {"status": "COMPLETED", "purchase_units": [{"payments": {"captures": [
+            {"amount": {"value": "12.34", "currency_code": "USD"}}
+        ]}}]}
+        with patch.object(server, "paypal_request", return_value=response):
+            result = server.operation(self.config, "reconcile", {"providerReference": "ORDER-12345678"}, self.envelope)
+        self.assertEqual("12.34", result["result"]["amount"])
+        self.assertEqual("USD", result["result"]["currency"])
+
+    def test_reconciliation_returns_exact_provider_amount_and_currency(self):
+        response = {"status": "COMPLETED", "purchase_units": [{"payments": {"captures": [
+            {"amount": {"value": "12.34", "currency_code": "USD"}}
+        ]}}]}
+        with patch.object(server, "paypal_request", return_value=response):
+            result = server.operation(self.config, "reconcile", {"providerReference": "ORDER-12345678"}, self.envelope)
+        self.assertEqual("12.34", result["result"]["amount"])
+        self.assertEqual("USD", result["result"]["currency"])
+
     def test_refund_uses_requested_amount_and_stable_provider_key(self):
         details = {"purchase_units": [{"payments": {"captures": [{"id": "CAPTURE-12345678"}]}}]}
         refund = {"id": "REFUND-12345678", "status": "COMPLETED"}
@@ -69,7 +87,8 @@ class PayPalTests(unittest.TestCase):
     ])
     def test_webhook_verification_uses_paypal_header_bag_and_configured_webhook(self, request):
         event = {"id": "WH-EVENT-1", "event_type": "PAYMENT.CAPTURE.COMPLETED",
-                 "resource": {"id": "CAPTURE-123", "supplementary_data": {"related_ids": {"order_id": "ORDER-12345678"}}}}
+                 "resource": {"id": "CAPTURE-123", "amount": {"value": "42.50", "currency_code": "USD"},
+                              "supplementary_data": {"related_ids": {"order_id": "ORDER-12345678"}}}}
         payload = {"headers": {"paypal-transmission-id": "tx", "paypal-transmission-time": "time",
                     "paypal-transmission-sig": "signature", "paypal-cert-url": "https://api.paypal.com/cert",
                     "paypal-auth-algo": "SHA256withRSA"},
@@ -78,6 +97,8 @@ class PayPalTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual("ORDER-12345678", result["providerReference"])
         self.assertEqual("CAPTURED", result["state"])
+        self.assertEqual("42.50", result["amount"])
+        self.assertEqual("USD", result["currency"])
         verification_request = request.call_args_list[1].args[0]
         verification = json.loads(verification_request.data)
         self.assertEqual("WH-test123", verification["webhook_id"])

@@ -151,8 +151,10 @@ def operation(configuration, name, payload, envelope):
         captures = (units[0].get("payments") or {}).get("captures") or [] if units else []
         capture = captures[0] if captures else {}
         amount = capture.get("amount") or {}
+        currency = amount.get("currency_code")
+        normalized_amount = amount_text(amount.get("value"), currency)
         return {"result": {"providerReference": reference, "state": "CAPTURED",
-                            "amount": amount.get("value"), "currency": amount.get("currency_code"), "failureCode": None}}
+                            "amount": normalized_amount, "currency": currency, "failureCode": None}}
     if name == "verifyWebhook":
         raw = payload.get("rawBodyBase64", "")
         try:
@@ -181,8 +183,11 @@ def operation(configuration, name, payload, envelope):
             state = "CAPTURED"
         elif event_type in ("PAYMENT.CAPTURE.DENIED", "PAYMENT.CAPTURE.REFUNDED"):
             state = "FAILED" if event_type.endswith("DENIED") else "REFUNDED"
+        amount = resource.get("amount") or {}
+        amount_value = amount_text(amount.get("value"), amount.get("currency_code")) if state == "CAPTURED" else None
         return {"providerEventId": event.get("id"), "eventType": event_type,
-                "providerReference": order_id, "state": state, "verified": True}
+                "providerReference": order_id, "state": state, "amount": amount_value,
+                "currency": amount.get("currency_code"), "verified": True}
     raise ProviderError(400, "Unsupported payment operation")
 
 

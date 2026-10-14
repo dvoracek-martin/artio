@@ -56,6 +56,24 @@ class StripeExtensionTests(unittest.TestCase):
         with self.assertRaises(server.ProviderError):
             server.minor_units("12.501", "CHF")
 
+    def test_reconciliation_returns_exact_major_units(self):
+        session = {"id": "cs_123", "status": "complete", "payment_status": "paid",
+                   "amount_total": 1234, "currency": "usd"}
+        with patch.object(server, "stripe_request", return_value=session):
+            result = server.operation({"stripeSecretKey": "sk_test_secret"}, "reconcile",
+                                      {"providerReference": "cs_123"}, {})
+        self.assertEqual("12.34", result["result"]["amount"])
+        self.assertEqual("USD", result["result"]["currency"])
+
+    def test_reconciliation_returns_exact_major_units(self):
+        session = {"id": "cs_123", "status": "complete", "payment_status": "paid",
+                   "amount_total": 1234, "currency": "usd"}
+        with patch.object(server, "stripe_request", return_value=session):
+            result = server.operation({"stripeSecretKey": "sk_test_secret"}, "reconcile",
+                                      {"providerReference": "cs_123"}, {})
+        self.assertEqual("12.34", result["result"]["amount"])
+        self.assertEqual("USD", result["result"]["currency"])
+
     def test_dynamic_payment_method_filter_can_select_twint_only(self):
         response = {"id": "cs_test_twint", "url": "https://checkout.stripe.test/twint"}
         with patch.object(server, "stripe_request", return_value=response) as request:
@@ -75,7 +93,7 @@ class StripeExtensionTests(unittest.TestCase):
         secret = "whsec_test"
         timestamp = str(int(time.time()))
         body = json.dumps({"id": "evt_123", "type": "checkout.session.completed", "data": {
-            "object": {"id": "cs_123", "payment_status": "paid"}}}).encode()
+            "object": {"id": "cs_123", "payment_status": "paid", "amount_total": 1250, "currency": "chf"}}}).encode()
         signed = timestamp.encode() + b"." + body
         signature = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
         header = f"t={timestamp},v1={signature}"
@@ -86,7 +104,8 @@ class StripeExtensionTests(unittest.TestCase):
             "headers": {"stripe-signature": header}, "rawBodyBase64": base64.b64encode(body).decode(),
         }, {})
         self.assertEqual({"providerEventId": "evt_123", "eventType": "checkout.session.completed",
-                          "providerReference": "cs_123", "state": "CAPTURED", "verified": True}, result)
+                          "providerReference": "cs_123", "state": "CAPTURED", "amount": "12.50",
+                          "currency": "CHF", "verified": True}, result)
 
     def test_credential_errors_never_return_secret_values(self):
         with self.assertRaises(server.ProviderError) as error:

@@ -38,6 +38,14 @@ def minor_units(amount, currency):
     return int(integral)
 
 
+def major_units(minor_amount, currency):
+    if isinstance(minor_amount, bool) or not isinstance(minor_amount, int) or minor_amount <= 0:
+        return None
+    code = str(currency or "").lower()
+    digits = 0 if code in ZERO_DECIMAL else 3 if code in THREE_DECIMAL else 2
+    return format(Decimal(minor_amount).scaleb(-digits), f".{digits}f")
+
+
 def stripe_request(configuration, path, method="GET", form=None, idempotency_key=None):
     key = configuration.get("stripeSecretKey")
     if not isinstance(key, str) or not key.strip():
@@ -170,7 +178,8 @@ def operation(configuration, name, payload, envelope):
         if state == "PENDING":
             return {"result": None}
         return {"result": {"providerReference": reference, "state": state,
-                "amount": session.get("amount_total"), "currency": session.get("currency"), "failureCode": None}}
+                "amount": major_units(session.get("amount_total"), session.get("currency")),
+                "currency": str(session.get("currency") or "").upper() or None, "failureCode": None}}
     if name == "verifyWebhook":
         try:
             body = base64.b64decode(payload.get("rawBodyBase64", ""), validate=True)
@@ -193,8 +202,10 @@ def operation(configuration, name, payload, envelope):
             state = "EXPIRED"
         elif event_type in ("checkout.session.async_payment_failed",):
             state = "FAILED"
+        currency = str(obj.get("currency") or "").upper() or None
         return {"providerEventId": event.get("id"), "eventType": event_type,
-                "providerReference": obj.get("id"), "state": state, "verified": True}
+                "providerReference": obj.get("id"), "state": state,
+                "amount": major_units(obj.get("amount_total"), currency), "currency": currency, "verified": True}
     if name == "capture":
         raise ProviderError(409, "Hosted Checkout does not support separate capture")
     raise ProviderError(400, "Unsupported payment operation")

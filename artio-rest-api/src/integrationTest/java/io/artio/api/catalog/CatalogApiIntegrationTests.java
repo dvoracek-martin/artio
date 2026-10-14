@@ -52,7 +52,7 @@ class CatalogApiIntegrationTests {
     private static final String PREVIOUS_TEST_ENCRYPTION_KEY = "previous-test-encryption-key-value-32-bytes-minimum";
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
-    private static final AtomicReference<String> PROVIDER_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\"}");
+    private static final AtomicReference<String> PROVIDER_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\",\"amount\":\"12.50\",\"currency\":\"CHF\"}");
 
     @Autowired
     private TestRestTemplate http;
@@ -1010,7 +1010,7 @@ class CatalogApiIntegrationTests {
     private ResponseEntity<String> providerWebhook(String type, String sessionId, String paymentStatus) throws Exception {
         String eventId = "evt_test_" + UUID.nameUUIDFromBytes((type + ":" + sessionId).getBytes(StandardCharsets.UTF_8));
         String body = "{\"id\":\"" + eventId + "\",\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
-                + "\",\"payment_status\":\"" + paymentStatus + "\"}}}";
+                + "\",\"payment_status\":\"" + paymentStatus + "\",\"amount\":\"1.00\",\"currency\":\"USD\"}}}";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
         headers.set("Provider-Signature", "integration-test-signature");
@@ -1324,7 +1324,7 @@ class CatalogApiIntegrationTests {
     @Test
     void reconciliationMarksLostPaidProviderSessionAsCapturedAndPaid() {
         UUID orderId = createStaleProviderOrder("cs_reconcile_paid_" + UUID.randomUUID());
-        PROVIDER_RESPONSE.set("{\"status\":\"complete\",\"payment_status\":\"paid\"}");
+        PROVIDER_RESPONSE.set("{\"status\":\"complete\",\"payment_status\":\"paid\",\"amount\":\"12.50\",\"currency\":\"CHF\"}");
 
         paymentReconciliationWorker.reconcileDueSessions();
 
@@ -1672,8 +1672,9 @@ class CatalogApiIntegrationTests {
                         String state = event.path("data").path("object").path("payment_status").asText();
                         PaymentState paymentState = "checkout.session.expired".equals(type) ? PaymentState.EXPIRED
                                 : "paid".equals(state) ? PaymentState.CAPTURED : PaymentState.PENDING;
-                        return new WebhookResult(event.path("id").asText(), type,
-                                event.path("data").path("object").path("id").asText(), paymentState, true);
+                        JsonNode object = event.path("data").path("object");
+                        return new WebhookResult(event.path("id").asText(), type, object.path("id").asText(), paymentState,
+                                object.path("amount").decimalValue(), object.path("currency").asText(), true);
                     } catch (IOException invalid) {
                         return new WebhookResult("", "", "", PaymentState.FAILED, false);
                     }
@@ -1684,7 +1685,8 @@ class CatalogApiIntegrationTests {
                         String status = response.path("status").asText();
                         String paid = response.path("payment_status").asText();
                         if ("complete".equals(status) && "paid".equals(paid))
-                            return Optional.of(new PaymentResult(reference, PaymentState.CAPTURED, null, null, null));
+                            return Optional.of(new PaymentResult(reference, PaymentState.CAPTURED,
+                                    response.path("amount").decimalValue(), response.path("currency").asText(), null));
                         if ("expired".equals(status))
                             return Optional.of(new PaymentResult(reference, PaymentState.EXPIRED, null, null, null));
                         return Optional.empty();
