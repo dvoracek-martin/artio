@@ -6,7 +6,7 @@ import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.HostConfig;
-import io.artio.api.security.EncryptionService;
+import io.artio.api.security.ExtensionCredentialService;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.ExtensionRuntimePort;
 import java.io.InputStream;
@@ -27,23 +27,23 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private final DockerClient docker;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final String network;
-    private final EncryptionService encryption;
+    private final ExtensionCredentialService credentials;
     private final boolean hostLoopbackTestAccess;
     private final java.util.concurrent.ConcurrentMap<String, ExtensionCircuitBreaker> circuits = new java.util.concurrent.ConcurrentHashMap<>();
 
     public DockerExtensionRuntime(DockerClient docker,
             @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.network:artio-extensions}") String network,
             @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.port:8080}") int port,
-            EncryptionService encryption) {
-        this(docker, network, port, encryption, false);
+            ExtensionCredentialService credentials) {
+        this(docker, network, port, credentials, false);
     }
 
-    DockerExtensionRuntime(DockerClient docker, String network, int port, EncryptionService encryption,
+    DockerExtensionRuntime(DockerClient docker, String network, int port, ExtensionCredentialService credentials,
                            boolean hostLoopbackTestAccess) {
         this.docker = docker;
         this.network = network;
         this.port = port;
-        this.encryption = encryption;
+        this.credentials = credentials;
         this.hostLoopbackTestAccess = hostLoopbackTestAccess;
     }
 
@@ -101,7 +101,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         var create = docker.createContainerCmd(service.image()).withName(name).withHostConfig(host)
                 .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(service.port()))
                 .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.extension.service", service.id(), "io.artio.managed", "true"));
-        if (service.primary()) create.withEnv("ARTIO_EXTENSION_TOKEN=" + encryption.deriveExtensionCredential(manifest.id(), credentialGeneration),
+        if (service.primary()) create.withEnv("ARTIO_EXTENSION_TOKEN=" + credentials.derive(manifest.id(), credentialGeneration),
                 "ARTIO_EXTENSION_API_VERSION=1");
         create.exec();
         docker.startContainerCmd(name).exec();
@@ -251,7 +251,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             byte[] body = envelope.getBytes(StandardCharsets.UTF_8);
             if (body.length > MAX_REQUEST_BYTES) throw new IllegalArgumentException("Extension invocation exceeds 1 MiB");
             HttpRequest request = HttpRequest.newBuilder(endpoint)
-                    .timeout(deadline).header("Authorization", "Bearer " + encryption.deriveExtensionCredential(pluginId, credentialGeneration))
+                    .timeout(deadline).header("Authorization", "Bearer " + credentials.derive(pluginId, credentialGeneration))
                     .header("Content-Type", "application/json").header("X-Artio-Extension-Api", "1")
                     .header("Idempotency-Key", idempotencyKey).POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
             HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());

@@ -8,7 +8,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
-import io.artio.api.security.EncryptionService;
+import io.artio.api.security.ExtensionCredentialService;
 import io.artio.extensions.PluginManifest;
 import java.time.Duration;
 import java.util.List;
@@ -35,7 +35,7 @@ class DockerExtensionRuntimeIntegrationTests {
             // Production uses the private, unpublished extension network and is separately asserted by runtime policy tests.
             docker.createNetworkCmd().withName(network).withDriver("bridge").exec();
             var runtime = new DockerExtensionRuntime(docker, network, 8080,
-                    new EncryptionService("integration-test-key-material-that-is-at-least-32-bytes"), true);
+                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
             PluginManifest current = manifest(pluginId, firstImage, "1.0.0");
             PluginManifest next = manifest(pluginId, secondImage, "2.0.0");
             try {

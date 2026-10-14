@@ -2,7 +2,7 @@
 
 Artio is a self-hosted commerce platform built with Java 21, Spring Boot, PostgreSQL, Apache Kafka and Angular 17. Kafka is part of every standard installation and carries durable asynchronous events from the transactional PostgreSQL outbox. Redis and OpenSearch remain optional integrations; provider-specific implementations are moving behind Docker plugin contracts. The Gradle project is a modular monolith: bounded contexts have separate domain and persistence modules, with a REST application coordinating transactional workflows. Configurable bundles remain their own aggregate and are quoted from current component prices.
 
-> **Architecture status:** this README describes the current checkout, not full product readiness. The target is a self-hosted single-merchant installation with an included Backoffice, optional Storefront, one Switzerland distribution, and Docker-only plugins. Current package gaps include provider extraction, distribution plugin provisioning, zero-config production secrets/key lifecycle, and the separate lifecycle controller. See [the target architecture](docs/ARCHITECTURE.md), [repository audit](docs/REPOSITORY_AUDIT.md), and [phase/task ledger](docs/ROADMAP.md).
+> **Architecture status:** this README describes the current checkout, not full product readiness. The target is a self-hosted single-merchant installation with an included Backoffice, optional Storefront, one Switzerland distribution, and Docker-only plugins. Current gaps include provider extraction, distribution plugin provisioning, live verification of the isolated lifecycle controller, and a Backoffice-managed observability package. Versioned encryption envelopes and a SUPERADMIN rewrap operation are implemented; deployment and restore acceptance remain. See [the target architecture](docs/ARCHITECTURE.md), [repository audit](docs/REPOSITORY_AUDIT.md), and [phase/task ledger](docs/ROADMAP.md).
 
 ## Local development
 
@@ -12,7 +12,7 @@ Install Docker Compose. The default installation generates unique database, JWT,
 docker compose exec rest-api cat /run/artio-secrets/setup-token
 ```
 
-Installation credentials are generated once and persist with the `artio-installation-secrets` volume. Back up that volume together with PostgreSQL; losing the AES key makes encrypted plugin secrets unrecoverable. Follow the [backup and recovery procedure](docs/operations/backup-recovery.md). Optional `.env` values can override generated credentials on the first boot only. Never commit `.env`.
+Installation credentials are generated once and persist with the `artio-installation-secrets` volume. Back up that volume together with PostgreSQL; losing the AES key makes encrypted plugin secrets unrecoverable. Plugin authentication uses a separate stable key so AES rotation does not reset installed plugins. Follow the [backup, recovery and key rotation procedure](docs/operations/backup-recovery.md). Optional `.env` values can override generated credentials on the first boot only. Never commit `.env`.
 
 For IntelliJ development, run the API with `SPRING_PROFILES_ACTIVE=dev`. The `dev` profile supplies local-only credentials so the API can run without optional plugins. Set `ARTIO_SETUP_SKIP=true` to initialize the local SUPERADMIN automatically; its local-only login is `admin@artio.local` / `ArtioDevOnly!ChangeMe2026`. The skip is rejected unless `dev` is active and is always rejected when `production` is active. Omit the skip flag to use the setup wizard. Never reuse these values outside a local development environment.
 
@@ -35,7 +35,7 @@ docker compose --env-file .env --env-file artio-docker/observability/.env \
   -f artio-docker/docker-compose.yml -f artio-docker/docker-compose.observability.yml up --build
 ```
 
-Grafana, Prometheus, and Jaeger are bound to localhost on ports 3000, 9090, and 16686. Disable and remove the add-on containers with `docker compose ... down`; its data volumes can be removed separately when the operator intentionally wants to discard telemetry history. The current plugin manager lifecycle controls individual extension containers; a multi-container observability pack still needs a bundle lifecycle adapter before it can be installed and removed from Backoffice as one plugin.
+Grafana, Prometheus, and Jaeger are bound to localhost on ports 3000, 9090, and 16686. Disable and remove the add-on containers with `docker compose ... down`; its data volumes can be removed separately when the operator intentionally wants to discard telemetry history. The plugin contract now supports up to eight managed sidecar services per extension. This Compose distribution has not yet been packaged as a registry-backed plugin with schema-backed settings and authenticated Backoffice access.
 
 Set Stripe test credentials and forward Stripe's `checkout.session.completed` and `checkout.session.expired` events to `POST /api/v1/payments/stripe/webhook` to exercise payment confirmation and reservation release. SMTP is optional; set `ARTIO_SMTP_HOST`, `ARTIO_SMTP_PORT`, credentials, and TLS options to send order email. In-app notifications are persisted even without SMTP.
 

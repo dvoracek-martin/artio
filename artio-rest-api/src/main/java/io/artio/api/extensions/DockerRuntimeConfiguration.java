@@ -26,7 +26,8 @@ public class DockerRuntimeConfiguration {
     DockerExtensionRuntime dockerExtensionRuntime(DockerClient docker,
             @Value("${artio.extensions.docker.network:artio-extensions}") String network,
             @Value("${artio.extensions.docker.port:8080}") int port,
-            io.artio.api.security.EncryptionService encryption) {
-        return new DockerExtensionRuntime(docker, network, port, encryption);
+            io.artio.api.security.ExtensionCredentialService credentials) {
+        return new DockerExtensionRuntime(docker, network, port, credentials);
     }
+
 }

@@ -1,6 +1,6 @@
 # Backup and recovery for a single Artio installation
 
-Artio stores commerce records in PostgreSQL and installation credentials in the `artio-installation-secrets` named volume. The secrets volume contains the database password, JWT signing secret, AES-GCM encryption key and first-run setup token. Back up both; a database dump without the matching AES key cannot decrypt saved plugin secrets.
+Artio stores commerce records in PostgreSQL and installation credentials in the `artio-installation-secrets` named volume. The secrets volume contains the database password, JWT signing secret, active AES-GCM encryption key, stable extension-authentication key and first-run setup token. Back up both; a database dump without the matching keys cannot decrypt saved plugin secrets or preserve plugin credentials.
 
 Run commands from the repository root with the normal Compose project name (`artio`). Keep the database dump and secrets archive in encrypted, access-controlled storage outside the machine running Artio. Do not commit either archive.
 
@@ -33,8 +33,17 @@ docker compose up -d
 
 The command above assumes a matching database schema and named volumes. For recovery on a new host, create the installation using Compose first, stop the API, restore the secrets into the newly created `artio_artio-installation-secrets` volume, restore PostgreSQL, then start the stack. Verify readiness, setup status, login, and decryption of an existing plugin configuration before routing traffic.
 
-## Key loss and rotation status
+## Key loss and rotation
 
-If the AES key is lost, PostgreSQL commerce data remains readable but encrypted plugin credentials cannot be recovered; configure new provider credentials. Restore the matching key from the same backup set to recover them.
+If an AES encryption key is lost, PostgreSQL commerce data remains readable but values encrypted with that key cannot be recovered; restore the matching key from the same backup set or configure new provider credentials. The separate `extension-auth-key` must also be restored: changing it changes every plugin runtime credential.
 
-The current AES-GCM ciphertext format uses one active installation key and does not yet provide versioned envelopes or an online key rotation workflow. Do not replace `encryption-key` in a live installation: existing plugin secrets would become unreadable. Key versioning, rotation, and restore acceptance remain open Phase 2 work tracked in [ROADMAP.md](../ROADMAP.md).
+New ciphertexts use `v2.<key-id>.<base64>` AES-256-GCM envelopes. Legacy unversioned ciphertext remains readable while its key is supplied. The active key id is the full 64-character lowercase SHA-256 digest of the UTF-8 key material. During rotation, Artio reads up to eight previous keys from a JSON file in the protected installation secret volume. The file maps each key id to its raw key material; `ARTIO_ENCRYPTION_KEYRING_FILE` contains only the file path. Never put raw key material in `.env`, send it to an Artio API endpoint or commit it to the repository.
+
+To rotate safely:
+
+1. Create a normal encrypted backup set and verify that the matching `extension-auth-key` is retained.
+2. Generate a new random active AES key in the installation secrets volume. Keep the prior active key in a JSON file such as `/run/artio-secrets/encryption-keyring.json`, keyed by its derived id, and set `ARTIO_ENCRYPTION_KEYRING_FILE=/run/artio-secrets/encryption-keyring.json` for both API and event-worker. Restart them to load the new active key and prior keyring. Keep `extension-auth-key` unchanged.
+3. As SUPERADMIN, call `POST /api/v1/admin/system/security/encryption/rotate`. The endpoint accepts no key material. It locks and rewraps every MFA secret and extension secret in one database transaction and appends an audit event. A failure rolls the transaction back. Its response reports the active key id and number of rewrapped values.
+4. Verify that MFA authentication and configured plugin invocations still work, then take another database-and-secrets backup. Remove the prior AES key from the keyring and restart API/event-worker only after that verification. Retain the previous backup according to the normal recovery policy.
+
+If the rotation request fails because a ciphertext cannot be decrypted, leave the previous key in the keyring, restore the matching backup if needed, and resolve the key mismatch before retrying. The endpoint is idempotent: values already encrypted by the active key are left unchanged. This flow does not rotate the stable plugin-authentication key.

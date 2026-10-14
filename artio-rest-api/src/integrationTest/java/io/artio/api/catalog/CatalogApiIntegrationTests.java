@@ -48,6 +48,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(CatalogApiIntegrationTests.LocalCacheConfiguration.class)
 class CatalogApiIntegrationTests {
+    private static final String ACTIVE_TEST_ENCRYPTION_KEY = "integration-test-encryption-key-value-32-bytes-minimum";
+    private static final String PREVIOUS_TEST_ENCRYPTION_KEY = "previous-test-encryption-key-value-32-bytes-minimum";
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
     private static final AtomicReference<String> STRIPE_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\"}");
@@ -89,7 +91,9 @@ class CatalogApiIntegrationTests {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("artio.security.jwt-secret", () -> "integration-test-jwt-secret-value-32-bytes-minimum");
-        registry.add("artio.security.encryption-key", () -> "integration-test-encryption-key-value-32-bytes-minimum");
+        registry.add("artio.security.encryption-key", () -> ACTIVE_TEST_ENCRYPTION_KEY);
+        registry.add("artio.security.encryption-keyring", () -> "{\"" + io.artio.api.security.EncryptionService.keyId(PREVIOUS_TEST_ENCRYPTION_KEY)
+                + "\":\"" + PREVIOUS_TEST_ENCRYPTION_KEY + "\"}");
         registry.add("artio.setup.token", () -> "integration-test-setup-token-value-32-bytes-minimum");
         registry.add("artio.extensions.trusted-registries", () -> "ghcr.io");
         registry.add("artio.inventory.expiry-interval-ms", () -> "3600000");
@@ -358,6 +362,42 @@ class CatalogApiIntegrationTests {
                 new io.artio.api.enterprise.SystemSettingsController.SystemSettingsUpdate("Studio Zürich", "CH", "CHF", "de-CH",
                         List.of("de"), "Europe/Zurich", "http://shop.example.test"), ApiError.class);
         assertThat(invalidUrl.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void encryptionRotationRequiresSuperadminAndRewrapsMfaAndPluginSecrets() throws Exception {
+        String path = "/api/v1/admin/system/security/encryption/rotate";
+        assertThat(adminExchange(path, HttpMethod.POST, null, ApiError.class).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET role='SUPERADMIN' WHERE id=?", adminUserId);
+        var ownerLogin = http.postForObject("/api/auth/login",
+                Map.of("email", "admin-" + adminUserId + "@example.test", "password", "admin-password-123"), LoginResponse.class);
+        assertThat(ownerLogin).isNotNull();
+        adminToken = ownerLogin.accessToken();
+
+        var previousEncryption = new io.artio.api.security.EncryptionService(PREVIOUS_TEST_ENCRYPTION_KEY);
+        String oldMfaCiphertext = previousEncryption.encrypt("mfa-secret-material");
+        String oldPluginCiphertext = previousEncryption.encrypt("provider-secret-material");
+        jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret) VALUES (?,?)", adminUserId, oldMfaCiphertext);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,encrypted_secrets) "
+                        + "VALUES ('test.key-rotation','{}'::jsonb,'ghcr.io/artio/test@sha256:'||repeat('a',64),'VALIDATED',?::jsonb)",
+                mapper.writeValueAsString(Map.of("apiKey", oldPluginCiphertext)));
+
+        var rotated = adminExchange(path, HttpMethod.POST, null,
+                io.artio.api.security.EncryptionKeyRotationController.RotationResult.class);
+
+        assertThat(rotated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(rotated.getBody()).isNotNull();
+        assertThat(rotated.getBody().activeKeyId()).isEqualTo(io.artio.api.security.EncryptionService.keyId(ACTIVE_TEST_ENCRYPTION_KEY));
+        assertThat(rotated.getBody().mfaSecretsRewrapped()).isEqualTo(1);
+        assertThat(rotated.getBody().extensionSecretsRewrapped()).isEqualTo(1);
+        String newMfaCiphertext = jdbc.queryForObject("SELECT encrypted_secret FROM mfa_methods WHERE user_id=?", String.class, adminUserId);
+        String newPluginCiphertext = jdbc.queryForObject("SELECT encrypted_secrets->>'apiKey' FROM extension_plugins WHERE plugin_id='test.key-rotation'", String.class);
+        assertThat(encryption.isEncryptedWithActiveKey(newMfaCiphertext)).isTrue();
+        assertThat(encryption.isEncryptedWithActiveKey(newPluginCiphertext)).isTrue();
+        assertThat(encryption.decrypt(newMfaCiphertext)).isEqualTo("mfa-secret-material");
+        assertThat(encryption.decrypt(newPluginCiphertext)).isEqualTo("provider-secret-material");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE path=? AND action='UPDATE'", Integer.class, path)).isEqualTo(1);
     }
 
     @Test

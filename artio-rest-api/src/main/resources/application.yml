@@ -84,6 +84,8 @@ artio:
   security:
     jwt-secret: ${ARTIO_JWT_SECRET}
     encryption-key: ${ARTIO_ENCRYPTION_KEY}
+    encryption-keyring: ${ARTIO_ENCRYPTION_KEYRING:${ARTIO_ENCRYPTION_KEYRING_FILE:}}
+    extension-auth-key: ${ARTIO_EXTENSION_AUTH_KEY:${artio.security.encryption-key}}
     allowed-origins: ${ARTIO_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4201}
     oauth2-enabled: ${ARTIO_OAUTH2_ENABLED:false}
   search:

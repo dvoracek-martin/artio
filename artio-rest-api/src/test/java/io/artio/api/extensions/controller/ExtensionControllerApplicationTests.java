@@ -17,7 +17,7 @@ import org.springframework.http.HttpStatus;
                 "artio.extensions.docker.enabled=true",
                 "artio.extensions.docker.mode=controller",
                 "artio.extensions.controller.token=integration-controller-token-value-at-least-32-characters",
-                "artio.security.encryption-key=integration-test-encryption-key-value-32-bytes-minimum",
+                "artio.security.extension-auth-key=integration-test-extension-auth-key-value-32-bytes-minimum",
                 "springdoc.api-docs.enabled=false",
                 "springdoc.swagger-ui.enabled=false"
         })

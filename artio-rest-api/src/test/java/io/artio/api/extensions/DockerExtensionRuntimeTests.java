@@ -87,7 +87,7 @@ class DockerExtensionRuntimeTests {
                     java.util.List.of(new io.artio.extensions.PluginManifest.BundleService("metrics",
                             "ghcr.io/artio/metrics@sha256:" + "b".repeat(64), server.getAddress().getPort(), "/metrics-health")));
             var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(),
-                    new io.artio.api.security.EncryptionService("unit-test-key-material-that-is-at-least-32-bytes"));
+                    new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
 
             runtime.enable(manifest, 1);
 
@@ -131,12 +131,12 @@ class DockerExtensionRuntimeTests {
 
     @Test
     void extensionCredentialsAreStableAndScopedToThePlugin() {
-        var encryption = new io.artio.api.security.EncryptionService("unit-test-key-material-that-is-at-least-32-bytes");
-        String token = encryption.deriveExtensionCredential("payments.example");
-        assertThat(token).isEqualTo(encryption.deriveExtensionCredential("payments.example"));
-        assertThat(token).isNotEqualTo(encryption.deriveExtensionCredential("shipping.example"));
-        assertThat(token).isNotEqualTo(encryption.deriveExtensionCredential("payments.example", 2));
-        assertThat(encryption.deriveExtensionCredential("payments.example", 1)).isEqualTo(token);
+        var credentials = new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes");
+        String token = credentials.derive("payments.example");
+        assertThat(token).isEqualTo(credentials.derive("payments.example"));
+        assertThat(token).isNotEqualTo(credentials.derive("shipping.example"));
+        assertThat(token).isNotEqualTo(credentials.derive("payments.example", 2));
+        assertThat(credentials.derive("payments.example", 1)).isEqualTo(token);
         assertThat(token).hasSize(43);
     }
 
@@ -175,14 +175,15 @@ class DockerExtensionRuntimeTests {
             when(settings.getNetworks()).thenReturn(Map.of("extensions", network));
             when(network.getIpAddress()).thenReturn("127.0.0.1");
 
-            var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(), encryption);
+            var credentials = new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes");
+            var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(), credentials);
             String key = "00000000-0000-0000-0000-000000000001";
             var result = runtime.invoke("payments.example", 2, "payment.provider.v1", "authorize", key,
                     "{\"apiKey\":\"provider-secret\"}", "{\"amount\":125}", Duration.ofSeconds(2));
 
             assertThat(result.statusCode()).isEqualTo(200);
             assertThat(new ObjectMapper().readTree(result.responseJson()).get("authorized").asBoolean()).isTrue();
-            assertThat(authorization.get()).isEqualTo("Bearer " + encryption.deriveExtensionCredential("payments.example", 2));
+            assertThat(authorization.get()).isEqualTo("Bearer " + credentials.derive("payments.example", 2));
             assertThat(apiVersion.get()).isEqualTo("1");
             assertThat(idempotencyKey.get()).isEqualTo(key);
             JsonNode envelope = new ObjectMapper().readTree(body.get());
@@ -233,7 +234,7 @@ class DockerExtensionRuntimeTests {
             when(settings.getNetworks()).thenReturn(Map.of("extensions", network));
             when(network.getIpAddress()).thenReturn("127.0.0.1");
             var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(),
-                    new io.artio.api.security.EncryptionService("unit-test-key-material-that-is-at-least-32-bytes"));
+                    new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
 
             var result = runtime.invoke("payments.example", 1, "payment.provider.v1", "authorize",
                     "00000000-0000-0000-0000-000000000099", "{}", "{}", Duration.ofSeconds(3));
