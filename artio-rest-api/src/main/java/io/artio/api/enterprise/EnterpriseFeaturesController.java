@@ -68,9 +68,35 @@ public class EnterpriseFeaturesController {
     @GetMapping("/api/loyalty/me")
     public LoyaltyView loyalty(JwtAuthenticationToken auth){UUID user=user(auth);jdbc.update("INSERT INTO loyalty_accounts(user_id) VALUES (?) ON CONFLICT DO NOTHING",user);return jdbc.queryForObject("SELECT points,tier,updated_at FROM loyalty_accounts WHERE user_id=?",(rs,n)->new LoyaltyView(rs.getLong(1),rs.getString(2),rs.getTimestamp(3).toInstant()),user);}
     @PostMapping("/api/loyalty/earn/{orderId}") @Transactional
-    public LoyaltyView earn(@PathVariable UUID orderId,JwtAuthenticationToken auth){UUID user=user(auth);var rows=jdbc.query("SELECT total,status FROM orders WHERE id=? AND user_id=? FOR UPDATE",(rs,n)->new OrderTotal(rs.getBigDecimal(1),rs.getString(2)),orderId,user);if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");OrderTotal order=rows.getFirst();if(!Set.of("PAID","SHIPPED","DELIVERED").contains(order.status()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Points are earned after payment");long points=order.total().setScale(0,RoundingMode.DOWN).longValueExact();jdbc.update("INSERT INTO loyalty_accounts(user_id) VALUES (?) ON CONFLICT DO NOTHING",user);int inserted=jdbc.update("INSERT INTO loyalty_transactions(id,user_id,order_id,points,kind) VALUES (?,?,?, ?,'EARN') ON CONFLICT DO NOTHING",UUID.randomUUID(),user,orderId,points);if(inserted==1)jdbc.update("UPDATE loyalty_accounts SET points=points+?,tier=CASE WHEN points+?>=10000 THEN 'GOLD' WHEN points+?>=2500 THEN 'SILVER' ELSE 'BRONZE' END,updated_at=now() WHERE user_id=?",points,points,points,user);return loyalty(auth);}
+    public LoyaltyView earn(@PathVariable UUID orderId,JwtAuthenticationToken auth){UUID user=user(auth);var rows=jdbc.query("SELECT total,status FROM orders WHERE id=? AND user_id=? FOR UPDATE",(rs,n)->new OrderTotal(rs.getBigDecimal(1),rs.getString(2)),orderId,user);if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");OrderTotal order=rows.getFirst();if(!Set.of("PAID","SHIPPED","DELIVERED").contains(order.status()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Points are earned after payment");BigDecimal refunded=jdbc.queryForObject("SELECT COALESCE(sum(refunded_amount),0) FROM payments WHERE order_id=?",BigDecimal.class,orderId);LoyaltyAccounting.earnForOrder(jdbc,user,orderId,order.total().subtract(refunded));return loyalty(auth);}
     @PostMapping("/api/loyalty/redeem") @Transactional
-    public LoyaltyView redeemPoints(@RequestBody PointsRequest request,JwtAuthenticationToken auth){if(request==null||request.points()<100||request.points()%100!=0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Points must be redeemed in increments of 100");UUID user=user(auth);jdbc.update("INSERT INTO loyalty_accounts(user_id) VALUES (?) ON CONFLICT DO NOTHING",user);int changed=jdbc.update("UPDATE loyalty_accounts SET points=points-?,updated_at=now() WHERE user_id=? AND points>=?",request.points(),user,request.points());if(changed==0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Insufficient points");jdbc.update("INSERT INTO loyalty_transactions(id,user_id,points,kind) VALUES (?,?,-?,'REDEEM')",UUID.randomUUID(),user,request.points());return loyalty(auth);}
+    public LoyaltyView redeemPoints(@RequestBody PointsRequest request,@RequestHeader("Idempotency-Key") String key,JwtAuthenticationToken auth){if(request==null||request.points()<100||request.points()%100!=0||key==null||!key.matches("[A-Za-z0-9._:-]{1,128}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Points must be redeemed in increments of 100 with a valid Idempotency-Key");UUID user=user(auth);jdbc.update("INSERT INTO loyalty_accounts(user_id) VALUES (?) ON CONFLICT DO NOTHING",user);jdbc.query("SELECT points FROM loyalty_accounts WHERE user_id=? FOR UPDATE",rs->{if(rs.next())return rs.getLong(1);return 0L;},user);var prior=jdbc.query("SELECT points FROM loyalty_transactions WHERE user_id=? AND kind='REDEEM' AND idempotency_key=?",(rs,n)->rs.getLong(1),user,key);if(!prior.isEmpty()){if(prior.getFirst()!=-request.points())throw new ResponseStatusException(HttpStatus.CONFLICT,"Idempotency key was already used for a different points redemption");return loyalty(auth);}int changed=jdbc.update("UPDATE loyalty_accounts SET points=points-?,updated_at=now() WHERE user_id=? AND points>=?",request.points(),user,request.points());if(changed==0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Insufficient points");jdbc.update("INSERT INTO loyalty_transactions(id,user_id,points,kind,idempotency_key) VALUES (?,?,-?,'REDEEM',?)",UUID.randomUUID(),user,request.points(),key);return loyalty(auth);}
+
+    @GetMapping("/api/admin/loyalty/{userId}")
+    public LoyaltyAccountView adminLoyalty(@PathVariable UUID userId){
+        var accounts=jdbc.query("SELECT points,tier,updated_at FROM loyalty_accounts WHERE user_id=?",
+                (rs,n)->new LoyaltyView(rs.getLong(1),rs.getString(2),rs.getTimestamp(3).toInstant()),userId);
+        if(accounts.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Loyalty account not found");
+        List<LoyaltyTransactionView> transactions=jdbc.query("SELECT id,order_id,refund_id,points,kind,reason,created_at FROM loyalty_transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 200",
+                (rs,n)->new LoyaltyTransactionView(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getObject(3,UUID.class),rs.getLong(4),rs.getString(5),rs.getString(6),rs.getTimestamp(7).toInstant()),userId);
+        return new LoyaltyAccountView(userId,accounts.getFirst(),transactions);
+    }
+
+    @PostMapping("/api/admin/loyalty/{userId}/adjust") @Transactional
+    public LoyaltyAccountView adjustLoyalty(@PathVariable UUID userId,@RequestHeader("Idempotency-Key") String key,@RequestBody LoyaltyAdjustment request,JwtAuthenticationToken auth){
+        if(key==null||!key.matches("[A-Za-z0-9._:-]{1,128}")||request==null||request.points()==0||request.points() < -1_000_000||request.points()>1_000_000||request.reason()==null||request.reason().isBlank()||request.reason().length()>500)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A non-zero adjustment and reason are required");
+        jdbc.update("INSERT INTO loyalty_accounts(user_id) VALUES (?) ON CONFLICT DO NOTHING",userId);
+        jdbc.query("SELECT points FROM loyalty_accounts WHERE user_id=? FOR UPDATE",rs->{if(rs.next())return rs.getLong(1);return 0L;},userId);
+        var prior=jdbc.query("SELECT points,reason FROM loyalty_transactions WHERE user_id=? AND kind='ADJUST' AND idempotency_key=?",(rs,n)->new LoyaltyPrior(rs.getLong(1),rs.getString(2)),userId,key);
+        if(!prior.isEmpty()){if(prior.getFirst().points()!=request.points()||!Objects.equals(prior.getFirst().reason(),request.reason().trim()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Idempotency key was already used for a different adjustment");return adminLoyalty(userId);}
+        jdbc.update("INSERT INTO loyalty_transactions(id,user_id,points,kind,idempotency_key,reason) VALUES (?,?,?,'ADJUST',?,?)",UUID.randomUUID(),userId,request.points(),key,request.reason().trim());
+        jdbc.update("UPDATE loyalty_accounts SET points=points+?,tier=CASE WHEN points+?>=10000 THEN 'GOLD' WHEN points+?>=2500 THEN 'SILVER' ELSE 'BRONZE' END,updated_at=now() WHERE user_id=?",
+                request.points(),request.points(),request.points(),userId);
+        jdbc.update("INSERT INTO audit_logs(id,user_id,action,path,status,occurred_at) VALUES (?,?,'LOYALTY_ADJUST','/api/admin/loyalty/'||CAST(? AS text),200,now())",
+                UUID.randomUUID(),user(auth),userId);
+        return adminLoyalty(userId);
+    }
 
     @PostMapping("/api/interactions")
     public void interaction(@RequestBody InteractionRequest request,org.springframework.security.core.Authentication auth){if(request==null||request.variantId()==null||!Set.of("VIEW","CART").contains(request.kind()))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Client interactions may only be VIEW or CART");UUID user=auth instanceof JwtAuthenticationToken jwt?user(jwt):null;jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind) VALUES (?,?,?,?)",UUID.randomUUID(),user,request.variantId(),request.kind());}
@@ -108,6 +134,10 @@ public class EnterpriseFeaturesController {
     public record GiftCardRedeem(String code,BigDecimal amount,String currency,UUID orderId){}
     public record GiftCardBalance(UUID id,BigDecimal balance,String currency){}
     public record LoyaltyView(long points,String tier,Instant updatedAt){}
+    public record LoyaltyAccountView(UUID userId,LoyaltyView balance,List<LoyaltyTransactionView> transactions){}
+    public record LoyaltyTransactionView(UUID id,UUID orderId,UUID refundId,long points,String kind,String reason,Instant createdAt){}
+    private record LoyaltyPrior(long points,String reason){}
+    public record LoyaltyAdjustment(long points,String reason){}
     public record PointsRequest(long points){}
     public record InteractionRequest(UUID variantId,String kind){}
     public record Recommendation(UUID variantId,long interactionScore,String strategy){}

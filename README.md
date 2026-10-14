@@ -114,6 +114,10 @@ The storefront includes responsive catalog browsing, search, bundle configuratio
 
 Backoffice order search, detail, fulfillment, timeline, internal notes and CSV export use secured staff APIs. ADMIN/SUPERADMIN can issue idempotent partial or full payment refunds from order detail; customer return requests, staff review, receipt and optional warehouse restocking keep merchandise and financial history separate. See [admin order management](docs/orders/admin-order-management-v1.md), [payment refunds](docs/payments/refunds-v1.md) and [order returns, timeline and notes](docs/orders/returns-v1.md).
 
+Loyalty points accrue after confirmed payment, reverse proportionally with refunds and support idempotent redemption and audited staff adjustments. See [loyalty v1](docs/loyalty/loyalty-v1.md).
+
+Loyalty points accrue once after payment, reverse proportionally with refunds and support idempotent redemption and audited staff adjustments. See [loyalty v1](docs/loyalty/loyalty-v1.md).
+
 The default Compose stack starts PostgreSQL, Apache Kafka, the REST API and Backoffice. Redis, OpenSearch and the optional Storefront use opt-in profiles; observability is available as an optional Compose overlay and as an unpublished plugin source pack. Docker Compose is the supported deployment path.
 
 ## API examples

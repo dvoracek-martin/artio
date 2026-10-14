@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.inventory.InventoryApplicationService;
 import io.artio.api.orders.OrderUpdatePublisher;
 import io.artio.api.orders.OrderTimelineEvents;
+import io.artio.api.enterprise.LoyaltyAccounting;
 import io.artio.extensions.commerce.PaymentProvider;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -208,6 +209,7 @@ public class PaymentController {
         int changed = jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
         if (changed > 0) {
             OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);
+            awardLoyalty(orderId);
             orderUpdates.publish(orderId);
             jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING", orderId);
             jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)", UUID.randomUUID(), orderId, orderId);
@@ -265,7 +267,7 @@ public class PaymentController {
                 return Map.of("status","payment_not_payable");
             }
             int paid = jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
-            if (paid > 0) OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);
+            if (paid > 0) { OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true); awardLoyalty(orderId); }
             orderUpdates.publish(orderId);
             jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING",orderId);
             jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)",UUID.randomUUID(),orderId,orderId);
@@ -282,6 +284,11 @@ public class PaymentController {
         }
         markProviderWebhookProcessed(providerKey, event.providerEventId());
         return Map.of("status", "processed");
+    }
+
+    private void awardLoyalty(UUID orderId) {
+        jdbc.query("SELECT user_id,total FROM orders WHERE id=?",(rs,row)->new Object[]{rs.getObject(1,UUID.class),rs.getBigDecimal(2)},orderId)
+                .stream().findFirst().ifPresent(order->LoyaltyAccounting.earnForOrder(jdbc,(UUID)order[0],orderId,(BigDecimal)order[1]));
     }
 
     private void markProviderWebhookProcessed(String providerKey, String eventId) {
@@ -323,7 +330,7 @@ public class PaymentController {
             String persistedPaymentStatus=jdbc.queryForObject("SELECT status FROM payments WHERE provider_reference=?",String.class,sessionId);
             if(!"CAPTURED".equals(persistedPaymentStatus)) { markWebhookProcessed(eventId); return Map.of("status","payment_not_payable"); }
             int paid=jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'",orderId);
-            if(paid>0)OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);
+            if(paid>0){OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);awardLoyalty(orderId);}
             orderUpdates.publish(orderId);
             jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM payments p JOIN orders o ON o.id=p.order_id JOIN order_items oi ON oi.order_id=o.id WHERE p.provider_reference=? AND o.status='PAID' ON CONFLICT DO NOTHING",sessionId);
             jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||order_id,false,now() FROM payments WHERE provider_reference=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||payments.order_id)",UUID.randomUUID(),sessionId);
@@ -416,6 +423,7 @@ public class PaymentController {
         String paymentStatus = totalRefunded.compareTo(payment.amount()) == 0 ? "REFUNDED" : "PARTIALLY_REFUNDED";
         jdbc.update("UPDATE payments SET refunded_amount=?,status=?,updated_at=now() WHERE id=?",totalRefunded,paymentStatus,paymentId);
         jdbc.update("UPDATE payment_refunds SET status='COMPLETED',provider_reference=?,updated_at=now() WHERE id=?",providerReference,refundId);
+        LoyaltyAccounting.reverseForRefund(jdbc,refundId,payment.orderId());
         OrderTimelineEvents.record(jdbc,payment.orderId(),UUID.fromString(auth.getToken().getSubject()),"PAYMENT_REFUNDED",
                 "Refund processed: "+refundAmount.toPlainString()+" "+payment.currency(),true);
         return ResponseEntity.ok(new RefundView(refundId,paymentId,refundAmount,payment.currency(),totalRefunded,

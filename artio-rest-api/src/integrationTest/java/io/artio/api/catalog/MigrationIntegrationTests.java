@@ -108,6 +108,11 @@ class MigrationIntegrationTests {
                     .containsExactly("payment_refunds","order_returns","order_return_items","order_return_events","order_timeline_events","shipment_tracking_events");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='loyalty_transactions' AND column_name IN ('refund_id','idempotency_key','reason')")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt(1)).isEqualTo(3);
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('notification_delivery_outbox')")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getString(1)).isEqualTo("notification_delivery_outbox");

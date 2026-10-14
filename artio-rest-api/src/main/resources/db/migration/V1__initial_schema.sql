@@ -394,7 +394,7 @@ CREATE UNIQUE INDEX uq_gift_card_redemption_per_order ON gift_card_transactions(
 
 CREATE TABLE loyalty_accounts (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  points BIGINT NOT NULL DEFAULT 0 CHECK (points >= 0),
+  points BIGINT NOT NULL DEFAULT 0,
   tier VARCHAR(16) NOT NULL DEFAULT 'BRONZE',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -403,10 +403,15 @@ CREATE TABLE loyalty_transactions (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   order_id UUID,
   points BIGINT NOT NULL CHECK (points <> 0),
-  kind VARCHAR(16) NOT NULL CHECK (kind IN ('EARN','REDEEM','ADJUST')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(user_id,order_id,kind)
+  kind VARCHAR(16) NOT NULL CHECK (kind IN ('EARN','REDEEM','ADJUST','REFUND')),
+  refund_id UUID REFERENCES payment_refunds(id),
+  idempotency_key VARCHAR(128),
+  reason VARCHAR(500),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX uq_loyalty_order_earn ON loyalty_transactions(user_id,order_id) WHERE order_id IS NOT NULL AND kind='EARN';
+CREATE UNIQUE INDEX uq_loyalty_refund_reversal ON loyalty_transactions(refund_id) WHERE refund_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_loyalty_idempotency_key ON loyalty_transactions(user_id,kind,idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE exchange_rates (
   base_currency CHAR(3) NOT NULL,

@@ -1,5 +1,8 @@
 package io.artio.api.payments;
 
+import io.artio.api.enterprise.LoyaltyAccounting;
+import io.artio.api.orders.OrderTimelineEvents;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.inventory.InventoryApplicationService;
@@ -128,7 +131,12 @@ public class StripePaymentReconciliationWorker {
             if (orderId == null) { clearClaim(payment.id()); return; }
             int captured = jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now(),reconciliation_claimed_at=NULL WHERE id=? AND status='PENDING'", payment.id());
             if (captured == 0) { clearClaim(payment.id()); return; }
-            jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
+            int paid=jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
+            if(paid>0){
+                OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);
+                jdbc.query("SELECT user_id,total FROM orders WHERE id=?",(rs,row)->new Object[]{rs.getObject(1,UUID.class),rs.getBigDecimal(2)},orderId)
+                        .stream().findFirst().ifPresent(order->LoyaltyAccounting.earnForOrder(jdbc,(UUID)order[0],orderId,(java.math.BigDecimal)order[1]));
+            }
             jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING", orderId);
             jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)", UUID.randomUUID(), orderId, orderId);
             orderUpdates.publish(orderId);
@@ -143,6 +151,7 @@ public class StripePaymentReconciliationWorker {
             boolean hasPending = Boolean.TRUE.equals(jdbc.queryForObject(
                     "SELECT EXISTS(SELECT 1 FROM payments WHERE order_id=? AND status='PENDING')", Boolean.class, orderId));
             if (!hasPending && jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'", orderId) > 0) {
+                OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_CANCELLED","Order cancelled because payment expired",true);
                 for (var reservation : inventory.reservationsByOrder(orderId))
                     if (reservation.state() == io.artio.inventory.ReservationState.RESERVED) inventory.release(reservation.id());
                 orderUpdates.publish(orderId);
