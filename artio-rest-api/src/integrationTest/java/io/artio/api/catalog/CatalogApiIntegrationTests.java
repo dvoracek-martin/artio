@@ -1675,6 +1675,8 @@ class CatalogApiIntegrationTests {
         assertThat(contract.at("/paths/~1api~1v1~1auth~1register/post/security").isMissingNode()).isTrue();
         assertThat(contract.at("/paths/~1api~1v1~1auth~1mfa~1totp~1enrollment/post/security").isArray()).isTrue();
         assertThat(contract.at("/paths/~1api~1v1~1products/get").isMissingNode()).isFalse();
+        assertThat(contract.at("/paths/~1api~1v1~1payments~1orders~1{orderId}~1checkout-session/post/responses/422").isMissingNode()).isFalse();
+        assertThat(contract.at("/paths/~1api~1v1~1payments~1orders~1{orderId}~1checkout-session/post/responses/502").isMissingNode()).isFalse();
     }
 
     private record LoginResponse(String accessToken, String tokenType, long expiresIn, UUID userId, String email, String role,boolean mfaEnrollmentRequired) { }

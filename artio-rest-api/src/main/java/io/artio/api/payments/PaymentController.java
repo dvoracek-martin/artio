@@ -6,6 +6,11 @@ import io.artio.api.orders.OrderTimelineEvents;
 import io.artio.api.enterprise.LoyaltyAccounting;
 import io.artio.api.enterprise.GiftCardAccounting;
 import io.artio.extensions.commerce.PaymentProvider;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -45,6 +50,16 @@ public class PaymentController {
     }
 
     @PostMapping("/orders/{orderId}/checkout-session")
+    @Operation(summary = "Create a hosted payment checkout session", description = "Creates checkout through the configured payment provider plugin. Definitive no-session rejection cancels the pending order and restores stock and gift-card tender; ambiguous outcomes remain retryable.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Checkout session created"),
+            @ApiResponse(responseCode = "422", description = "Provider definitively rejected checkout; pending order was cancelled",
+                    content = @Content(schema = @Schema(implementation = io.artio.api.error.ApiError.class))),
+            @ApiResponse(responseCode = "502", description = "Provider outcome is ambiguous; retry with the same checkout identity",
+                    content = @Content(schema = @Schema(implementation = io.artio.api.error.ApiError.class))),
+            @ApiResponse(responseCode = "503", description = "No payment provider is configured or enabled",
+                    content = @Content(schema = @Schema(implementation = io.artio.api.error.ApiError.class)))
+    })
     public CheckoutSession checkoutSession(@PathVariable UUID orderId, JwtAuthenticationToken auth) {
         PaymentProvider extension = provider.getIfAvailable();
         if (extension == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "No payment provider is configured");
