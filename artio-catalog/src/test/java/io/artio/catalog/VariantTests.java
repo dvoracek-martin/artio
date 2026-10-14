@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class VariantTests {
@@ -23,6 +24,37 @@ class VariantTests {
         assertThat(variant.getSku()).isEqualTo(sku);
         assertThat(variant.isActive()).isTrue();
         assertThat(variant.getDomainEvents()).containsExactly(new VariantCreated(id, productId, name, sku));
+    }
+
+    @Test
+    void storesImmutableTypedCombinationValuesOnVariant() {
+        var variant = Variant.create(new VariantId(UUID.randomUUID()), new ProductId(UUID.randomUUID()),
+                new VariantName("Blue / Medium"), new Sku("SHIRT-BLU-M"), Map.of("size", "M", "color", "blue"));
+
+        assertThat(variant.getAttributes()).containsExactlyInAnyOrderEntriesOf(Map.of("size", "M", "color", "blue"));
+        assertThat(((VariantCreated) variant.getDomainEvents().getFirst()).attributes()).containsEntry("color", "blue");
+        assertThatThrownBy(() -> variant.getAttributes().put("size", "L")).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void updatesCombinationAndDetailsOnlyWhenTheValueChanges() {
+        var variant = variant();
+        variant.update(new VariantName("Blue medium"), new Sku("ITEM-BLU-M"), Map.of("size", "M"));
+        int eventCount = variant.getDomainEvents().size();
+        variant.update(new VariantName("Blue medium"), new Sku("ITEM-BLU-M"), Map.of("size", "M"));
+
+        assertThat(variant.getAttributes()).containsEntry("size", "M");
+        assertThat(variant.getDomainEvents()).hasSize(eventCount);
+    }
+
+    @Test
+    void rejectsMalformedOptionKeysAndBlankValues() {
+        assertThatThrownBy(() -> Variant.create(new VariantId(UUID.randomUUID()), new ProductId(UUID.randomUUID()),
+                new VariantName("Blue"), new Sku("ITEM-RED"), Map.of("Color", "red")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Variant.create(new VariantId(UUID.randomUUID()), new ProductId(UUID.randomUUID()),
+                new VariantName("Blue"), new Sku("ITEM-RED"), Map.of("color", " ")))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

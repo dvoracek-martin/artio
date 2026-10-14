@@ -22,6 +22,11 @@ public class VariantResourceController {
         return variants.findById(id);
     }
 
+    @PutMapping("/{id}")
+    public VariantResponse update(@PathVariable UUID id, @RequestBody VariantRequest request) {
+        return variants.update(id, request);
+    }
+
     @PutMapping("/{id}/active")
     public VariantResponse setActive(@PathVariable UUID id, @RequestBody SetActiveRequest request) {
         return variants.setActive(id, request.active());

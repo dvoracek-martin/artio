@@ -24,6 +24,9 @@ CREATE TABLE catalog_variant (
 );
 
 CREATE INDEX catalog_variant_product_id_idx ON catalog_variant(product_id);
+ALTER TABLE catalog_variant ADD COLUMN attributes JSONB NOT NULL DEFAULT '{}'::jsonb;
+CREATE UNIQUE INDEX catalog_variant_combination_unique_idx ON catalog_variant(product_id, attributes)
+    WHERE attributes <> '{}'::jsonb;
 
 CREATE TABLE catalog_product_media (
     id UUID PRIMARY KEY,

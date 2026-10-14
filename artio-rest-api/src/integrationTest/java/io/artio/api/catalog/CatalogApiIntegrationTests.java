@@ -1,6 +1,7 @@
 package io.artio.api.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,6 +72,9 @@ class CatalogApiIntegrationTests {
 
     @Autowired
     private io.artio.api.inventory.ReservationExpiryScheduler reservationExpiryScheduler;
+
+    @Autowired
+    private VariantApplicationService variantApplicationService;
 
     @Autowired
     private io.artio.api.notifications.OrderEventOutboxPublisher orderEventOutboxPublisher;
@@ -666,6 +670,40 @@ class CatalogApiIntegrationTests {
         assertThat(restored.getBody()).isNotNull();
         assertThat(restored.getBody().archived()).isFalse();
         assertThat(restored.getBody().active()).isFalse();
+    }
+
+    @Test
+    void variantCombinationsAreTypedUniqueEditableAndPersisted() {
+        var product = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Variant shirt", "Combination test", "VAR-" + UUID.randomUUID().toString().substring(0, 8)), ProductResponse.class);
+        adminExchange("/api/v1/attribute-definitions", HttpMethod.POST,
+                new MetadataApplicationService.AttributeRequest("color", "Color", io.artio.catalog.AttributeDefinition.Type.TEXT, false),
+                MetadataApplicationService.AttributeView.class);
+        adminExchange("/api/v1/attribute-definitions", HttpMethod.POST,
+                new MetadataApplicationService.AttributeRequest("size", "Size", io.artio.catalog.AttributeDefinition.Type.TEXT, false),
+                MetadataApplicationService.AttributeView.class);
+
+        var created = adminExchange("/api/v1/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Navy small", "VAR-NAVY-S", Map.of("color", "navy", "size", "S")),
+                VariantResponse.class, product.getBody().id());
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(created.getBody().attributes()).containsExactlyInAnyOrderEntriesOf(Map.of("color", "navy", "size", "S"));
+        assertThatThrownBy(() -> variantApplicationService.create(product.getBody().id(),
+                new VariantRequest("Duplicate", "VAR-NAVY-S2", Map.of("size", "S", "color", "navy"))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("same option combination");
+
+        var anonymousUpdate = http.exchange("/api/v1/variants/{id}", HttpMethod.PUT,
+                new HttpEntity<>(new VariantRequest("Navy small", "VAR-NAVY-S", Map.of("color", "navy", "size", "S"))),
+                ApiError.class, created.getBody().id());
+        assertThat(anonymousUpdate.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        var updated = adminExchange("/api/v1/variants/{id}", HttpMethod.PUT,
+                new VariantRequest("Navy medium", "VAR-NAVY-M", Map.of("color", "navy", "size", "M")),
+                VariantResponse.class, created.getBody().id());
+        assertThat(updated.getBody().name()).isEqualTo("Navy medium");
+        assertThat(updated.getBody().attributes()).containsEntry("size", "M");
+        var persisted = http.getForEntity("/api/v1/variants/{id}", VariantResponse.class, created.getBody().id());
+        assertThat(persisted.getBody().attributes()).containsEntry("color", "navy").containsEntry("size", "M");
     }
 
     @Test

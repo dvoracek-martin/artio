@@ -5,4 +5,5 @@ plugins {
 
 dependencies {
     implementation(project(":artio-catalog"))
+    implementation("com.fasterxml.jackson.core:jackson-databind")
 }
