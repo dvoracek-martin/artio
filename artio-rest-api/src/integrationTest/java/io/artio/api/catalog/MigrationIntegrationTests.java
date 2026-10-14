@@ -102,10 +102,10 @@ class MigrationIntegrationTests {
             assertThat(result.getString(1)).isEqualTo("payment_webhook_receipts");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
-                var result = statement.executeQuery("SELECT to_regclass('payment_refunds'),to_regclass('order_returns'),to_regclass('order_return_items'),to_regclass('order_return_events'),to_regclass('order_timeline_events')")) {
+                var result = statement.executeQuery("SELECT to_regclass('payment_refunds'),to_regclass('order_returns'),to_regclass('order_return_items'),to_regclass('order_return_events'),to_regclass('order_timeline_events'),to_regclass('shipment_tracking_events')")) {
             assertThat(result.next()).isTrue();
-            assertThat(java.util.List.of(result.getString(1),result.getString(2),result.getString(3),result.getString(4),result.getString(5)))
-                    .containsExactly("payment_refunds","order_returns","order_return_items","order_return_events","order_timeline_events");
+            assertThat(java.util.List.of(result.getString(1),result.getString(2),result.getString(3),result.getString(4),result.getString(5),result.getString(6)))
+                    .containsExactly("payment_refunds","order_returns","order_return_items","order_return_events","order_timeline_events","shipment_tracking_events");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('notification_delivery_outbox')")) {

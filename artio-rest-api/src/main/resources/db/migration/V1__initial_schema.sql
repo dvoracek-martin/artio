@@ -235,6 +235,16 @@ CREATE TABLE order_timeline_events (
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_order_timeline_order ON order_timeline_events(order_id, occurred_at, id);
+CREATE TABLE shipment_tracking_events (
+  id UUID PRIMARY KEY,
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  tracking_reference VARCHAR(255) NOT NULL,
+  carrier_status VARCHAR(80) NOT NULL,
+  last_location VARCHAR(200),
+  occurred_at TIMESTAMPTZ,
+  checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_shipment_tracking_order ON shipment_tracking_events(order_id,checked_at DESC);
 CREATE INDEX idx_orders_user ON orders(user_id);
 CREATE INDEX idx_orders_created ON orders(created_at DESC);
 CREATE INDEX idx_carts_user ON carts(user_id);

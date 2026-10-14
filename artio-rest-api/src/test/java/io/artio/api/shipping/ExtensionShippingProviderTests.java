@@ -58,4 +58,20 @@ class ExtensionShippingProviderTests {
         assertThat(quote.currency()).isEqualTo("CHF");
         verify(invoker).invoke("shipping.swiss-post","shipping.provider.v1","quote",stableKey,request);
     }
+
+    @Test
+    void tracksCarrierReferenceAndRejectsUnboundedProviderData() {
+        when(invoker.invoke(eq("shipping.swiss-post"),eq("shipping.provider.v1"),eq("track"),eq(UUID.nameUUIDFromBytes(
+                "artio:track:track:track-1".getBytes(StandardCharsets.UTF_8)).toString()),eq(java.util.Map.of("trackingReference","track-1"))))
+                .thenReturn(new ObjectMapper().valueToTree(new io.artio.extensions.commerce.ShippingProvider.TrackingResult(
+                        "track-1","IN_TRANSIT","Zürich","2026-10-14T10:00:00Z")));
+        assertThat(provider.track("track-1").status()).isEqualTo("IN_TRANSIT");
+
+        when(invoker.invoke(eq("shipping.swiss-post"),eq("shipping.provider.v1"),eq("track"),eq(UUID.nameUUIDFromBytes(
+                "artio:track:track:track-2".getBytes(StandardCharsets.UTF_8)).toString()),eq(java.util.Map.of("trackingReference","track-2"))))
+                .thenReturn(new ObjectMapper().valueToTree(new io.artio.extensions.commerce.ShippingProvider.TrackingResult(
+                        "track-2","x".repeat(81),null,null)));
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->provider.track("track-2"))
+                .isInstanceOf(io.artio.extensions.ExtensionRuntimePort.ExtensionProtocolException.class);
+    }
 }

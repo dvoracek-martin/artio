@@ -84,7 +84,10 @@ public class ExtensionShippingProvider implements ShippingProvider {
     @Override public TrackingResult track(String trackingReference) {
         TrackingResult result = read(invoke("track", Map.of("trackingReference", trackingReference), "track:" + trackingReference), TrackingResult.class);
         if (result.trackingReference() == null || !result.trackingReference().equals(trackingReference)
-                || result.status() == null || result.status().isBlank()) throw protocol("Shipping plugin returned invalid tracking data");
+                || result.status() == null || result.status().isBlank() || result.status().length() > 80
+                || result.lastLocation() != null && result.lastLocation().length() > 200
+                || result.occurredAt() != null && result.occurredAt().length() > 64)
+            throw protocol("Shipping plugin returned invalid tracking data");
         return result;
     }
 
