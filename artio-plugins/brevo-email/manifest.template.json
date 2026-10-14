@@ -1,0 +1,22 @@
+{
+  "manifestVersion": "1",
+  "id": "notifications.brevo",
+  "name": "Brevo Transactional Email",
+  "vendor": "Brevo",
+  "version": "1.0.0",
+  "description": "Provider-neutral transactional email delivery through Brevo SMTP API.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/brevo-email@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": ["notifications.send"],
+  "configuration": {
+    "apiKey": {"type": "secret", "required": true, "secret": true, "label": "Brevo API key", "description": "Transactional email API key.", "format": null, "options": [], "minimumLength": 16, "maximumLength": 512, "minimum": null, "maximum": null},
+    "senderEmail": {"type": "text", "required": true, "secret": false, "label": "Verified sender email", "description": "Email address verified in Brevo.", "format": null, "options": [], "minimumLength": 3, "maximumLength": 254, "minimum": null, "maximum": null},
+    "senderName": {"type": "text", "required": false, "secret": false, "label": "Sender name", "description": "Optional display name for outgoing messages.", "format": null, "options": [], "minimumLength": null, "maximumLength": 100, "minimum": null, "maximum": null}
+  },
+  "extensionPoints": ["notification.channel.v1"],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {"scope": "GLOBAL", "countries": []}
+}
