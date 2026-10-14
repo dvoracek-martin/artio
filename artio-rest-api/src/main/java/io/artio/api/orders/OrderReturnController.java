@@ -127,7 +127,8 @@ public class OrderReturnController {
         for (ReturnLine line : lines) {
             if (request.restock()) {
                 UUID variantId = jdbc.queryForObject("SELECT variant_id FROM order_items WHERE id=?", UUID.class, line.orderItemId());
-                inventory.receive(request.warehouseId(), variantId, java.math.BigDecimal.valueOf(line.quantity()));
+                inventory.receive(request.warehouseId(), variantId, java.math.BigDecimal.valueOf(line.quantity()),
+                        "Customer return " + returnId, userId(auth));
             }
             jdbc.update("UPDATE order_return_items SET restock_warehouse_id=?,restocked_at=? WHERE id=?",
                     request.restock() ? request.warehouseId() : null, request.restock() ? java.sql.Timestamp.from(Instant.now()) : null, line.id());

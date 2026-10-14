@@ -4,6 +4,8 @@ This is the canonical phase/task ledger. Detailed baseline is in [REPOSITORY_AUD
 
 ## Current state
 
+- **Return restock audit attribution (2026-10-14):** Stock receipts created by staff return intake now include the return UUID as the movement reason and the authenticated staff user as actor, using the inventory application's audited receipt operation. `git diff --check` exited 0. Tests/build were not run; Docker-backed persistence acceptance remains unavailable.
+
 - **Backoffice return receiving usability (2026-10-14):** Order detail now loads active warehouses from the inventory API and provides an explicit warehouse selector for restocking. Staff can separately receive without restocking; dismissing a confirmation dialog no longer silently selects that outcome. The return API remains unchanged and financial refund remains a distinct explicit operation. `git diff --check` exited 0. Frontend build was not run; live database workflow remains Docker-gated.
 
 - **Current-state payment terminology correction (2026-10-14):** Updated active P5/P9 acceptance rows to describe configured hosted-checkout providers, the provider-neutral reconciliation worker, and provider-keyed webhook receipts. Historical dated entries retain the provider that was under test at that time. A targeted scan of the active P5/P9 rows confirmed the stale provider-specific descriptions are gone; `git diff --check` exited 0. Documentation-only correction; tests were not run.

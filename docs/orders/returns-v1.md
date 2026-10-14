@@ -18,7 +18,7 @@ Artio separates merchandise returns from payment refunds. A return request track
 
 In Backoffice order details, active warehouses are loaded from the inventory API and offered in a selector for the restock action. Staff choose explicitly between Receive & restock (requires an active warehouse selection) and Receive without restocking; the latter is a separate action and is not inferred by dismissing a confirmation dialog.
 
-Every request, decision, rejection, and receipt is recorded in `order_return_events`. Return line restock warehouse and timestamp are retained. Refunds are never initiated implicitly: staff use the separate idempotent payment refund endpoint after receipt/inspection as appropriate.
+Every request, decision, rejection, and receipt is recorded in `order_return_events`. Return line restock warehouse and timestamp are retained. Each restock writes an inventory movement with the return UUID as its reason and the authenticated staff member as actor. Refunds are never initiated implicitly: staff use the separate idempotent payment refund endpoint after receipt/inspection as appropriate.
 
 ## State model
 
