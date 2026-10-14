@@ -35,6 +35,11 @@ public class ManagedExtensionInvoker {
     }
 
     public JsonNode invoke(String pluginId, String extensionPoint, String operation, Object payload) {
+        return invoke(pluginId, extensionPoint, operation, UUID.randomUUID().toString(), payload);
+    }
+
+    /** Invokes a plugin with a stable caller-owned key for provider operations that must be idempotent across retries. */
+    public JsonNode invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey, Object payload) {
         PluginRow plugin = jdbc.query("""
                 SELECT manifest,public_configuration,encrypted_secrets,lifecycle_state,credential_generation
                 FROM extension_plugins WHERE plugin_id=? AND lifecycle_state<>'UNINSTALLED'
@@ -56,7 +61,7 @@ public class ManagedExtensionInvoker {
             ExtensionRuntimePort runtime = runtimeProvider.getIfAvailable();
             if (runtime == null) throw new ExtensionRuntimePort.ExtensionUnavailableException("Docker extension runtime is disabled");
             var result = runtime.invoke(pluginId, plugin.credentialGeneration(), extensionPoint, operation,
-                    UUID.randomUUID().toString(), configurationJson, payloadJson, DEADLINE);
+                    idempotencyKey, configurationJson, payloadJson, DEADLINE);
             return mapper.readTree(result.responseJson());
         } catch (ExtensionRuntimePort.ExtensionUnavailableException | ExtensionRuntimePort.ExtensionTimeoutException
                 | ExtensionRuntimePort.ExtensionCallException | IllegalArgumentException failure) {

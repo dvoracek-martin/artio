@@ -99,6 +99,8 @@ artio:
     enabled: ${ARTIO_RATE_LIMIT_ENABLED:true}
     requests-per-minute: ${ARTIO_RATE_LIMIT_PER_MINUTE:100}
   payments:
+    provider: ${ARTIO_PAYMENT_PROVIDER:stripe}
+    extension-plugin-id: ${ARTIO_PAYMENTS_EXTENSION_PLUGIN_ID:}
     stripe-secret-key: ${ARTIO_STRIPE_SECRET_KEY:}
     stripe-webhook-secret: ${ARTIO_STRIPE_WEBHOOK_SECRET:}
   storefront-url: ${ARTIO_STOREFRONT_URL:http://localhost:4200}
