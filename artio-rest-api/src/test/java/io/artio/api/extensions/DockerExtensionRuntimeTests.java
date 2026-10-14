@@ -60,6 +60,62 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void enablesBundleOnlyAfterEveryServicePassesItsHealthCheck() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        var healthCalls = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        server.createContext("/health", exchange -> { healthCalls.add("main"); exchange.sendResponseHeaders(204, -1); exchange.close(); });
+        server.createContext("/metrics-health", exchange -> { healthCalls.add("metrics"); exchange.sendResponseHeaders(204, -1); exchange.close(); });
+        server.start();
+        String pluginId = "observability.bundle";
+        String mainName = DockerExtensionRuntime.containerName(pluginId);
+        String serviceName = DockerExtensionRuntime.serviceName(pluginId, "metrics");
+        try {
+            DockerClient docker = mock(DockerClient.class);
+            var mainCommand = mock(InspectContainerCmd.class);
+            var serviceCommand = mock(InspectContainerCmd.class);
+            var mainContainer = runningContainer(pluginId, "main", server.getAddress().getPort());
+            var serviceContainer = runningContainer(pluginId, "metrics", server.getAddress().getPort());
+            when(docker.inspectContainerCmd(mainName)).thenReturn(mainCommand);
+            when(docker.inspectContainerCmd(serviceName)).thenReturn(serviceCommand);
+            when(mainCommand.exec()).thenReturn(mainContainer);
+            when(serviceCommand.exec()).thenReturn(serviceContainer);
+
+            var manifest = new io.artio.extensions.PluginManifest("1", pluginId, "Observability", "Artio", "1.0.0", "Metrics bundle",
+                    "0.1.0", "1.0.0", "ghcr.io/artio/observability@sha256:" + "a".repeat(64), java.util.List.of(),
+                    java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics",
+                    io.artio.extensions.PluginManifest.GeographicAvailability.global(),
+                    java.util.List.of(new io.artio.extensions.PluginManifest.BundleService("metrics",
+                            "ghcr.io/artio/metrics@sha256:" + "b".repeat(64), server.getAddress().getPort(), "/metrics-health")));
+            var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(),
+                    new io.artio.api.security.EncryptionService("unit-test-key-material-that-is-at-least-32-bytes"));
+
+            runtime.enable(manifest, 1);
+
+            assertThat(healthCalls).containsExactlyInAnyOrder("main", "metrics");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static InspectContainerResponse runningContainer(String pluginId, String serviceId, int port) {
+        var container = mock(InspectContainerResponse.class);
+        var state = mock(InspectContainerResponse.ContainerState.class);
+        var config = mock(com.github.dockerjava.api.model.ContainerConfig.class);
+        var settings = mock(NetworkSettings.class);
+        var network = mock(ContainerNetwork.class);
+        when(container.getId()).thenReturn("container-" + serviceId);
+        when(container.getState()).thenReturn(state);
+        when(state.getRunning()).thenReturn(true);
+        when(container.getConfig()).thenReturn(config);
+        when(config.getLabels()).thenReturn(Map.of("io.artio.extension", pluginId, "io.artio.managed", "true", "io.artio.extension.service", serviceId));
+        when(config.getExposedPorts()).thenReturn(new com.github.dockerjava.api.model.ExposedPort[] { com.github.dockerjava.api.model.ExposedPort.tcp(port) });
+        when(container.getNetworkSettings()).thenReturn(settings);
+        when(settings.getNetworks()).thenReturn(Map.of("extensions", network));
+        when(network.getIpAddress()).thenReturn("127.0.0.1");
+        return container;
+    }
+
+    @Test
     void invocationEnvelopeHasStrictBoundsAndStableRequestIdentity() {
         io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1", "authorize", "00000000-0000-0000-0000-000000000001",
                 "{}", "{\"amount\":100}", java.time.Duration.ofSeconds(5));

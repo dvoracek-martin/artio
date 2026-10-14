@@ -17,6 +17,35 @@ class PluginManifestValidatorTests {
     }
 
     @Test
+    void validatesOptionalBundleServicesWithoutChangingSingleImagePlugins() {
+        var manifest = validManifest();
+        var bundle = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(),
+                manifest.extensionPoints(), manifest.healthPath(), manifest.diagnosticsPath(), manifest.geographicAvailability(),
+                List.of(new PluginManifest.BundleService("metrics", "ghcr.io/artio/metrics@sha256:" + "b".repeat(64), 9090, "/-/healthy")));
+        assertThat(validator.validate(bundle, "0.1.0", Set.of())).isEmpty();
+
+        var invalid = new PluginManifest(bundle.manifestVersion(), bundle.id(), bundle.name(), bundle.vendor(), bundle.version(),
+                bundle.description(), bundle.minimumCoreVersion(), bundle.maximumCoreVersion(), bundle.image(),
+                bundle.dependencies(), bundle.permissions(), bundle.configuration(), bundle.extensionPoints(),
+                bundle.healthPath(), bundle.diagnosticsPath(), bundle.geographicAvailability(), List.of(
+                new PluginManifest.BundleService("metrics", "docker.io/metrics:latest", 70000, "//host/admin"),
+                new PluginManifest.BundleService("metrics", "docker.io/metrics:latest", 0, "/health")));
+        assertThat(validator.validate(invalid, "0.1.0", Set.of()))
+                .contains("bundle service port must be between 1 and 65535",
+                        "bundle service healthPath must be a bounded absolute path within the plugin container",
+                        "bundle service image must be pinned by sha256 digest", "duplicate bundle service id: metrics");
+        var invalidSlug = new PluginManifest.BundleService("Metrics", "ghcr.io/artio/metrics@sha256:" + "b".repeat(64), 9090, "/health");
+        var invalidSlugManifest = new PluginManifest(bundle.manifestVersion(), bundle.id(), bundle.name(), bundle.vendor(),
+                bundle.version(), bundle.description(), bundle.minimumCoreVersion(), bundle.maximumCoreVersion(),
+                bundle.image(), bundle.dependencies(), bundle.permissions(), bundle.configuration(), bundle.extensionPoints(),
+                bundle.healthPath(), bundle.diagnosticsPath(), bundle.geographicAvailability(), List.of(invalidSlug));
+        assertThat(validator.validate(invalidSlugManifest, "0.1.0", Set.of()))
+                .contains("bundle service id must be a lowercase service slug");
+    }
+
+    @Test
     void acceptsCountrySpecificAvailabilityAndRejectsInvalidOrContradictoryMetadata() {
         var ch = withAvailability(new PluginManifest.GeographicAvailability("COUNTRY_SPECIFIC", List.of("CH")));
         assertThat(validator.validate(ch, "0.1.0", Set.of())).isEmpty();

@@ -34,8 +34,7 @@ public final class PluginManifestValidator {
         if (manifest.description().length() > 2000) errors.add("description exceeds 2000 characters");
         if (!SEMVER.matcher(manifest.minimumCoreVersion()).matches() || !SEMVER.matcher(manifest.maximumCoreVersion()).matches()) errors.add("Core compatibility bounds must use semantic versions");
         else if (compare(coreVersion, manifest.minimumCoreVersion()) < 0 || compare(coreVersion, manifest.maximumCoreVersion()) > 0) errors.add("plugin is incompatible with this Core version");
-        if (!DIGEST_IMAGE.matcher(manifest.image()).matches()) errors.add("image must be pinned by sha256 digest");
-        else if (!isTrusted(manifest.image())) errors.add("image registry is not trusted");
+        validateImage(manifest.image(), "image", errors);
         validateGeographicAvailability(manifest.geographicAvailability(), errors);
         Set<String> permissions = new HashSet<>();
         for (String permission : manifest.permissions()) {
@@ -59,6 +58,19 @@ public final class PluginManifestValidator {
         manifest.configuration().forEach((key, field) -> validateField(key, field, errors));
         validatePath(manifest.healthPath(), "healthPath", errors);
         validatePath(manifest.diagnosticsPath(), "diagnosticsPath", errors);
+        if (manifest.services().size() > 8) errors.add("plugin bundle may define at most 8 sidecar services");
+        Set<String> serviceIds = new HashSet<>();
+        for (var service : manifest.services()) {
+            if (service == null) { errors.add("bundle service cannot be null"); continue; }
+            if (service.id() == null || !service.id().matches("[a-z][a-z0-9-]{0,30}")) errors.add("bundle service id must be a lowercase service slug");
+            else {
+                if (service.id().equals("main")) errors.add("bundle service id 'main' is reserved for the primary plugin image");
+                if (!serviceIds.add(service.id())) errors.add("duplicate bundle service id: " + service.id());
+            }
+            validateImage(service.image(), "bundle service image", errors);
+            if (service.port() < 1 || service.port() > 65535) errors.add("bundle service port must be between 1 and 65535");
+            validatePath(service.healthPath(), "bundle service healthPath", errors);
+        }
         return List.copyOf(errors);
     }
 
@@ -91,6 +103,11 @@ public final class PluginManifestValidator {
     private boolean isTrusted(String image) {
         String registry = image.substring(0, image.indexOf('/'));
         return trustedRegistries.contains(registry.toLowerCase(Locale.ROOT));
+    }
+
+    private void validateImage(String image, String field, List<String> errors) {
+        if (image == null || !DIGEST_IMAGE.matcher(image).matches()) errors.add(field + " must be pinned by sha256 digest");
+        else if (!isTrusted(image)) errors.add(field + " registry is not trusted");
     }
 
     private static void validateField(String key, PluginManifest.ConfigField field, List<String> errors) {

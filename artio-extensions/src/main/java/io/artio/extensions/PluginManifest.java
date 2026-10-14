@@ -21,7 +21,8 @@ public record PluginManifest(
         List<String> extensionPoints,
         String healthPath,
         String diagnosticsPath,
-        GeographicAvailability geographicAvailability) {
+        GeographicAvailability geographicAvailability,
+        List<BundleService> services) {
 
     public PluginManifest {
         Objects.requireNonNull(manifestVersion, "Manifest version is required");
@@ -37,6 +38,7 @@ public record PluginManifest(
         permissions = permissions == null ? List.of() : List.copyOf(permissions);
         configuration = configuration == null ? Map.of() : Map.copyOf(configuration);
         extensionPoints = extensionPoints == null ? List.of() : List.copyOf(extensionPoints);
+        services = services == null ? List.of() : List.copyOf(services);
     }
 
     /** Source-compatible constructor for manifests created before geographic metadata was added. */
@@ -46,10 +48,24 @@ public record PluginManifest(
             List<String> extensionPoints, String healthPath, String diagnosticsPath) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                GeographicAvailability.global());
+                GeographicAvailability.global(), List.of());
+    }
+
+    /** Source-compatible constructor for v1 manifests with geographic metadata. */
+    public PluginManifest(String manifestVersion, String id, String name, String vendor, String version,
+            String description, String minimumCoreVersion, String maximumCoreVersion, String image,
+            List<Dependency> dependencies, List<String> permissions, Map<String, ConfigField> configuration,
+            List<String> extensionPoints, String healthPath, String diagnosticsPath,
+            GeographicAvailability geographicAvailability) {
+        this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
+                image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
+                geographicAvailability, List.of());
     }
 
     public record Dependency(String id, String minimumVersion, String maximumVersion) { }
+
+    /** Optional private, non-invokable sidecar belonging to this plugin installation. */
+    public record BundleService(String id, String image, int port, String healthPath) { }
 
     /** Discovery hint only. It never restricts a merchant from enabling another supported market. */
     public record GeographicAvailability(String scope, List<String> countries) {

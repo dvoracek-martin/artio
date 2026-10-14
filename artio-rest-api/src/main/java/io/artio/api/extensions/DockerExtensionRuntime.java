@@ -48,9 +48,11 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     public void install(PluginManifest manifest) {
-        requirePinnedImage(manifest.image());
         try {
-            docker.pullImageCmd(manifest.image()).start().awaitCompletion(120, TimeUnit.SECONDS);
+            for (RuntimeService service : services(manifest)) {
+                requirePinnedImage(service.image());
+                docker.pullImageCmd(service.image()).start().awaitCompletion(120, TimeUnit.SECONDS);
+            }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Extension image pull was interrupted", interrupted);
@@ -71,29 +73,38 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     @Override
     public void enable(PluginManifest manifest, int credentialGeneration) {
         if (credentialGeneration < 1) throw new IllegalArgumentException("Credential generation must be positive");
-        requirePinnedImage(manifest.image());
-        String name = containerName(manifest.id());
+        try {
+            for (RuntimeService service : services(manifest)) startService(manifest, service, credentialGeneration);
+            for (RuntimeService service : services(manifest)) awaitReady(manifest.id(), service.id(), service.healthPath());
+        } catch (RuntimeException failure) {
+            disable(manifest.id());
+            throw failure;
+        }
+    }
+
+    private void startService(PluginManifest manifest, RuntimeService service, int credentialGeneration) {
+        String name = serviceName(manifest.id(), service.id());
         try {
             InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
+            requireManaged(current, manifest.id());
             if (!Boolean.TRUE.equals(current.getState().getRunning())) docker.startContainerCmd(name).exec();
-            awaitReady(manifest.id(), manifest.healthPath());
             return;
         } catch (NotFoundException ignored) {
             // Create only containers owned by this runtime; no mounts, published ports or caller-supplied options.
         }
         HostConfig host = restrictedHostConfig(network);
-        if (hostLoopbackTestAccess) {
+        if (hostLoopbackTestAccess && service.primary()) {
             var bindings = new com.github.dockerjava.api.model.Ports();
-            bindings.bind(ExposedPort.tcp(port), com.github.dockerjava.api.model.Ports.Binding.bindIp("127.0.0.1"));
+            bindings.bind(ExposedPort.tcp(service.port()), com.github.dockerjava.api.model.Ports.Binding.bindIp("127.0.0.1"));
             host.withPortBindings(bindings);
         }
-        docker.createContainerCmd(manifest.image()).withName(name).withHostConfig(host)
-                .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(port))
-                .withEnv("ARTIO_EXTENSION_TOKEN=" + encryption.deriveExtensionCredential(manifest.id(), credentialGeneration), "ARTIO_EXTENSION_API_VERSION=1")
-                .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.managed", "true"))
-                .exec();
+        var create = docker.createContainerCmd(service.image()).withName(name).withHostConfig(host)
+                .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(service.port()))
+                .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.extension.service", service.id(), "io.artio.managed", "true"));
+        if (service.primary()) create.withEnv("ARTIO_EXTENSION_TOKEN=" + encryption.deriveExtensionCredential(manifest.id(), credentialGeneration),
+                "ARTIO_EXTENSION_API_VERSION=1");
+        create.exec();
         docker.startContainerCmd(name).exec();
-        awaitReady(manifest.id(), manifest.healthPath());
     }
 
     static HostConfig restrictedHostConfig(String network) {
@@ -104,67 +115,49 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     public void disable(String pluginId) {
-        String name = containerName(pluginId);
-        try {
-            InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
-            if (Boolean.TRUE.equals(current.getState().getRunning())) docker.stopContainerCmd(name).withTimeout(10).exec();
-        } catch (NotFoundException ignored) {
-            // Already stopped/removed.
+        for (InspectContainerResponse current : managedContainers(pluginId)) {
+            if (Boolean.TRUE.equals(current.getState().getRunning())) docker.stopContainerCmd(current.getId()).withTimeout(10).exec();
         }
     }
 
     @Override
     public void uninstall(String pluginId) {
-        String name = containerName(pluginId);
-        try {
-            InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
-            if (current.getConfig() == null || current.getConfig().getLabels() == null
-                    || !"true".equals(current.getConfig().getLabels().get("io.artio.managed"))
-                    || !pluginId.equals(current.getConfig().getLabels().get("io.artio.extension"))) {
-                throw new IllegalStateException("Refusing to remove an unmanaged extension container");
-            }
+        var containers = managedContainers(pluginId);
+        for (InspectContainerResponse current : containers) {
+            requireManaged(current, pluginId);
             if (Boolean.TRUE.equals(current.getState().getRunning())) {
                 throw new IllegalStateException("Disable the extension before uninstalling it");
             }
-            docker.removeContainerCmd(name).withForce(false).exec();
-        } catch (NotFoundException ignored) {
-            // A registered but never installed extension has no runtime container.
+        }
+        for (InspectContainerResponse current : containers) {
+            docker.removeContainerCmd(current.getId()).withForce(false).exec();
         }
     }
 
     @Override
     public void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) {
-        String name = containerName(manifest.id());
-        try {
-            InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
-            if (current.getConfig() == null || current.getConfig().getLabels() == null
-                    || !"true".equals(current.getConfig().getLabels().get("io.artio.managed"))
-                    || !manifest.id().equals(current.getConfig().getLabels().get("io.artio.extension"))) {
-                throw new IllegalStateException("Refusing to replace an unmanaged extension container");
-            }
-            if (Boolean.TRUE.equals(current.getState().getRunning())) docker.stopContainerCmd(name).withTimeout(10).exec();
-            docker.removeContainerCmd(name).withForce(true).exec();
-        } catch (NotFoundException ignored) {
-            // A stopped or not-yet-created extension has no old runtime credential to revoke.
+        var containers = managedContainers(manifest.id());
+        for (InspectContainerResponse current : containers) requireManaged(current, manifest.id());
+        for (InspectContainerResponse current : containers) {
+            if (Boolean.TRUE.equals(current.getState().getRunning())) docker.stopContainerCmd(current.getId()).withTimeout(10).exec();
+        }
+        for (InspectContainerResponse current : containers) {
+            requireManaged(current, manifest.id());
+            docker.removeContainerCmd(current.getId()).withForce(true).exec();
         }
         if (restartIfEnabled) enable(manifest, credentialGeneration);
     }
 
     private void removeStoppedManagedContainer(String pluginId) {
-        String name = containerName(pluginId);
-        try {
-            InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
-            if (current.getConfig() == null || current.getConfig().getLabels() == null
-                    || !"true".equals(current.getConfig().getLabels().get("io.artio.managed"))
-                    || !pluginId.equals(current.getConfig().getLabels().get("io.artio.extension"))) {
-                throw new IllegalStateException("Refusing to replace an unmanaged extension container");
-            }
+        var containers = managedContainers(pluginId);
+        for (InspectContainerResponse current : containers) {
+            requireManaged(current, pluginId);
             if (Boolean.TRUE.equals(current.getState().getRunning())) {
                 throw new IllegalStateException("Disable the extension before updating its image");
             }
-            docker.removeContainerCmd(name).withForce(false).exec();
-        } catch (NotFoundException ignored) {
-            // Install-only plugins have no container to replace.
+        }
+        for (InspectContainerResponse current : containers) {
+            docker.removeContainerCmd(current.getId()).withForce(false).exec();
         }
     }
 
@@ -282,10 +275,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
     }
 
-    private void awaitReady(String pluginId, String healthPath) {
+    private void awaitReady(String pluginId, String serviceId, String healthPath) {
         long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         do {
-            if (health(pluginId, healthPath).healthy()) return;
+            if (serviceHealth(pluginId, serviceId, healthPath).healthy()) return;
             try {
                 Thread.sleep(300);
             } catch (InterruptedException interrupted) {
@@ -298,18 +291,72 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension did not become healthy within 30 seconds");
     }
 
+    private ExtensionRuntimePort.RuntimeHealth serviceHealth(String pluginId, String serviceId, String healthPath) {
+        try {
+            String name = serviceId.equals("main") ? containerName(pluginId) : serviceName(pluginId, serviceId);
+            InspectContainerResponse container = docker.inspectContainerCmd(name).exec();
+            requireManaged(container, pluginId);
+            if (!Boolean.TRUE.equals(container.getState().getRunning())) return new ExtensionRuntimePort.RuntimeHealth(false, "STOPPED");
+            var exposed = container.getConfig() == null ? null : container.getConfig().getExposedPorts();
+            if (exposed == null || exposed.length != 1) return new ExtensionRuntimePort.RuntimeHealth(false, "NO_EXPOSED_PORT");
+            URI address = endpoint(container, safeHealthPath(healthPath), exposed[0].getPort());
+            if (address == null) return new ExtensionRuntimePort.RuntimeHealth(false, "NO_NETWORK_ADDRESS");
+            var response = http.send(HttpRequest.newBuilder(address).timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.discarding());
+            return new ExtensionRuntimePort.RuntimeHealth(response.statusCode() >= 200 && response.statusCode() < 300, "HTTP_" + response.statusCode());
+        } catch (NotFoundException missing) {
+            return new ExtensionRuntimePort.RuntimeHealth(false, "NOT_INSTALLED");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new ExtensionRuntimePort.RuntimeHealth(false, "INTERRUPTED");
+        } catch (Exception failure) {
+            return new ExtensionRuntimePort.RuntimeHealth(false, "UNAVAILABLE");
+        }
+    }
+
     private URI endpoint(InspectContainerResponse container, String path) {
+        return endpoint(container, path, port);
+    }
+
+    private URI endpoint(InspectContainerResponse container, String path, int servicePort) {
         if (hostLoopbackTestAccess) {
             var bindings = container.getNetworkSettings() == null || container.getNetworkSettings().getPorts() == null
-                    ? null : container.getNetworkSettings().getPorts().getBindings().get(ExposedPort.tcp(port));
+                    ? null : container.getNetworkSettings().getPorts().getBindings().get(ExposedPort.tcp(servicePort));
             if (bindings == null || bindings.length == 0 || bindings[0].getHostPortSpec() == null) return null;
             return URI.create("http://127.0.0.1:" + bindings[0].getHostPortSpec() + path);
         }
         var networks = container.getNetworkSettings().getNetworks();
         var networkInfo = networks == null ? null : networks.get(network);
         String address = networkInfo == null ? null : networkInfo.getIpAddress();
-        return address == null || address.isBlank() ? null : URI.create("http://" + address + ":" + port + path);
+        return address == null || address.isBlank() ? null : URI.create("http://" + address + ":" + servicePort + path);
     }
+
+    private java.util.List<InspectContainerResponse> managedContainers(String pluginId) {
+        return docker.listContainersCmd().withShowAll(true).exec().stream()
+                .filter(container -> container.getLabels() != null && pluginId.equals(container.getLabels().get("io.artio.extension")))
+                .map(container -> docker.inspectContainerCmd(container.getId()).exec()).toList();
+    }
+
+    private static void requireManaged(InspectContainerResponse container, String pluginId) {
+        var labels = container.getConfig() == null ? null : container.getConfig().getLabels();
+        if (labels == null || !"true".equals(labels.get("io.artio.managed")) || !pluginId.equals(labels.get("io.artio.extension")))
+            throw new IllegalStateException("Refusing to manage an unmanaged extension container");
+    }
+
+    private java.util.List<RuntimeService> services(PluginManifest manifest) {
+        var result = new java.util.ArrayList<RuntimeService>();
+        result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true));
+        for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(), false));
+        return java.util.List.copyOf(result);
+    }
+
+    static String serviceName(String pluginId, String serviceId) {
+        if (serviceId == null || !serviceId.matches("[a-z][a-z0-9-]{0,30}")) throw new IllegalArgumentException("Invalid plugin service id");
+        if (serviceId.equals("main")) return containerName(pluginId);
+        String primary = containerName(pluginId);
+        return "artio-svc-" + primary.substring(primary.length() - 12) + "-" + serviceId;
+    }
+
+    private record RuntimeService(String id, String image, int port, String healthPath, boolean primary) { }
 
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
