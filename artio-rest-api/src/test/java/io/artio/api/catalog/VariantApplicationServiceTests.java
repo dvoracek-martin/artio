@@ -47,6 +47,23 @@ class VariantApplicationServiceTests {
     }
 
     @Test
+    void normalizesEquivalentNumericOptionValuesBeforeCombinationUniquenessCheck() {
+        UUID productId = UUID.randomUUID();
+        var product = product(productId);
+        var existing = io.artio.catalog.Variant.create(new io.artio.catalog.VariantId(UUID.randomUUID()),
+                product.getId(), new io.artio.catalog.VariantName("Size 42"), new Sku("SHIRT-SIZE-42"), Map.of("size", "42"));
+        when(products.findById(new ProductId(productId))).thenReturn(Optional.of(product));
+        when(definitions.findAll()).thenReturn(List.of(definition("size", AttributeDefinition.Type.NUMBER)));
+        when(variants.findByProductId(new ProductId(productId))).thenReturn(List.of(existing));
+
+        assertThatThrownBy(() -> service.create(productId,
+                new VariantRequest("Size 42 duplicate", "SHIRT-SIZE-42B", Map.of("size", "42.00"))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("same option combination");
+        verify(variants, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void rejectsDuplicateOptionCombinationsBeforePersistence() {
         UUID productId = UUID.randomUUID();
         var product = product(productId);

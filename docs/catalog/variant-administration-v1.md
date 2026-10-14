@@ -12,7 +12,7 @@ Backoffice Products lists each variant's name, SKU and status. Administrators ca
 - `PUT /api/v1/variants/{variantId}` updates its name, SKU and complete option combination.
 - `PUT /api/v1/variants/{variantId}/active` sets its active state.
 
-Read routes remain public with public product data. Variant creation and update are protected by the product administration rule; status changes require ADMIN or SUPERADMIN. SKU uniqueness is enforced by the persisted variant constraint. A non-empty option combination is unique per product, enforced both in the application and with a PostgreSQL JSONB unique index. `TEXT` values are trimmed, `NUMBER` values must parse as decimal numbers, and `BOOLEAN` values accept true/false and are stored lowercase. Attribute codes must be active and option values are bounded. Inactive variants remain addressable for order history but are not offered as active merchandise.
+Read routes remain public with public product data. Variant creation and update are protected by the product administration rule; status changes require ADMIN or SUPERADMIN. SKU uniqueness is enforced by the persisted variant constraint. A non-empty option combination is unique per product, enforced both in the application and with a PostgreSQL JSONB unique index. `TEXT` values are trimmed, `NUMBER` values must parse as decimal numbers and are stored in canonical decimal form (`42.00` becomes `42`), and `BOOLEAN` values accept true/false and are stored lowercase. Attribute codes must be active and option values are bounded. Inactive variants remain addressable for order history but are not offered as active merchandise.
 
 ## Verification and remaining scope
 

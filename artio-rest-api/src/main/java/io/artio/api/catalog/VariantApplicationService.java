@@ -92,7 +92,13 @@ public class VariantApplicationService {
             String value = raw.trim();
             switch (definition.getType()) {
                 case TEXT -> { if (value.length() > 2000) throw new IllegalArgumentException("Text option cannot exceed 2000 characters: " + code); }
-                case NUMBER -> { try { new java.math.BigDecimal(value); } catch (NumberFormatException invalid) { throw new IllegalArgumentException("Variant option must be a number: " + code, invalid); } }
+                case NUMBER -> {
+                    try {
+                        value = new java.math.BigDecimal(value).stripTrailingZeros().toPlainString();
+                    } catch (NumberFormatException invalid) {
+                        throw new IllegalArgumentException("Variant option must be a number: " + code, invalid);
+                    }
+                }
                 case BOOLEAN -> {
                     if (!value.equalsIgnoreCase("true") && !value.equalsIgnoreCase("false")) throw new IllegalArgumentException("Variant option must be true or false: " + code);
                     value = value.toLowerCase(java.util.Locale.ROOT);
