@@ -8,6 +8,8 @@ Artio separates merchandise returns from payment refunds. A return request track
 
 `GET /api/v1/orders/{orderId}/returns` lists return requests only for the authenticated order owner.
 
+`GET /api/v1/orders/{orderId}/items` provides the order line identifiers needed to create a return request; it is restricted to the owner. The Storefront order history exposes shipment history and a customer return request flow for eligible order states.
+
 ## Staff routes
 
 - `GET /api/v1/admin/orders/{orderId}/returns` lists requests for an order. ADMIN or SUPERADMIN is required by the `/api/admin/**` authorization rule.
