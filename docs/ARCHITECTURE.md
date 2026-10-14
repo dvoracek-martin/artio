@@ -38,7 +38,7 @@ The standard `docker compose up -d` topology includes PostgreSQL, a persistent s
 | Extension controller | Perform narrowly scoped Docker lifecycle operations | Keeps the Docker socket away from the public commerce API |
 | Kafka | Durable asynchronous transport and consumer-group coordination | Required shared infrastructure for recoverable cross-service work |
 
-The Core API and event-worker are separate processes in Compose. The event-worker currently also hosts scheduled notification delivery and maintenance jobs. Extension lifecycle is mediated by the separate controller; the task ledger records remaining service boundaries and bundle-management gaps.
+The Core API, event-worker and notification-worker are separate processes in Compose. The event-worker publishes and consumes Kafka events and runs commerce maintenance schedules. The notification-worker only polls the durable delivery outbox and calls the selected provider-neutral notification transport; it has its own scaling and failure boundary. Extension lifecycle is mediated by the separate controller; the task ledger records remaining service boundaries and bundle-management gaps.
 
 Persistence adapters depend on the domain contracts they implement. A domain must not depend on Spring, database adapters, Kafka clients, UI projects or provider SDKs. REST DTOs remain API concerns, not persistence entities. Cross-context table writes are replaced with owner application calls or an explicit event workflow.
 

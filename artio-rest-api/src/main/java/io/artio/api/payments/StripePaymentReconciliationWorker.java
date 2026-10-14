@@ -17,6 +17,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -27,6 +28,7 @@ import org.springframework.web.client.RestClient;
 
 /** Reconciles Stripe Checkout sessions when webhook delivery is delayed or lost. */
 @Component
+@ConditionalOnProperty(name = "artio.workers.enabled", havingValue = "true", matchIfMissing = true)
 public class StripePaymentReconciliationWorker {
     private static final Logger log = LoggerFactory.getLogger(StripePaymentReconciliationWorker.class);
     private static final int BATCH_SIZE = 50;

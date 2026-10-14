@@ -1,12 +1,14 @@
 package io.artio.api.payments;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** Bounded cleanup for already processed webhook deduplication receipts. */
 @Component
+@ConditionalOnProperty(name = "artio.workers.enabled", havingValue = "true", matchIfMissing = true)
 public class StripeWebhookReceiptRetentionWorker {
     private static final int BATCH_SIZE = 1000;
     private final JdbcTemplate jdbc;

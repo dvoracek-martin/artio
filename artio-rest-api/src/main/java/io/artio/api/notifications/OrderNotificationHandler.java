@@ -10,12 +10,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** Delivers transactional order-email outbox records with bounded retries. */
 @Component
+@ConditionalOnProperty(prefix = "artio.notifications.worker", name = "enabled", havingValue = "true")
 public class OrderNotificationHandler {
     private static final Logger log = LoggerFactory.getLogger(OrderNotificationHandler.class);
     private static final int BATCH_SIZE = 25;

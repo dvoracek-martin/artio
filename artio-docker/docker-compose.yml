@@ -234,6 +234,7 @@ services:
       ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
       ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
       ARTIO_WORKERS_ENABLED: "true"
+      ARTIO_NOTIFICATIONS_WORKER_ENABLED: "false"
       ARTIO_KAFKA_EVENTS_ENABLED: "true"
       ARTIO_KAFKA_CONSUMER_ENABLED: "true"
       ARTIO_KAFKA_CONSUMER_GROUP: artio-notification-worker
@@ -243,10 +244,6 @@ services:
       ARTIO_ENCRYPTION_KEYRING_FILE: ${ARTIO_ENCRYPTION_KEYRING_FILE:-}
       ARTIO_INVENTORY_RESERVATION_TTL: ${ARTIO_INVENTORY_RESERVATION_TTL:-PT30M}
       ARTIO_INVENTORY_EXPIRY_INTERVAL_MS: ${ARTIO_INVENTORY_EXPIRY_INTERVAL_MS:-60000}
-      ARTIO_EMAIL_ENABLED: ${ARTIO_EMAIL_ENABLED:-false}
-      ARTIO_EMAIL_POLL_INTERVAL_MS: ${ARTIO_EMAIL_POLL_INTERVAL_MS:-30000}
-      ARTIO_EMAIL_PROVIDER: ${ARTIO_EMAIL_PROVIDER:-none}
-      ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID: ${ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID:-}
       ARTIO_STRIPE_SECRET_KEY: ${ARTIO_STRIPE_SECRET_KEY:-}
       ARTIO_STRIPE_WEBHOOK_SECRET: ${ARTIO_STRIPE_WEBHOOK_SECRET:-}
       KAFKA_BROKERS: kafka:9092
@@ -258,6 +255,40 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      installation-secrets:
+        condition: service_completed_successfully
+
+  notification-worker:
+    build:
+      context: ..
+      dockerfile: artio-docker/Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
+      ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
+      ARTIO_WORKERS_ENABLED: "false"
+      ARTIO_NOTIFICATIONS_WORKER_ENABLED: "true"
+      ARTIO_KAFKA_EVENTS_ENABLED: "false"
+      ARTIO_KAFKA_CONSUMER_ENABLED: "false"
+      ARTIO_EMAIL_ENABLED: ${ARTIO_EMAIL_ENABLED:-false}
+      ARTIO_EMAIL_POLL_INTERVAL_MS: ${ARTIO_EMAIL_POLL_INTERVAL_MS:-30000}
+      ARTIO_EMAIL_PROVIDER: ${ARTIO_EMAIL_PROVIDER:-none}
+      ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID: ${ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID:-}
+      ARTIO_EXTENSION_DOCKER_ENABLED: ${ARTIO_EXTENSION_DOCKER_ENABLED:-true}
+      ARTIO_EXTENSION_DOCKER_MODE: remote
+      ARTIO_EXTENSION_DOCKER_NETWORK: artio-extensions
+      ARTIO_EXTENSION_CONTROLLER_URL: http://extension-controller:8090
+      ARTIO_EXTENSION_CONTROLLER_TOKEN: ${ARTIO_EXTENSION_CONTROLLER_TOKEN:-}
+      ARTIO_ENCRYPTION_KEYRING_FILE: ${ARTIO_ENCRYPTION_KEYRING_FILE:-}
+    networks:
+      - default
+      - extension-control
+    volumes:
+      - artio-installation-secrets:/run/artio-secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
       installation-secrets:
         condition: service_completed_successfully
 

@@ -9,9 +9,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(name = "artio.workers.enabled", havingValue = "true", matchIfMissing = true)
 public class ReservationExpiryScheduler {
     private final InventoryApplicationService inventory;
     private final JdbcTemplate jdbc;
