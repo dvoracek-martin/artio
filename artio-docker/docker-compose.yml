@@ -163,6 +163,30 @@ services:
       extension-controller:
         condition: service_healthy
 
+  extension-egress:
+    build:
+      context: ./extension-egress
+    environment:
+      ARTIO_EGRESS_ALLOWED_HOSTS: api.stripe.com,api-m.paypal.com,api-m.sandbox.paypal.com,api.brevo.com,api.post.ch,dcapi.apis.post.ch
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    cpus: 0.50
+    pids_limit: 64
+    networks:
+      - default
+      - extensions
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',3128),1); s.close()"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+      start_period: 3s
+
   extension-controller:
     build:
       context: ..
@@ -173,6 +197,7 @@ services:
       ARTIO_EXTENSION_DOCKER_MODE: controller
       ARTIO_EXTENSION_DOCKER_NETWORK: artio-extensions
       ARTIO_EXTENSION_DOCKER_PORT: "8080"
+      ARTIO_EXTENSIONS_DOCKER_EGRESS_PROXY: http://extension-egress:3128
       PORT: "8090"
       SPRINGDOC_API_DOCS_ENABLED: "false"
       SPRINGDOC_SWAGGER_UI_ENABLED: "false"
@@ -197,6 +222,8 @@ services:
     depends_on:
       installation-secrets:
         condition: service_completed_successfully
+      extension-egress:
+        condition: service_healthy
 
   event-worker:
     build:

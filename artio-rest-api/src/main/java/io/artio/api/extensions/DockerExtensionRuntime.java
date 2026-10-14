@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Restricted Docker runtime for digest-pinned extensions. The Docker daemon is an administrative trust boundary. */
 public final class DockerExtensionRuntime implements ExtensionRuntimePort {
+    private static final String EGRESS_PROXY = "http://extension-egress:3128";
     private final int port;
     private static final long MAX_REQUEST_BYTES = 1_048_576;
     private static final long MAX_RESPONSE_BYTES = 1_048_576;
@@ -28,22 +29,34 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final String network;
     private final ExtensionCredentialService credentials;
+    private final String egressProxy;
     private final boolean hostLoopbackTestAccess;
     private final java.util.concurrent.ConcurrentMap<String, ExtensionCircuitBreaker> circuits = new java.util.concurrent.ConcurrentHashMap<>();
 
     public DockerExtensionRuntime(DockerClient docker,
             @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.network:artio-extensions}") String network,
             @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.port:8080}") int port,
-            ExtensionCredentialService credentials) {
-        this(docker, network, port, credentials, false);
+            ExtensionCredentialService credentials,
+            @org.springframework.beans.factory.annotation.Value("${artio.extensions.docker.egress-proxy:http://extension-egress:3128}") String egressProxy) {
+        this(docker, network, port, credentials, false, egressProxy);
+    }
+
+    DockerExtensionRuntime(DockerClient docker, String network, int port, ExtensionCredentialService credentials) {
+        this(docker, network, port, credentials, false, EGRESS_PROXY);
     }
 
     DockerExtensionRuntime(DockerClient docker, String network, int port, ExtensionCredentialService credentials,
                            boolean hostLoopbackTestAccess) {
+        this(docker, network, port, credentials, hostLoopbackTestAccess, EGRESS_PROXY);
+    }
+
+    DockerExtensionRuntime(DockerClient docker, String network, int port, ExtensionCredentialService credentials,
+                           boolean hostLoopbackTestAccess, String egressProxy) {
         this.docker = docker;
         this.network = network;
         this.port = port;
         this.credentials = credentials;
+        this.egressProxy = egressProxy;
         this.hostLoopbackTestAccess = hostLoopbackTestAccess;
     }
 
@@ -121,13 +134,27 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private java.util.List<String> environment(PluginManifest manifest, RuntimeService service,
             int credentialGeneration, Map<String, String> configuration) {
         return resolvedEnvironment(manifest, service.primary(), service.configurationBindings(),
-                credentialGeneration, configuration, credentials);
+                credentialGeneration, configuration, credentials, egressProxy);
     }
 
     static java.util.List<String> resolvedEnvironment(PluginManifest manifest, boolean primary,
             Map<String, String> bindings, int credentialGeneration, Map<String, String> configuration,
             io.artio.api.security.ExtensionCredentialService credentials) {
+        return resolvedEnvironment(manifest, primary, bindings, credentialGeneration, configuration, credentials, EGRESS_PROXY);
+    }
+
+    static java.util.List<String> resolvedEnvironment(PluginManifest manifest, boolean primary,
+            Map<String, String> bindings, int credentialGeneration, Map<String, String> configuration,
+            io.artio.api.security.ExtensionCredentialService credentials, String egressProxy) {
         var values = new java.util.TreeMap<String, String>();
+        if (egressProxy != null && !egressProxy.isBlank()) {
+            values.put("HTTP_PROXY", egressProxy);
+            values.put("HTTPS_PROXY", egressProxy);
+            values.put("http_proxy", egressProxy);
+            values.put("https_proxy", egressProxy);
+            values.put("NO_PROXY", "localhost,127.0.0.1,::1");
+            values.put("no_proxy", "localhost,127.0.0.1,::1");
+        }
         if (primary) {
             values.put("ARTIO_EXTENSION_TOKEN", credentials.derive(manifest.id(), credentialGeneration));
             values.put("ARTIO_EXTENSION_API_VERSION", "1");

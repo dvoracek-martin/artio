@@ -77,8 +77,11 @@ class DockerExtensionRuntimeTests {
                 Map.of("password", "a-private-password"), credentials);
 
         assertThat(primary).contains("GF_SECURITY_ADMIN_PASSWORD=a-private-password",
-                "ARTIO_EXTENSION_TOKEN=" + credentials.derive(manifest.id(), 1), "ARTIO_EXTENSION_API_VERSION=1");
-        assertThat(sidecar).containsExactly("GF_SECURITY_ADMIN_PASSWORD=a-private-password");
+                "ARTIO_EXTENSION_TOKEN=" + credentials.derive(manifest.id(), 1), "ARTIO_EXTENSION_API_VERSION=1",
+                "HTTPS_PROXY=http://extension-egress:3128", "https_proxy=http://extension-egress:3128");
+        assertThat(sidecar).contains("GF_SECURITY_ADMIN_PASSWORD=a-private-password",
+                "HTTPS_PROXY=http://extension-egress:3128", "https_proxy=http://extension-egress:3128")
+                .doesNotContain("ARTIO_EXTENSION_TOKEN=" + credentials.derive(manifest.id(), 1));
         assertThatThrownBy(() -> DockerExtensionRuntime.resolvedEnvironment(manifest, false,
                 Map.of("GF_SECURITY_ADMIN_PASSWORD", "password"), 1, Map.of(), credentials))
                 .isInstanceOf(IllegalStateException.class).hasMessage("Required plugin configuration is missing");

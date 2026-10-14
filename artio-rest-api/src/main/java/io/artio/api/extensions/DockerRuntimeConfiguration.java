@@ -26,8 +26,9 @@ public class DockerRuntimeConfiguration {
     DockerExtensionRuntime dockerExtensionRuntime(DockerClient docker,
             @Value("${artio.extensions.docker.network:artio-extensions}") String network,
             @Value("${artio.extensions.docker.port:8080}") int port,
+            @Value("${artio.extensions.docker.egress-proxy:http://extension-egress:3128}") String egressProxy,
             io.artio.api.security.ExtensionCredentialService credentials) {
-        return new DockerExtensionRuntime(docker, network, port, credentials);
+        return new DockerExtensionRuntime(docker, network, port, credentials, egressProxy);
     }
 
 }
