@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -29,12 +30,14 @@ public class OrderEventOutboxPublisher {
     private final JdbcTemplate jdbc;
     private final KafkaTemplate<String, String> kafka;
     private final TransactionTemplate transactions;
+    private final String topic;
 
     public OrderEventOutboxPublisher(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager, @Value("${artio.events.kafka.order-topic:artio.order.events}") String topic) {
         this.jdbc = jdbc;
         this.kafka = kafka;
         this.transactions = new TransactionTemplate(transactionManager);
+        this.topic = topic;
     }
 
     @Scheduled(fixedDelayString = "${artio.events.outbox-poll-interval-ms:1000}")
@@ -64,7 +67,7 @@ public class OrderEventOutboxPublisher {
 
     private void publish(OutboxRow event) {
         try {
-            var record = new ProducerRecord<>("artio.order.events", event.aggregateId(), event.payload());
+            var record = new ProducerRecord<>(topic, event.aggregateId(), event.payload());
             record.headers().add("event-id", event.id().toString().getBytes(StandardCharsets.UTF_8));
             record.headers().add("event-type", event.eventType().getBytes(StandardCharsets.UTF_8));
             record.headers().add("schema-version", "1".getBytes(StandardCharsets.UTF_8));

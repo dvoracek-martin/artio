@@ -128,15 +128,13 @@ public class CartController {
         for(var requirement:requirements.entrySet()){var selected=warehouses.stream().filter(w->inventory.stockByWarehouse(w.id()).stream().anyMatch(s->s.sellableId().equals(requirement.getKey())&&s.available().compareTo(requirement.getValue())>=0)).findFirst().orElseThrow(()->new IllegalStateException("Insufficient inventory for item "+requirement.getKey()));inventory.reserve(new InventoryApplicationService.ReserveRequest(order.getId().value(),selected.id(),requirement.getKey(),requirement.getValue()));}
         UUID eventId=UUID.randomUUID();
         String eventPayload;
-        try{eventPayload=mapper.writeValueAsString(Map.of("schemaVersion",1,"eventId",eventId,"type","ORDER_CREATED","occurredAt",Instant.now(),"orderId",order.getId().value(),"userId",userId));}
+        try{eventPayload=mapper.writeValueAsString(Map.of("schemaVersion",1,"eventId",eventId,"type","ORDER_CREATED","occurredAt",Instant.now(),"orderId",order.getId().value(),"userId",userId,"locale",request.locale()));}
         catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Order event could not be serialized",e);}
         jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload) VALUES (?,'ORDER_CREATED','ORDER',?,?::jsonb)",eventId,order.getId().value().toString(),eventPayload);
         String orderNumber=order.getId().value().toString();
         var confirmation = io.artio.api.notifications.OrderConfirmationTemplates.confirmation(request.locale(), orderNumber);
         jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,?,?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
                 UUID.randomUUID(),userId,"ORDER_CREATED",confirmation.subject(),confirmation.body(),"order-created:"+orderNumber);
-        jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body) VALUES (?,?,?,?,?,?) ON CONFLICT (event_key) DO NOTHING",
-                UUID.randomUUID(),"order-email:"+orderNumber,userId,order.getId().value(),confirmation.subject(),confirmation.body());
         jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
         return org.springframework.http.ResponseEntity.status(HttpStatus.CREATED).body(new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null,request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshot));
     }

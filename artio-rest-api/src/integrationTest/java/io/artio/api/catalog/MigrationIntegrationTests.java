@@ -107,6 +107,11 @@ class MigrationIntegrationTests {
             assertThat(result.getString(1)).isEqualTo("notification_delivery_outbox");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT to_regclass('event_inbox')")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("event_inbox");
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='pricing_price' AND column_name='prices_include_tax'")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getInt(1)).isEqualTo(1);

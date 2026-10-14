@@ -13,6 +13,7 @@ dependencies {
     add(integrationTest.implementationConfigurationName, "org.junit.jupiter:junit-jupiter")
     add(integrationTest.implementationConfigurationName, "org.testcontainers:junit-jupiter")
     add(integrationTest.implementationConfigurationName, "org.testcontainers:postgresql")
+    add(integrationTest.implementationConfigurationName, "org.testcontainers:kafka")
 }
 
 val integrationTestTask = tasks.register<Test>("integrationTest") {

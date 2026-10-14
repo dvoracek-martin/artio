@@ -520,6 +520,19 @@ CREATE INDEX event_outbox_stale_claim_idx ON event_outbox(locked_at)
 CREATE INDEX event_outbox_dead_idx ON event_outbox(dead_at DESC)
     WHERE status='DEAD';
 
+CREATE TABLE event_inbox (
+    consumer_name VARCHAR(120) NOT NULL,
+    event_id UUID NOT NULL,
+    event_type VARCHAR(128) NOT NULL,
+    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+    aggregate_id VARCHAR(128) NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (consumer_name, event_id)
+);
+
+CREATE INDEX event_inbox_processed_idx ON event_inbox(processed_at);
+
 
 -- ===== Legacy V19__durable_order_email_outbox =====
 CREATE TABLE notification_delivery_outbox (

@@ -11,6 +11,13 @@ spring:
       port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: ${ARTIO_KAFKA_CONSUMER_GROUP:artio-notification-worker}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -53,6 +60,8 @@ management:
       probes:
         enabled: true
 artio:
+  workers:
+    enabled: ${ARTIO_WORKERS_ENABLED:true}
   setup:
     token: ${ARTIO_SETUP_TOKEN:}
   cache:
@@ -61,6 +70,10 @@ artio:
   events:
     kafka:
       enabled: ${ARTIO_KAFKA_EVENTS_ENABLED:true}
+      consumer-enabled: ${ARTIO_KAFKA_CONSUMER_ENABLED:false}
+      order-topic: ${ARTIO_KAFKA_ORDER_TOPIC:artio.order.events}
+      notification-consumer-group: ${ARTIO_KAFKA_CONSUMER_GROUP:artio-notification-worker}
+      consumer-concurrency: ${ARTIO_KAFKA_CONSUMER_CONCURRENCY:1}
   mail-from: ${ARTIO_MAIL_FROM:no-reply@artio.local}
   notifications:
     email:

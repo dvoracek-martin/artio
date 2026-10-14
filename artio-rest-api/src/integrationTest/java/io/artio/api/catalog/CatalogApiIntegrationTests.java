@@ -95,6 +95,8 @@ class CatalogApiIntegrationTests {
         registry.add("artio.inventory.expiry-interval-ms", () -> "3600000");
         registry.add("artio.events.outbox-poll-interval-ms", () -> "3600000");
         registry.add("artio.events.kafka.enabled", () -> "true");
+        registry.add("artio.events.kafka.consumer-enabled", () -> "false");
+        registry.add("artio.workers.enabled", () -> "false");
         registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
         registry.add("artio.payments.stripe-webhook-secret", () -> "whsec_integration_test_secret");
         registry.add("artio.payments.reconciliation-api-url", () -> "http://127.0.0.1:" + MOCK_STRIPE.getAddress().getPort());
@@ -809,12 +811,9 @@ class CatalogApiIntegrationTests {
         String eventPayload = jdbc.queryForObject("SELECT payload::text FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CREATED'",
                 String.class, firstBody.orderId().toString());
         assertThat(mapper.readTree(eventPayload).path("schemaVersion").asInt()).isEqualTo(1);
+        assertThat(eventPayload).contains("\"locale\":\"de\"");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
-                "order-email:" + firstBody.orderId())).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT subject FROM notification_delivery_outbox WHERE event_key=?", String.class,
-                "order-email:" + firstBody.orderId())).isEqualTo("Bestellung eingegangen");
-        assertThat(jdbc.queryForObject("SELECT body FROM notification_delivery_outbox WHERE event_key=?", String.class,
-                "order-email:" + firstBody.orderId())).contains(firstBody.orderId().toString(), "Vielen Dank");
+                "order-email:" + firstBody.orderId())).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE dedupe_key=?", Integer.class,
                 "order-created:" + firstBody.orderId())).isEqualTo(1);
 
@@ -825,7 +824,7 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_outbox WHERE aggregate_id=?", Integer.class,
                 firstBody.orderId().toString())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
-                "order-email:" + firstBody.orderId())).isEqualTo(1);
+                "order-email:" + firstBody.orderId())).isZero();
     }
 
     @Test

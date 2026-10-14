@@ -47,6 +47,10 @@ services:
         --create --if-not-exists --topic artio.order.events
         --partitions 3 --replication-factor 1
         --config retention.ms=604800000
+        && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092
+        --create --if-not-exists --topic artio.order.events.dlq
+        --partitions 3 --replication-factor 1
+        --config retention.ms=2592000000
     depends_on:
       kafka:
         condition: service_healthy
@@ -131,6 +135,8 @@ services:
       ARTIO_MAIL_FROM: ${ARTIO_MAIL_FROM:-no-reply@artio.local}
       ARTIO_EMAIL_ENABLED: ${ARTIO_EMAIL_ENABLED:-false}
       ARTIO_EMAIL_POLL_INTERVAL_MS: ${ARTIO_EMAIL_POLL_INTERVAL_MS:-30000}
+      ARTIO_WORKERS_ENABLED: "false"
+      ARTIO_KAFKA_CONSUMER_ENABLED: "false"
       REDIS_HOST: redis
       ARTIO_CACHE_REDIS_ENABLED: ${ARTIO_CACHE_REDIS_ENABLED:-false}
       KAFKA_BROKERS: kafka:9092
@@ -139,6 +145,46 @@ services:
     networks:
       - default
       - extensions
+    volumes:
+      - artio-installation-secrets:/run/artio-secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      installation-secrets:
+        condition: service_completed_successfully
+
+  event-worker:
+    build:
+      context: ..
+      dockerfile: artio-docker/Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
+      ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
+      ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
+      ARTIO_WORKERS_ENABLED: "true"
+      ARTIO_KAFKA_EVENTS_ENABLED: "true"
+      ARTIO_KAFKA_CONSUMER_ENABLED: "true"
+      ARTIO_KAFKA_CONSUMER_GROUP: artio-notification-worker
+      ARTIO_KAFKA_ORDER_TOPIC: artio.order.events
+      ARTIO_KAFKA_CONSUMER_CONCURRENCY: ${ARTIO_KAFKA_CONSUMER_CONCURRENCY:-1}
+      ARTIO_EVENTS_OUTBOX_POLL_INTERVAL_MS: ${ARTIO_EVENTS_OUTBOX_POLL_INTERVAL_MS:-1000}
+      ARTIO_INVENTORY_RESERVATION_TTL: ${ARTIO_INVENTORY_RESERVATION_TTL:-PT30M}
+      ARTIO_INVENTORY_EXPIRY_INTERVAL_MS: ${ARTIO_INVENTORY_EXPIRY_INTERVAL_MS:-60000}
+      ARTIO_EMAIL_ENABLED: ${ARTIO_EMAIL_ENABLED:-false}
+      ARTIO_EMAIL_POLL_INTERVAL_MS: ${ARTIO_EMAIL_POLL_INTERVAL_MS:-30000}
+      ARTIO_SMTP_HOST: ${ARTIO_SMTP_HOST:-localhost}
+      ARTIO_SMTP_PORT: ${ARTIO_SMTP_PORT:-1025}
+      ARTIO_SMTP_USERNAME: ${ARTIO_SMTP_USERNAME:-}
+      ARTIO_SMTP_PASSWORD: ${ARTIO_SMTP_PASSWORD:-}
+      ARTIO_SMTP_AUTH: ${ARTIO_SMTP_AUTH:-false}
+      ARTIO_SMTP_STARTTLS: ${ARTIO_SMTP_STARTTLS:-false}
+      ARTIO_MAIL_FROM: ${ARTIO_MAIL_FROM:-no-reply@artio.local}
+      ARTIO_STRIPE_SECRET_KEY: ${ARTIO_STRIPE_SECRET_KEY:-}
+      ARTIO_STRIPE_WEBHOOK_SECRET: ${ARTIO_STRIPE_WEBHOOK_SECRET:-}
+      KAFKA_BROKERS: kafka:9092
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
     volumes:
       - artio-installation-secrets:/run/artio-secrets:ro
     depends_on:

@@ -37,6 +37,8 @@ class FirstRunSetupIntegrationTests {
         registry.add("artio.security.encryption-key", () -> "integration-test-encryption-key-value-32-bytes-minimum");
         registry.add("artio.setup.token", () -> SETUP_TOKEN);
         registry.add("artio.extensions.trusted-registries", () -> "ghcr.io");
+        registry.add("artio.events.kafka.consumer-enabled", () -> "false");
+        registry.add("artio.workers.enabled", () -> "false");
     }
 
     @Test

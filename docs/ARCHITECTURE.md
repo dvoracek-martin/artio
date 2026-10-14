@@ -14,7 +14,7 @@ The standard product includes **Artio Core** and a **Backoffice**. The **Storefr
 
 Artio is one product deployed as multiple Docker services. Keep strongly transactional commerce operations in the Core API's modular monolith; split background event publication/consumption, notification delivery, and privileged Docker lifecycle control into separate runtime services where their independent security, failure isolation, and scaling needs justify it. Do not create one service per domain. PostgreSQL is transactional truth, and Kafka is required installation infrastructure for asynchronous workflows. Domain events express business facts, not event sourcing. Synchronous application interfaces remain responsible for use cases needing immediate consistency.
 
-The standard `docker compose up -d` topology includes PostgreSQL, a persistent single-node KRaft Kafka broker, topic initialization, the Core API, and Backoffice. The reference Storefront is an optional deployment extension. Kafka producers use aggregate IDs as partition keys so records for one aggregate retain ordering. The current implementation has not yet satisfied the complete target topology; the roadmap records remaining service boundaries and event reliability work.
+The standard `docker compose up -d` topology includes PostgreSQL, a persistent single-node KRaft Kafka broker, topic initialization, the Core API, a background `event-worker`, and Backoffice. The reference Storefront is an optional deployment extension. Kafka producers use aggregate IDs as partition keys so records for one aggregate retain ordering. The notification delivery scheduler currently shares the event-worker process; provider-isolated notification worker/plugin runtime remains a separate task.
 
 | Context | Owns | Allowed dependencies |
 |---|---|---|
@@ -38,7 +38,7 @@ The standard `docker compose up -d` topology includes PostgreSQL, a persistent s
 | Extension controller | Perform narrowly scoped Docker lifecycle operations | Keeps the Docker socket away from the public commerce API |
 | Kafka | Durable asynchronous transport and consumer-group coordination | Required shared infrastructure for recoverable cross-service work |
 
-These are target service boundaries. The task ledger records which are already separated and which still run inside the REST application.
+The Core API and event-worker are separate processes in Compose. The event-worker currently also hosts scheduled notification delivery and maintenance jobs. Extension lifecycle still runs in the REST API; the task ledger records remaining service boundaries.
 
 Persistence adapters depend on the domain contracts they implement. A domain must not depend on Spring, database adapters, Kafka clients, UI projects or provider SDKs. REST DTOs remain API concerns, not persistence entities. Cross-context table writes are replaced with owner application calls or an explicit event workflow.
 
