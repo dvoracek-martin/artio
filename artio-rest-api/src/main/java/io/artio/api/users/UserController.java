@@ -21,7 +21,19 @@ public class UserController {
     public UserView me(JwtAuthenticationToken auth){return find(UUID.fromString(auth.getToken().getSubject()));}
 
     @GetMapping("/api/admin/users")
-    public List<UserView> users(){return jdbc.query("SELECT id,email,first_name,last_name,role,permissions,email_verified,active,created_at,last_login FROM users ORDER BY created_at DESC LIMIT 500",(rs,n)->view(rs.getObject("id",UUID.class),rs.getString("email"),rs.getString("first_name"),rs.getString("last_name"),rs.getString("role"),rs.getString("permissions"),rs.getBoolean("email_verified"),rs.getBoolean("active"),rs.getTimestamp("created_at").toInstant(),rs.getTimestamp("last_login")==null?null:rs.getTimestamp("last_login").toInstant()));}
+    public List<UserView> users(@RequestParam(defaultValue="") String q,@RequestParam(defaultValue="ALL") String activity,
+            @RequestParam(defaultValue="100") int limit,@RequestParam(defaultValue="0") int offset){
+        if(q.length()>120||limit<1||limit>200||offset<0||offset>1_000_000)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid customer search bounds");
+        String filter=activity==null?"ALL":activity.toUpperCase(Locale.ROOT);
+        if(!Set.of("ALL","RECENT","STALE","NEVER").contains(filter))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"activity must be ALL, RECENT, STALE or NEVER");
+        String pattern="%"+q.trim()+"%";
+        return jdbc.query("SELECT id,email,first_name,last_name,role,permissions,email_verified,active,created_at,last_login FROM users "
+                        +"WHERE (?='' OR email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?) "
+                        +"AND (?='ALL' OR (?='NEVER' AND last_login IS NULL) OR (?='RECENT' AND last_login>=now()-interval '30 days') OR (?='STALE' AND last_login<now()-interval '30 days')) "
+                        +"ORDER BY created_at DESC,id LIMIT ? OFFSET ?",
+                (rs,n)->view(rs.getObject("id",UUID.class),rs.getString("email"),rs.getString("first_name"),rs.getString("last_name"),rs.getString("role"),rs.getString("permissions"),rs.getBoolean("email_verified"),rs.getBoolean("active"),rs.getTimestamp("created_at").toInstant(),rs.getTimestamp("last_login")==null?null:rs.getTimestamp("last_login").toInstant()),
+                q.trim(),pattern,pattern,pattern,filter,filter,filter,filter,limit,offset);
+    }
 
     @PutMapping("/api/admin/users/{id}/active")
     public UserView active(@PathVariable UUID id,@RequestBody ActiveRequest request,JwtAuthenticationToken auth){

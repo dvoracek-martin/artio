@@ -145,7 +145,7 @@ Všechny JSON API běží pod `/api`, GraphQL pod `/graphql`, realtime STOMP/Web
 - `POST /api/auth/mfa/totp/enrollment` — zahájí enrolment a vrátí TOTP secret + `otpauth://` URI.
 - `POST /api/auth/mfa/totp/verify` — ověří TOTP a vrátí sadu jednorázových backup kódů pouze jednou.
 - `DELETE /api/auth/mfa/totp` — MFA deaktivuje po ověření aktuálního TOTP.
-- `GET /api/users/me`, `GET /api/admin/users` — profil a seznam uživatelů pro samostatnou instalaci.
+- `GET /api/users/me`, `GET /api/admin/users?q=&activity=ALL|RECENT|STALE|NEVER&limit=100&offset=0` — profil a omezený, vyhledávatelný admin seznam; `lastLogin` se zapisuje po úspěšném heslovém i OAuth přihlášení a zobrazuje ve správě zákazníků s filtrem posledních 30 dnů / starých / nikdy nepřihlášených účtů.
 - `GET /api/admin/audit-logs` — audit metadata s filtry `userId`, `action`, `from`, `to`, `page`, `size`.
 - Rate limit: default 100 requestů/minutu/IP, Redis s lokálním fallbackem; `X-API-Key` dostává samostatný vyšší limit, ale samotný klíč zde nenahrazuje autentizaci.
 

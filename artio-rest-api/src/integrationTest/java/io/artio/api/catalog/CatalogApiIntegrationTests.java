@@ -1184,6 +1184,23 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void customerAdministrationSearchesByLastLoginActivityAndBoundsResults() {
+        String base="/api/v1/admin/users";
+        var recent=adminExchange(base+"?q="+"admin-"+adminUserId+"&activity=RECENT",HttpMethod.GET,null,
+                io.artio.api.users.UserController.UserView[].class);
+        assertThat(recent.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(recent.getBody()).hasSize(1);
+        assertThat(recent.getBody()[0].id()).isEqualTo(adminUserId);
+        assertThat(recent.getBody()[0].lastLogin()).isNotNull();
+
+        var never=adminExchange(base+"?activity=NEVER",HttpMethod.GET,null,io.artio.api.users.UserController.UserView[].class);
+        assertThat(never.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(never.getBody()).extracting("id").doesNotContain(adminUserId);
+        var invalid=adminExchange(base+"?limit=201",HttpMethod.GET,null,ApiError.class);
+        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void versionedRoutesKeepPublicAndPrivilegedAuthorizationBoundaries() {
         var publicProducts = http.getForEntity("/api/v1/products", String.class);
         assertThat(publicProducts.getStatusCode()).isEqualTo(HttpStatus.OK);
