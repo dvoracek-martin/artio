@@ -1,7 +1,7 @@
 # Artio target architecture
 
 **Status:** target decisions for implementation; this document does not claim every boundary is implemented.
-**Authority:** product and architecture choices in the 2026-10-13 final implementation directive.
+**Authority:** product and architecture choices in the 2026-10-14 final master implementation directive v4.0.
 **Current evidence and module-by-module gaps:** [repository audit](REPOSITORY_AUDIT.md).
 
 ## Product topology
@@ -12,7 +12,9 @@ The standard product includes **Artio Core** and a **Backoffice**. The **Storefr
 
 ## Core boundaries
 
-Core is one modular monolith, not one microservice per domain. The API application composes bounded contexts; domains remain framework/provider independent. PostgreSQL is transactional truth. Domain events express business facts, not event sourcing. Synchronous application interfaces serve use cases needing immediate consistency. Kafka is introduced only for a named asynchronous producer/consumer use case with documented delivery, idempotency, retry and recovery.
+Artio is one product deployed as multiple Docker services. Keep strongly transactional commerce operations in the Core API's modular monolith; split background event publication/consumption, notification delivery, and privileged Docker lifecycle control into separate runtime services where their independent security, failure isolation, and scaling needs justify it. Do not create one service per domain. PostgreSQL is transactional truth, and Kafka is required installation infrastructure for asynchronous workflows. Domain events express business facts, not event sourcing. Synchronous application interfaces remain responsible for use cases needing immediate consistency.
+
+The standard `docker compose up -d` topology includes PostgreSQL, a persistent single-node KRaft Kafka broker, topic initialization, the Core API, and Backoffice. The reference Storefront is an optional deployment extension. Kafka producers use aggregate IDs as partition keys so records for one aggregate retain ordering. The current implementation has not yet satisfied the complete target topology; the roadmap records remaining service boundaries and event reliability work.
 
 | Context | Owns | Allowed dependencies |
 |---|---|---|
@@ -26,7 +28,17 @@ Core is one modular monolith, not one microservice per domain. The API applicati
 | Payment orchestration | Payment intents/attempts, idempotency, state mapping and Core-owned port | Kernel; provider-independent; invokes Extension API |
 | Fulfillment | Shipment/consignment/tracking state and Core-owned carrier contract | Kernel; provider-independent; invokes Extension API |
 | Notifications/integrations | Delivery jobs/status, retry policy and external webhook subscription contracts | Kernel; asynchronous adapters only where justified |
-| Extension management | Manifest validation, entitlements, lifecycle, schema-backed configuration, health, audit and invocation | Core application/security; Docker runtime adapter; versioned API contract |
+| Extension management | Manifest validation, entitlements, lifecycle, schema-backed configuration, health, audit and invocation | Core management API plus isolated privileged lifecycle controller; versioned API contract |
+
+| Runtime service | Responsibility | Why it is separate |
+|---|---|---|
+| Core API | Synchronous commerce, identity, checkout and admin APIs; owns authoritative domain transactions | Preserves checkout, tax and inventory consistency across contexts |
+| Event worker | Publish the transactional outbox; consume versioned business events with an inbox and bounded retries | Kafka outage/replay and consumer scaling must not block the request API |
+| Notification worker | Deliver persisted messages through provider-neutral Docker plugins | Isolates slow/unavailable providers and separates notification credentials |
+| Extension controller | Perform narrowly scoped Docker lifecycle operations | Keeps the Docker socket away from the public commerce API |
+| Kafka | Durable asynchronous transport and consumer-group coordination | Required shared infrastructure for recoverable cross-service work |
+
+These are target service boundaries. The task ledger records which are already separated and which still run inside the REST application.
 
 Persistence adapters depend on the domain contracts they implement. A domain must not depend on Spring, database adapters, Kafka clients, UI projects or provider SDKs. REST DTOs remain API concerns, not persistence entities. Cross-context table writes are replaced with owner application calls or an explicit event workflow.
 
@@ -41,6 +53,12 @@ Core-to-plugin calls use a versioned, authenticated, bounded request/response co
 The initial registry/trust policy must allow only configured trusted registries or explicitly approved local images. Resolve and record a digest; validate image/manifest compatibility before execution. Updates stage a new image/config version, health-check before switching, preserve the prior reference for rollback where the plugin's data contract allows it, and never silently delete plugin-created business data on uninstall.
 
 Plugin configuration schema is untrusted metadata, not authorization. Core validates type/constraints and allowed schema features. Backoffice renders forms from the validated schema; secret values are write-only, encrypted using the deployment-owned secret/key-management strategy, never returned in full, logs, diagnostics or normal exports. Secret rotation requires a documented re-encryption/provider update flow.
+
+### Observability plugin boundary
+
+Artio Core has no Prometheus registry, scrape endpoint, Grafana code, or Jaeger dependency. When enabled, the application exports vendor-neutral OpenTelemetry data over OTLP; export is off by default. Prometheus, Grafana, Jaeger, scrape/alert rules, dashboards and their credentials are independently distributed under `artio-docker/observability`, with configuration isolated from the base stack. The current deployment pack can be started/stopped/removed with Docker Compose, but it is not yet a Backoffice-managed Artio plugin: the current Extension API supervises one plugin container and lacks multi-service bundle orchestration and an authenticated UI proxy. P2-03 remains open until that service-bundle plugin lifecycle supports separate schema-backed configuration and install/enable/disable/update/uninstall from the Artio plugin manager. Do not add vendor-specific exporters or service implementations to Core to close this gap.
+
+AI Frontend Builder and AI Module Builder are **DEFERRED – future product decision**. They are outside the initial release scope; no AI-specific extension points, services, APIs, UIs, placeholder modules, or deployment assumptions are to be introduced. Keep general versioned REST and plugin contracts documented for ordinary integrations.
 
 ## Globalization and regional policy
 

@@ -17,6 +17,22 @@ class PluginManifestValidatorTests {
     }
 
     @Test
+    void acceptsCountrySpecificAvailabilityAndRejectsInvalidOrContradictoryMetadata() {
+        var ch = withAvailability(new PluginManifest.GeographicAvailability("COUNTRY_SPECIFIC", List.of("CH")));
+        assertThat(validator.validate(ch, "0.1.0", Set.of())).isEmpty();
+        assertThat(ch.geographicAvailability().appliesTo("CH")).isTrue();
+        assertThat(ch.geographicAvailability().appliesTo("DE")).isFalse();
+
+        var invalidCountry = withAvailability(new PluginManifest.GeographicAvailability("COUNTRY_SPECIFIC", List.of("ch", "XX")));
+        assertThat(validator.validate(invalidCountry, "0.1.0", Set.of()))
+                .contains("geographicAvailability countries must use ISO 3166-1 alpha-2 codes");
+
+        var contradictoryGlobal = withAvailability(new PluginManifest.GeographicAvailability("GLOBAL", List.of("CH")));
+        assertThat(validator.validate(contradictoryGlobal, "0.1.0", Set.of()))
+                .contains("GLOBAL geographicAvailability must not list countries");
+    }
+
+    @Test
     void rejectsMutableImagesUntrustedRegistriesAndUnsupportedPrivileges() {
         var manifest = new PluginManifest("1", "payments.stripe", "Stripe", "Artio", "1.0.0", "Payment adapter",
                 "0.1.0", "1.9.0", "docker.io/acme/stripe:latest", List.of(), List.of("host.docker.internal", "orders.write"),
@@ -59,5 +75,13 @@ class PluginManifestValidatorTests {
                 "0.1.0", "1.0.0", "ghcr.io/artio/stripe@sha256:" + "a".repeat(64), List.of(), List.of("payment.process"),
                 Map.of("apiKey", new PluginManifest.ConfigField("secret", true, true, "Secret API key", "Stripe key", null, List.of(), null, null, null, null)),
                 List.of("payment.provider.v1"), "/health", "/diagnostics");
+    }
+
+    private static PluginManifest withAvailability(PluginManifest.GeographicAvailability availability) {
+        var manifest = validManifest();
+        return new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(),
+                manifest.extensionPoints(), manifest.healthPath(), manifest.diagnosticsPath(), availability);
     }
 }

@@ -36,6 +36,7 @@ public final class PluginManifestValidator {
         else if (compare(coreVersion, manifest.minimumCoreVersion()) < 0 || compare(coreVersion, manifest.maximumCoreVersion()) > 0) errors.add("plugin is incompatible with this Core version");
         if (!DIGEST_IMAGE.matcher(manifest.image()).matches()) errors.add("image must be pinned by sha256 digest");
         else if (!isTrusted(manifest.image())) errors.add("image registry is not trusted");
+        validateGeographicAvailability(manifest.geographicAvailability(), errors);
         Set<String> permissions = new HashSet<>();
         for (String permission : manifest.permissions()) {
             if (!PERMISSIONS.contains(permission)) errors.add("unsupported permission: " + permission);
@@ -59,6 +60,32 @@ public final class PluginManifestValidator {
         validatePath(manifest.healthPath(), "healthPath", errors);
         validatePath(manifest.diagnosticsPath(), "diagnosticsPath", errors);
         return List.copyOf(errors);
+    }
+
+    private static void validateGeographicAvailability(PluginManifest.GeographicAvailability availability,
+            List<String> errors) {
+        if (availability == null) {
+            errors.add("geographicAvailability is required");
+            return;
+        }
+        if (availability.scope() == null || !Set.of("GLOBAL", "COUNTRY_SPECIFIC").contains(availability.scope())) {
+            errors.add("geographicAvailability.scope must be GLOBAL or COUNTRY_SPECIFIC");
+            return;
+        }
+        Set<String> countries = new HashSet<>();
+        Set<String> isoCountries = Set.of(Locale.getISOCountries());
+        for (String country : availability.countries()) {
+            if (country == null || !country.matches("[A-Z]{2}") || !isoCountries.contains(country)) {
+                errors.add("geographicAvailability countries must use ISO 3166-1 alpha-2 codes");
+            }
+            if (country != null && !countries.add(country)) errors.add("geographicAvailability contains duplicate country: " + country);
+        }
+        if ("GLOBAL".equals(availability.scope()) && !availability.countries().isEmpty()) {
+            errors.add("GLOBAL geographicAvailability must not list countries");
+        }
+        if ("COUNTRY_SPECIFIC".equals(availability.scope()) && availability.countries().isEmpty()) {
+            errors.add("COUNTRY_SPECIFIC geographicAvailability must list at least one country");
+        }
     }
 
     private boolean isTrusted(String image) {

@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    password: ${ARTIO_DATABASE_PASSWORD:artio-dev-database-only-password}
+artio:
+  setup:
+    token: ${ARTIO_SETUP_TOKEN:artio-dev-setup-token-only-do-not-use}
+    skip: ${ARTIO_SETUP_SKIP:false}
+  security:
+    jwt-secret: ${ARTIO_JWT_SECRET:artio-dev-jwt-secret-only-do-not-use-in-production-2026}
+    encryption-key: ${ARTIO_ENCRYPTION_KEY:artio-dev-encryption-key-only-do-not-use-in-prod-2026}
+  cache:
+    redis:
+      enabled: false
+  events:
+    kafka:
+      enabled: false
+  search:
+    enabled: false

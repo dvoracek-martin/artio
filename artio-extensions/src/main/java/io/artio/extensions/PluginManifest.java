@@ -20,7 +20,8 @@ public record PluginManifest(
         Map<String, ConfigField> configuration,
         List<String> extensionPoints,
         String healthPath,
-        String diagnosticsPath) {
+        String diagnosticsPath,
+        GeographicAvailability geographicAvailability) {
 
     public PluginManifest {
         Objects.requireNonNull(manifestVersion, "Manifest version is required");
@@ -38,7 +39,32 @@ public record PluginManifest(
         extensionPoints = extensionPoints == null ? List.of() : List.copyOf(extensionPoints);
     }
 
+    /** Source-compatible constructor for manifests created before geographic metadata was added. */
+    public PluginManifest(String manifestVersion, String id, String name, String vendor, String version,
+            String description, String minimumCoreVersion, String maximumCoreVersion, String image,
+            List<Dependency> dependencies, List<String> permissions, Map<String, ConfigField> configuration,
+            List<String> extensionPoints, String healthPath, String diagnosticsPath) {
+        this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
+                image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
+                GeographicAvailability.global());
+    }
+
     public record Dependency(String id, String minimumVersion, String maximumVersion) { }
+
+    /** Discovery hint only. It never restricts a merchant from enabling another supported market. */
+    public record GeographicAvailability(String scope, List<String> countries) {
+        public GeographicAvailability {
+            countries = countries == null ? List.of() : List.copyOf(countries);
+        }
+
+        public static GeographicAvailability global() {
+            return new GeographicAvailability("GLOBAL", List.of());
+        }
+
+        public boolean appliesTo(String country) {
+            return "GLOBAL".equals(scope) || country != null && countries.contains(country);
+        }
+    }
 
     public record ConfigField(String type, boolean required, boolean secret, String label,
                               String description, String format, List<String> options,

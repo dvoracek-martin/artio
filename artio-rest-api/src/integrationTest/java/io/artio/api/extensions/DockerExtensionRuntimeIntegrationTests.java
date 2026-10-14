@@ -52,6 +52,10 @@ class DockerExtensionRuntimeIntegrationTests {
                 runtime.update(current);
                 runtime.enable(current, 1);
                 assertInvocation(runtime, pluginId, "1");
+
+                runtime.disable(pluginId);
+                runtime.uninstall(pluginId);
+                assertThat(runtime.health(pluginId, "/health").status()).isEqualTo("NOT_INSTALLED");
             } finally {
                 runtime.disable(pluginId);
                 try { docker.removeContainerCmd(DockerExtensionRuntime.containerName(pluginId)).withForce(true).exec(); }

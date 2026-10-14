@@ -4,7 +4,9 @@
 
 `artio-extensions` contains the Core-owned manifest model and a fail-closed structural validator. The admin endpoint `POST /api/v1/admin/extensions/validate` runs preflight validation only. It does not pull, start, or trust an image by virtue of validating its metadata. Trusted registry hosts are configured with `ARTIO_EXTENSION_TRUSTED_REGISTRIES`; the default is empty, so no registry is trusted by default. Images must use a sha256 digest.
 
-The validator checks manifest version, identifier and semantic-version shape, Core compatibility bounds, image pinning and registry allowlist, supported permission and extension-point identifiers, dependency presence, configuration field limits and supported form metadata, and bounded in-container health/diagnostics paths. Manifest values are untrusted metadata; they do not grant Core authorization.
+The validator checks manifest version, identifier and semantic-version shape, Core compatibility bounds, image pinning and registry allowlist, geographic availability, supported permission and extension-point identifiers, dependency presence, configuration field limits and supported form metadata, and bounded in-container health/diagnostics paths. Manifest values are untrusted metadata; they do not grant Core authorization.
+
+Every manifest exposes `geographicAvailability`: `GLOBAL` must have an empty `countries` array; `COUNTRY_SPECIFIC` must list one or more uppercase ISO 3166-1 alpha-2 codes. Older source callers that construct the v1 model without this field map to explicit `GLOBAL` metadata. The manager API accepts `?country=CH` to filter discovery to global plugins and plugins listing that country, and the Backoffice shows the declared scope. This is discovery metadata only: it does not prevent an administrator from registering or installing a compatible plugin for an additional market.
 
 ## Persisted management API
 
@@ -14,7 +16,7 @@ Runtime dependency checks use the installed manifest version and lifecycle state
 
 Docker install, start/readiness and stop failures mark the plugin `FAILED` and append a lifecycle failure audit containing only the exception class. A later install can retry a failed plugin. Dependency and invalid-state rejections do not mutate plugin state.
 
-Backoffice exposes Install, Enable, Disable, Health, schema-backed configuration, credential rotation, update and rollback. The Activity view displays the latest 100 audit events with secret-free details. When an extension is enabled, an administrator can make an explicit bounded diagnostic invocation against a manifest-declared extension point; the UI warns that it sends a real request and recommends a non-destructive operation.
+Backoffice exposes Install, Enable, Disable, Uninstall, Health, schema-backed configuration, credential rotation, update and rollback. Uninstall requires the extension to be stopped and not be an enabled dependency; it removes only a container carrying the runtime's managed identity labels, redacts stored configuration/secrets, hides the plugin from the active registry, and preserves immutable release/audit history. Re-registering the same identifier remains blocked by the retained tombstone. The Activity view displays the latest 100 audit events with secret-free details. When an extension is enabled, an administrator can make an explicit bounded diagnostic invocation against a manifest-declared extension point; the UI warns that it sends a real request and recommends a non-destructive operation.
 
 ## Example
 
@@ -48,7 +50,11 @@ Backoffice exposes Install, Enable, Disable, Health, schema-backed configuration
   },
   "extensionPoints": ["payment.provider.v1"],
   "healthPath": "/health",
-  "diagnosticsPath": "/diagnostics"
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {
+    "scope": "GLOBAL",
+    "countries": []
+  }
 }
 ```
 

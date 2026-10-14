@@ -1,9 +1,10 @@
 services:
   redis:
+    profiles: [cache]
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - artio-redis-data:/data
     healthcheck:
@@ -13,7 +14,7 @@ services:
       retries: 20
 
   kafka:
-    image: apache/kafka:3.8.0
+    image: apache/kafka:4.3.1
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
@@ -28,73 +29,52 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
-    ports:
-      - "9092:9092"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - artio-kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 20
 
+  kafka-init:
+    image: apache/kafka:4.3.1
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - >-
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092
+        --create --if-not-exists --topic artio.order.events
+        --partitions 3 --replication-factor 1
+        --config retention.ms=604800000
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   opensearch:
+    profiles: [search]
     image: opensearchproject/opensearch:2.17.1
     environment:
       discovery.type: single-node
       plugins.security.disabled: "true"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD:?Set ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD in .env}"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD:-}
       OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 20
 
-  jaeger:
-    image: jaegertracing/all-in-one:1.60
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-    ports:
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
-
-  prometheus:
-    image: prom/prometheus:v2.54.1
-    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
-    volumes:
-      - ../artio-observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ../artio-observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - artio-prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
-    depends_on:
-      - rest-api
-
-  grafana:
-    image: grafana/grafana:11.2.2
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}"
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - ../artio-observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../artio-observability/grafana/provisioning/dashboards/artio-overview.json:/var/lib/grafana/dashboards/artio-overview.json:ro
-      - artio-grafana-data:/var/lib/grafana
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: artio
       POSTGRES_USER: ${ARTIO_DATABASE_USERNAME:-artio}
-      POSTGRES_PASSWORD: "${ARTIO_DATABASE_PASSWORD:?Set ARTIO_DATABASE_PASSWORD in .env}"
+      POSTGRES_PASSWORD_FILE: /run/artio-secrets/database-password
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${ARTIO_POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U artio -d artio"]
       interval: 5s
@@ -102,6 +82,22 @@ services:
       retries: 20
     volumes:
       - artio-postgres-data:/var/lib/postgresql/data
+      - artio-installation-secrets:/run/artio-secrets:ro
+    depends_on:
+      installation-secrets:
+        condition: service_completed_successfully
+
+  installation-secrets:
+    image: alpine:3.20
+    entrypoint: ["/bin/sh", "/init/initialize-secrets.sh"]
+    environment:
+      ARTIO_DATABASE_PASSWORD: ${ARTIO_DATABASE_PASSWORD:-}
+      ARTIO_JWT_SECRET: ${ARTIO_JWT_SECRET:-}
+      ARTIO_ENCRYPTION_KEY: ${ARTIO_ENCRYPTION_KEY:-}
+      ARTIO_SETUP_TOKEN: ${ARTIO_SETUP_TOKEN:-}
+    volumes:
+      - artio-installation-secrets:/run/artio-secrets
+      - ./initialize-secrets.sh:/init/initialize-secrets.sh:ro
 
   rest-api:
     build:
@@ -111,23 +107,21 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
       ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
       ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
-      ARTIO_DATABASE_PASSWORD: "${ARTIO_DATABASE_PASSWORD:?Set ARTIO_DATABASE_PASSWORD in .env}"
-      ARTIO_SEARCH_ENABLED: "true"
+      ARTIO_SEARCH_ENABLED: ${ARTIO_SEARCH_ENABLED:-false}
       ARTIO_SEARCH_URL: http://opensearch:9200
-      ARTIO_JWT_SECRET: "${ARTIO_JWT_SECRET:?Set ARTIO_JWT_SECRET in .env}"
-      ARTIO_ENCRYPTION_KEY: "${ARTIO_ENCRYPTION_KEY:?Set ARTIO_ENCRYPTION_KEY in .env}"
       ARTIO_EXTENSION_TRUSTED_REGISTRIES: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-}
       ARTIO_EXTENSION_DOCKER_ENABLED: ${ARTIO_EXTENSION_DOCKER_ENABLED:-false}
       ARTIO_EXTENSION_DOCKER_NETWORK: artio-extensions
       ARTIO_INVENTORY_RESERVATION_TTL: ${ARTIO_INVENTORY_RESERVATION_TTL:-PT30M}
       ARTIO_INVENTORY_EXPIRY_INTERVAL_MS: ${ARTIO_INVENTORY_EXPIRY_INTERVAL_MS:-60000}
       ARTIO_ALLOWED_ORIGINS: ${ARTIO_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4201}
-      ARTIO_BOOTSTRAP_ADMIN_EMAIL: ${ARTIO_BOOTSTRAP_ADMIN_EMAIL:-}
-      ARTIO_BOOTSTRAP_ADMIN_PASSWORD: ${ARTIO_BOOTSTRAP_ADMIN_PASSWORD:-}
       ARTIO_STRIPE_SECRET_KEY: ${ARTIO_STRIPE_SECRET_KEY:-}
       ARTIO_STRIPE_WEBHOOK_SECRET: ${ARTIO_STRIPE_WEBHOOK_SECRET:-}
       ARTIO_STOREFRONT_URL: http://localhost:4200
-      ARTIO_OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
+      MANAGEMENT_TRACING_ENABLED: ${ARTIO_TRACING_ENABLED:-false}
+      ARTIO_OTLP_TRACING_ENDPOINT: ${ARTIO_OTLP_TRACING_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      ARTIO_METRICS_OTLP_ENABLED: ${ARTIO_METRICS_OTLP_ENABLED:-false}
+      ARTIO_OTLP_METRICS_ENDPOINT: ${ARTIO_OTLP_METRICS_ENDPOINT:-http://otel-collector:4318/v1/metrics}
       ARTIO_SMTP_HOST: ${ARTIO_SMTP_HOST:-localhost}
       ARTIO_SMTP_PORT: ${ARTIO_SMTP_PORT:-1025}
       ARTIO_SMTP_USERNAME: ${ARTIO_SMTP_USERNAME:-}
@@ -138,25 +132,25 @@ services:
       ARTIO_EMAIL_ENABLED: ${ARTIO_EMAIL_ENABLED:-false}
       ARTIO_EMAIL_POLL_INTERVAL_MS: ${ARTIO_EMAIL_POLL_INTERVAL_MS:-30000}
       REDIS_HOST: redis
+      ARTIO_CACHE_REDIS_ENABLED: ${ARTIO_CACHE_REDIS_ENABLED:-false}
       KAFKA_BROKERS: kafka:9092
     ports:
-      - "8080:8080"
+      - "${ARTIO_BIND_ADDRESS:-127.0.0.1}:${ARTIO_API_PORT:-8080}:8080"
     networks:
       - default
       - extensions
+    volumes:
+      - artio-installation-secrets:/run/artio-secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
-      opensearch:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      jaeger:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+      installation-secrets:
+        condition: service_completed_successfully
 
   storefront:
+    profiles: [storefront]
     build:
       context: ..
       dockerfile: artio-docker/Dockerfile.frontend
@@ -164,7 +158,7 @@ services:
         MODULE: artio-storefront
         APP_NAME: storefront
     ports:
-      - "4200:80"
+      - "${ARTIO_BIND_ADDRESS:-127.0.0.1}:${ARTIO_STOREFRONT_PORT:-4200}:80"
     depends_on:
       rest-api:
         condition: service_started
@@ -177,7 +171,7 @@ services:
         MODULE: artio-backoffice
         APP_NAME: backoffice
     ports:
-      - "4201:80"
+      - "${ARTIO_BIND_ADDRESS:-127.0.0.1}:${ARTIO_BACKOFFICE_PORT:-4201}:80"
     depends_on:
       rest-api:
         condition: service_started
@@ -185,8 +179,8 @@ services:
 volumes:
   artio-postgres-data:
   artio-redis-data:
-  artio-prometheus-data:
-  artio-grafana-data:
+  artio-installation-secrets:
+  artio-kafka-data:
 
 networks:
   default: {}

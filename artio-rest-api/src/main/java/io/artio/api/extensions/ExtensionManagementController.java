@@ -23,12 +23,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /** Admin-only manifest registry and schema-backed configuration. It deliberately does not run images. */
 @RestController
@@ -67,14 +70,20 @@ public class ExtensionManagementController {
 
     @GetMapping
     @Transactional(readOnly = true)
-    public List<PluginSummary> findAll() {
-        return jdbc.query("SELECT plugin_id,manifest,lifecycle_state,configuration_version,encrypted_secrets FROM extension_plugins WHERE lifecycle_state<>'UNINSTALLED' ORDER BY plugin_id",
+    public List<PluginSummary> findAll(@RequestParam(required = false) String country) {
+        if (country != null && (!country.matches("[A-Z]{2}") || !Set.of(java.util.Locale.getISOCountries()).contains(country))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "country must be an ISO 3166-1 alpha-2 code");
+        }
+        List<PluginSummary> plugins = jdbc.query("SELECT plugin_id,manifest,lifecycle_state,configuration_version,encrypted_secrets FROM extension_plugins WHERE lifecycle_state<>'UNINSTALLED' ORDER BY plugin_id",
                 (rs, row) -> {
                     PluginManifest manifest = read(rs.getString("manifest"), PluginManifest.class);
                     Map<String, String> secrets = read(rs.getString("encrypted_secrets"), STRING_MAP);
                     return new PluginSummary(manifest.id(), manifest.name(), manifest.version(), rs.getString("lifecycle_state"),
-                            rs.getInt("configuration_version"), Set.copyOf(secrets.keySet()));
+                            rs.getInt("configuration_version"), Set.copyOf(secrets.keySet()), manifest.geographicAvailability());
                 });
+        return country == null ? plugins : plugins.stream()
+                .filter(plugin -> plugin.geographicAvailability() == null || plugin.geographicAvailability().appliesTo(country))
+                .toList();
     }
 
     @PostMapping("/register")
@@ -271,6 +280,35 @@ public class ExtensionManagementController {
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "DISABLED"));
     }
 
+    @DeleteMapping("/{pluginId}")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> uninstall(@PathVariable String pluginId, JwtAuthenticationToken actor) {
+        PluginRow row = findPlugin(pluginId);
+        if ("UNINSTALLED".equals(row.lifecycleState())) {
+            return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "UNINSTALLED"));
+        }
+        if ("ENABLED".equals(row.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the plugin before uninstalling it"));
+        }
+        List<PluginManifest> enabled = jdbc.query("SELECT manifest FROM extension_plugins WHERE lifecycle_state='ENABLED' AND plugin_id<>?",
+                (rs, rowNumber) -> read(rs.getString("manifest"), PluginManifest.class), pluginId);
+        List<String> dependents = PluginDependencyPolicy.enabledDependents(pluginId, enabled);
+        if (!dependents.isEmpty()) return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "Enabled plugins depend on this plugin", "dependents", dependents));
+        if (Set.of("INSTALLED", "DISABLED", "FAILED", "UNHEALTHY").contains(row.lifecycleState())) {
+            try {
+                runtime().uninstall(pluginId);
+            } catch (RuntimeException failure) {
+                audit(pluginId, actor, "UNINSTALL_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", "Plugin runtime could not be removed"));
+            }
+        }
+        jdbc.update("UPDATE extension_plugins SET public_configuration='{}'::jsonb,encrypted_secrets='{}'::jsonb,lifecycle_state='UNINSTALLED',updated_at=now() WHERE plugin_id=?",
+                pluginId);
+        audit(pluginId, actor, "UNINSTALL", Map.of("configurationPurged", true));
+        return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "UNINSTALLED"));
+    }
+
     @GetMapping("/{pluginId}/health")
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ExtensionRuntimePort.RuntimeHealth health(@PathVariable String pluginId) {
@@ -445,7 +483,8 @@ public class ExtensionManagementController {
         public ManifestValidationResponse { errors = List.copyOf(errors); }
     }
     public record PluginSummary(String id, String name, String version, String lifecycleState,
-                                int configurationVersion, Set<String> configuredSecrets) { }
+                                int configurationVersion, Set<String> configuredSecrets,
+                                PluginManifest.GeographicAvailability geographicAvailability) { }
     public record PluginView(PluginManifest manifest, String lifecycleState, Map<String, Object> configuration,
                              Set<String> configuredSecrets, int configurationVersion) { }
     public record ConfigurationErrorResponse(List<String> errors) {

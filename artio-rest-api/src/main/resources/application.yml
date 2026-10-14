@@ -28,21 +28,39 @@ server:
   port: ${PORT:8080}
   forward-headers-strategy: framework
 management:
+  health:
+    mail:
+      enabled: ${ARTIO_EMAIL_ENABLED:false}
+    redis:
+      enabled: ${ARTIO_CACHE_REDIS_ENABLED:false}
   tracing:
+    enabled: ${MANAGEMENT_TRACING_ENABLED:false}
     sampling:
       probability: ${ARTIO_TRACING_SAMPLE_PROBABILITY:0.1}
   otlp:
     tracing:
       endpoint: ${ARTIO_OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+    metrics:
+      export:
+        enabled: ${ARTIO_METRICS_OTLP_ENABLED:false}
+        url: ${ARTIO_OTLP_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        include: health,info
   endpoint:
     health:
       probes:
         enabled: true
 artio:
+  setup:
+    token: ${ARTIO_SETUP_TOKEN:}
+  cache:
+    redis:
+      enabled: ${ARTIO_CACHE_REDIS_ENABLED:false}
+  events:
+    kafka:
+      enabled: ${ARTIO_KAFKA_EVENTS_ENABLED:true}
   mail-from: ${ARTIO_MAIL_FROM:no-reply@artio.local}
   notifications:
     email:

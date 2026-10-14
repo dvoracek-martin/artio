@@ -1,0 +1,58 @@
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    expose:
+      - "4317"
+      - "4318"
+      - "9464"
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - artio-prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${ARTIO_OBSERVABILITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: "${ARTIO_OBSERVABILITY_ADMIN_PASSWORD:?Set ARTIO_OBSERVABILITY_ADMIN_PASSWORD}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/provisioning/dashboards/artio-overview.json:/var/lib/grafana/dashboards/artio-overview.json:ro
+      - artio-grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+
+  rest-api:
+    environment:
+      MANAGEMENT_TRACING_ENABLED: ${ARTIO_OBSERVABILITY_TRACES_ENABLED:-true}
+      ARTIO_METRICS_OTLP_ENABLED: ${ARTIO_OBSERVABILITY_METRICS_ENABLED:-true}
+      ARTIO_OTLP_TRACING_ENDPOINT: http://otel-collector:4318/v1/traces
+      ARTIO_OTLP_METRICS_ENDPOINT: http://otel-collector:4318/v1/metrics
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+volumes:
+  artio-prometheus-data:
+  artio-grafana-data:

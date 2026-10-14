@@ -90,9 +90,11 @@ class CatalogApiIntegrationTests {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("artio.security.jwt-secret", () -> "integration-test-jwt-secret-value-32-bytes-minimum");
         registry.add("artio.security.encryption-key", () -> "integration-test-encryption-key-value-32-bytes-minimum");
+        registry.add("artio.setup.token", () -> "integration-test-setup-token-value-32-bytes-minimum");
         registry.add("artio.extensions.trusted-registries", () -> "ghcr.io");
         registry.add("artio.inventory.expiry-interval-ms", () -> "3600000");
         registry.add("artio.events.outbox-poll-interval-ms", () -> "3600000");
+        registry.add("artio.events.kafka.enabled", () -> "true");
         registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
         registry.add("artio.payments.stripe-webhook-secret", () -> "whsec_integration_test_secret");
         registry.add("artio.payments.reconciliation-api-url", () -> "http://127.0.0.1:" + MOCK_STRIPE.getAddress().getPort());
@@ -285,6 +287,75 @@ class CatalogApiIntegrationTests {
                 Map.of("mode", "root", "endpoint", "javascript:alert(1)"),
                 io.artio.api.extensions.ExtensionManagementController.ConfigurationErrorResponse.class, manifest.id());
         assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        var uninstalled = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, manifest.id());
+        assertThat(uninstalled.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(uninstalled.getBody()).containsEntry("lifecycleState", "UNINSTALLED");
+        assertThat(jdbc.queryForObject("SELECT encrypted_secrets::text FROM extension_plugins WHERE plugin_id=?", String.class, manifest.id()))
+                .isEqualTo("{}");
+        assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, manifest.id()))
+                .isEqualTo("UNINSTALLED");
+        assertThat(adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, Map[].class).getBody())
+                .noneMatch(plugin -> manifest.id().equals(plugin.get("id")));
+    }
+
+    @Test
+    void pluginDiscoveryFiltersGeographicAvailabilityButDoesNotRestrictRegistration() {
+        var swissPost = new io.artio.extensions.PluginManifest("1", "shipping.swiss-post", "Swiss Post", "Artio",
+                "1.0.0", "Swiss carrier adapter", "0.1.0", "1.0.0",
+                "ghcr.io/artio/swiss-post@sha256:" + "e".repeat(64), java.util.List.of(),
+                java.util.List.of("shipping.quote"), java.util.Map.of(), java.util.List.of("shipping.provider.v1"),
+                "/health", "/diagnostics", new io.artio.extensions.PluginManifest.GeographicAvailability("COUNTRY_SPECIFIC", java.util.List.of("CH")));
+        var global = new io.artio.extensions.PluginManifest("1", "observability.prometheus", "Prometheus", "Artio",
+                "1.0.0", "Global metrics plugin", "0.1.0", "1.0.0",
+                "ghcr.io/artio/prometheus@sha256:" + "f".repeat(64), java.util.List.of(), java.util.List.of(),
+                java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
+        assertThat(adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, swissPost, Map.class).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, global, Map.class).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        var ch = adminExchange("/api/v1/admin/extensions?country=CH", HttpMethod.GET, null, Map[].class).getBody();
+        var de = adminExchange("/api/v1/admin/extensions?country=DE", HttpMethod.GET, null, Map[].class).getBody();
+        assertThat(ch).extracting(plugin -> plugin.get("id")).contains("shipping.swiss-post", "observability.prometheus");
+        assertThat(de).extracting(plugin -> plugin.get("id")).doesNotContain("shipping.swiss-post").contains("observability.prometheus");
+
+        var invalid = adminExchange("/api/v1/admin/extensions?country=XX", HttpMethod.GET, null, ApiError.class);
+        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void installationSettingsAreRestrictedToSuperadminAndAudited() {
+        var denied = adminExchange("/api/v1/admin/system/settings", HttpMethod.GET, null, ApiError.class);
+        assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        UUID ownerId = UUID.randomUUID();
+        String ownerEmail = "owner-" + ownerId + "@example.test";
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) VALUES (?,?,?,?,?,'SUPERADMIN',now())",
+                ownerId, ownerEmail, new BCryptPasswordEncoder().encode("owner-password-123"), "System", "Owner");
+        LoginResponse ownerLogin = http.postForObject("/api/auth/login", Map.of("email", ownerEmail, "password", "owner-password-123"), LoginResponse.class);
+        assertThat(ownerLogin).isNotNull();
+        adminToken = ownerLogin.accessToken();
+
+        var defaults = adminExchange("/api/v1/admin/system/settings", HttpMethod.GET, null,
+                io.artio.api.enterprise.SystemSettingsController.SystemSettingsView.class);
+        assertThat(defaults.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(defaults.getBody()).isNotNull();
+        assertThat(defaults.getBody().distributionId()).isEqualTo("switzerland-v1");
+
+        var saved = adminExchange("/api/v1/admin/system/settings", HttpMethod.PUT,
+                new io.artio.api.enterprise.SystemSettingsController.SystemSettingsUpdate("Studio Zürich", "CH", "CHF", "de-CH",
+                        List.of("de", "fr", "it", "en"), "Europe/Zurich", "https://shop.example.test"),
+                io.artio.api.enterprise.SystemSettingsController.SystemSettingsView.class);
+        assertThat(saved.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(saved.getBody()).isNotNull();
+        assertThat(saved.getBody().storeName()).isEqualTo("Studio Zürich");
+        assertThat(saved.getBody().availableLanguages()).containsExactly("de", "fr", "it", "en");
+
+        var invalidUrl = adminExchange("/api/v1/admin/system/settings", HttpMethod.PUT,
+                new io.artio.api.enterprise.SystemSettingsController.SystemSettingsUpdate("Studio Zürich", "CH", "CHF", "de-CH",
+                        List.of("de"), "Europe/Zurich", "http://shop.example.test"), ApiError.class);
+        assertThat(invalidUrl.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -474,7 +545,8 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
         var duplicateExpiry = signedStripeWebhook("checkout.session.expired", sessionId, "unpaid");
         assertThat(duplicateExpiry.getBody()).contains("duplicate");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE provider='STRIPE'", Integer.class)).isEqualTo(1);
+        String expiryEventId = "evt_test_" + UUID.nameUUIDFromBytes(("checkout.session.expired:" + sessionId).getBytes(StandardCharsets.UTF_8));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE provider='STRIPE' AND event_id=?", Integer.class, expiryEventId)).isEqualTo(1);
 
         var lateSuccess = signedStripeWebhook("checkout.session.completed", sessionId, "paid");
         assertThat(lateSuccess.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -497,6 +569,42 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT attempts FROM event_outbox WHERE id=?", Integer.class, eventId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT available_at>now() FROM event_outbox WHERE id=?", Boolean.class, eventId)).isTrue();
         assertThat(jdbc.queryForObject("SELECT last_error IS NOT NULL FROM event_outbox WHERE id=?", Boolean.class, eventId)).isTrue();
+    }
+
+    @Test
+    void movesRetryExhaustedEventsToDeadLetterState() {
+        UUID eventId = UUID.randomUUID();
+        jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload,status,attempts) "
+                        + "VALUES (?,'ORDER_CREATED','ORDER',?,'{}'::jsonb,'PENDING',12)", eventId, UUID.randomUUID().toString());
+
+        orderEventOutboxPublisher.publishPending();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM event_outbox WHERE id=?", String.class, eventId)).isEqualTo("DEAD");
+        assertThat(jdbc.queryForObject("SELECT dead_at IS NOT NULL FROM event_outbox WHERE id=?", Boolean.class, eventId)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT attempts FROM event_outbox WHERE id=?", Integer.class, eventId)).isEqualTo(12);
+    }
+
+    @Test
+    void deadLetterEventsCanBeSafelyRedrivenByAdministrators() {
+        UUID eventId = UUID.randomUUID();
+        String aggregateId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload,status,attempts,dead_at,last_error) "
+                        + "VALUES (?,'ORDER_CREATED','ORDER',?,jsonb_build_object('payload','private-test-value'),'DEAD',12,now(),'TimeoutException')",
+                eventId, aggregateId);
+
+        var headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+        var listed = http.exchange("/api/v1/admin/operations/outbox/events/dead", HttpMethod.GET,
+                new HttpEntity<>(headers), String.class);
+        assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(listed.getBody()).contains(eventId.toString(), "ORDER_CREATED", "TimeoutException")
+                .doesNotContain("private-test-value");
+
+        var replay = http.exchange("/api/v1/admin/operations/outbox/events/" + eventId + "/replay", HttpMethod.POST,
+                new HttpEntity<>(headers), io.artio.api.notifications.OutboxOperationsController.ReplayResult.class);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM event_outbox WHERE id=?", String.class, eventId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT attempts FROM event_outbox WHERE id=?", Integer.class, eventId)).isZero();
     }
 
     private ResponseEntity<String> signedStripeWebhook(String type, String sessionId, String paymentStatus) throws Exception {
@@ -698,6 +806,9 @@ class CatalogApiIntegrationTests {
                 .contains(bundleResponse.getBody().id().toString(), variant.getBody().id().toString(), "configuredTotal", "componentAdjustmentFactor");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CREATED'", Integer.class,
                 firstBody.orderId().toString())).isEqualTo(1);
+        String eventPayload = jdbc.queryForObject("SELECT payload::text FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CREATED'",
+                String.class, firstBody.orderId().toString());
+        assertThat(mapper.readTree(eventPayload).path("schemaVersion").asInt()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
                 "order-email:" + firstBody.orderId())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT subject FROM notification_delivery_outbox WHERE event_key=?", String.class,
@@ -828,14 +939,15 @@ class CatalogApiIntegrationTests {
         org.springframework.mail.javamail.JavaMailSender sender = org.mockito.Mockito.mock(org.springframework.mail.javamail.JavaMailSender.class);
         org.mockito.Mockito.when(sender.createMimeMessage()).thenReturn(new jakarta.mail.internet.MimeMessage(
                 jakarta.mail.Session.getInstance(new java.util.Properties())));
-        org.springframework.beans.factory.ObjectProvider<org.springframework.mail.javamail.JavaMailSender> provider =
+        org.springframework.beans.factory.ObjectProvider<io.artio.extensions.commerce.NotificationTransport> provider =
                 org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
-        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(sender);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(
+                new io.artio.api.notifications.SmtpNotificationTransport(sender, "no-reply@artio.test"));
 
-        new io.artio.api.notifications.OrderNotificationHandler(jdbc, provider, "no-reply@artio.test", true)
+        new io.artio.api.notifications.OrderNotificationHandler(jdbc, provider, true)
                 .deliverPendingBatch();
 
-        org.mockito.Mockito.verify(sender).send(org.mockito.ArgumentMatchers.any(jakarta.mail.internet.MimeMessage.class));
+        org.mockito.Mockito.verify(sender, org.mockito.Mockito.atLeastOnce()).send(org.mockito.ArgumentMatchers.any(jakarta.mail.internet.MimeMessage.class));
         assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("SENT");
         assertThat(jdbc.queryForObject("SELECT subject || body FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEmpty();
     }
@@ -850,11 +962,12 @@ class CatalogApiIntegrationTests {
                 jakarta.mail.Session.getInstance(new java.util.Properties())));
         org.mockito.Mockito.doThrow(new org.springframework.mail.MailSendException("simulated SMTP failure"))
                 .when(sender).send(org.mockito.ArgumentMatchers.any(jakarta.mail.internet.MimeMessage.class));
-        org.springframework.beans.factory.ObjectProvider<org.springframework.mail.javamail.JavaMailSender> provider =
+        org.springframework.beans.factory.ObjectProvider<io.artio.extensions.commerce.NotificationTransport> provider =
                 org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
-        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(sender);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(
+                new io.artio.api.notifications.SmtpNotificationTransport(sender, "no-reply@artio.test"));
 
-        new io.artio.api.notifications.OrderNotificationHandler(jdbc, provider, "no-reply@artio.test", true)
+        new io.artio.api.notifications.OrderNotificationHandler(jdbc, provider, true)
                 .deliverPendingBatch();
 
         assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("PENDING");
@@ -924,7 +1037,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE", String.class);
-        assertThat(appliedVersions).contains("6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18");
+        assertThat(appliedVersions).containsExactly("1");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "

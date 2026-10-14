@@ -4,3 +4,10 @@
 **/build
 **/node_modules
 **/dist
+!buildSrc/src/
+!buildSrc/src/main/
+!buildSrc/src/main/kotlin/
+!buildSrc/src/main/kotlin/io/
+!buildSrc/src/main/kotlin/io/artio/
+!buildSrc/src/main/kotlin/io/artio/build/
+!buildSrc/src/main/kotlin/io/artio/build/**

@@ -48,8 +48,18 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(25);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("25");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(1);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("1");
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='event_outbox' AND column_name='dead_at'")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt(1)).isEqualTo(1);
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='artio_installation_settings' AND column_name IN ('store_name','available_languages','external_base_url','distribution_id')")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt(1)).isEqualTo(4);
+        }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('catalog_product_translations')")) {
             assertThat(result.next()).isTrue();

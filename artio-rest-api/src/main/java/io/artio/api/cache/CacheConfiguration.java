@@ -2,6 +2,8 @@ package io.artio.api.cache;
 
 import java.time.Duration;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -12,7 +14,9 @@ import org.springframework.data.redis.serializer.RedisSerializationContext;
 
 @Configuration
 public class CacheConfiguration {
-    @Bean CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+    @Bean
+    @ConditionalOnProperty(prefix = "artio.cache.redis", name = "enabled", havingValue = "true")
+    CacheManager redisCacheManager(RedisConnectionFactory connectionFactory) {
         var valueSerializer = RedisSerializationContext.SerializationPair.fromSerializer(new JdkSerializationRedisSerializer());
         var defaults = RedisCacheConfiguration.defaultCacheConfig().serializeValuesWith(valueSerializer).disableCachingNullValues();
         return RedisCacheManager.builder(connectionFactory)
@@ -20,5 +24,11 @@ public class CacheConfiguration {
                 .withCacheConfiguration("catalog-products", defaults.entryTtl(Duration.ofHours(2)))
                 .withCacheConfiguration("price-lookups", defaults.entryTtl(Duration.ofHours(1)))
                 .build();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "artio.cache.redis", name = "enabled", havingValue = "false", matchIfMissing = true)
+    CacheManager localCacheManager() {
+        return new ConcurrentMapCacheManager("catalog-products", "price-lookups");
     }
 }

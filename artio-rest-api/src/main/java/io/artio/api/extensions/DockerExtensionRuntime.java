@@ -118,6 +118,25 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     @Override
+    public void uninstall(String pluginId) {
+        String name = containerName(pluginId);
+        try {
+            InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
+            if (current.getConfig() == null || current.getConfig().getLabels() == null
+                    || !"true".equals(current.getConfig().getLabels().get("io.artio.managed"))
+                    || !pluginId.equals(current.getConfig().getLabels().get("io.artio.extension"))) {
+                throw new IllegalStateException("Refusing to remove an unmanaged extension container");
+            }
+            if (Boolean.TRUE.equals(current.getState().getRunning())) {
+                throw new IllegalStateException("Disable the extension before uninstalling it");
+            }
+            docker.removeContainerCmd(name).withForce(false).exec();
+        } catch (NotFoundException ignored) {
+            // A registered but never installed extension has no runtime container.
+        }
+    }
+
+    @Override
     public void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) {
         String name = containerName(manifest.id());
         try {

@@ -1,31 +1,41 @@
 # Artio Commerce
 
-Artio is a modular commerce platform built with Java 21, Spring Boot, PostgreSQL, Redis, Kafka, OpenSearch and Angular 17. The Gradle project is a modular monolith: bounded contexts have separate domain and persistence modules, with a single REST application coordinating workflows. Configurable bundles remain their own aggregate and are quoted from current component prices.
+Artio is a self-hosted commerce platform built with Java 21, Spring Boot, PostgreSQL, Apache Kafka and Angular 17. Kafka is part of every standard installation and carries durable asynchronous events from the transactional PostgreSQL outbox. Redis and OpenSearch remain optional integrations; provider-specific implementations are moving behind Docker plugin contracts. The Gradle project is a modular monolith: bounded contexts have separate domain and persistence modules, with a REST application coordinating transactional workflows. Configurable bundles remain their own aggregate and are quoted from current component prices.
 
-> **Architecture status:** this README describes the current checkout, not full product readiness. The binding target is a self-hosted single-merchant installation with a proprietary Community/Enterprise edition model, an included Backoffice, an optional headless Storefront, and Docker-only provider plugins. See [the target architecture](docs/ARCHITECTURE.md), [repository audit](docs/REPOSITORY_AUDIT.md), and [phase/task ledger](docs/ROADMAP.md). Current code still has documented conflicts and unverified migration/deployment behavior.
+> **Architecture status:** this README describes the current checkout, not full product readiness. The target is a self-hosted single-merchant installation with an included Backoffice, optional Storefront, one Switzerland distribution, and Docker-only plugins. Current package gaps include provider extraction, distribution plugin provisioning, zero-config production secrets/key lifecycle, and the separate lifecycle controller. See [the target architecture](docs/ARCHITECTURE.md), [repository audit](docs/REPOSITORY_AUDIT.md), and [phase/task ledger](docs/ROADMAP.md).
 
 ## Local development
 
-Install Java 21, Node.js 20 and Docker Compose. Copy `.env.example` to `.env` in the repository root, replace every `replace-with-...` value with a unique secret, and keep `.env` private. The API rejects placeholder or cryptographic keys shorter than 32 bytes. Compose requires the database, JWT, encryption, and Grafana passwords instead of supplying public defaults:
-
-```dotenv
-ARTIO_DATABASE_PASSWORD=replace-with-a-unique-database-password
-ARTIO_JWT_SECRET=replace-with-at-least-32-random-bytes
-ARTIO_ENCRYPTION_KEY=replace-with-a-different-32-byte-or-longer-secret
-ARTIO_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-ARTIO_BOOTSTRAP_ADMIN_PASSWORD=choose-a-unique-password-at-least-16-characters
-GRAFANA_ADMIN_PASSWORD=replace-with-unique-grafana-password
-ARTIO_STRIPE_SECRET_KEY=sk_test_...
-ARTIO_STRIPE_WEBHOOK_SECRET=whsec_...
-```
-
-Then start the API and dependencies:
+Install Docker Compose. The default installation generates unique database, JWT, AES-GCM and first-run setup credentials into a restricted persistent Docker volume. No `.env` file is required for the default stack. To inspect the generated setup token for the wizard, run this from the repository root and paste the output into the first-run wizard; the token is not written to logs or returned by the API:
 
 ```shell
-docker compose --env-file .env -f artio-docker/docker-compose.yml up --build
+docker compose exec rest-api cat /run/artio-secrets/setup-token
 ```
 
-The storefront is at `http://localhost:4200`, the backoffice at `http://localhost:4201`, the API at `http://localhost:8080`, OpenSearch at `http://localhost:9200`, PostgreSQL at `localhost:5432`, Redis at `localhost:6379`, and Kafka at `localhost:9092`. Flyway applies the migrations at API startup. The bootstrap administrator is created only if both bootstrap values are supplied; the password must be at least 16 characters. OpenSearch 2.17 requires an initial admin password during startup even though this Compose profile disables its security plugin; set a unique value in `ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD`. Order confirmation emails are queued durably but sending is disabled by default; configure SMTP and set `ARTIO_EMAIL_ENABLED=true` to enable delivery. Do not use the sample values in a deployed environment.
+Installation credentials are generated once and persist with the `artio-installation-secrets` volume. Back up that volume together with PostgreSQL; losing the AES key makes encrypted plugin secrets unrecoverable. Follow the [backup and recovery procedure](docs/operations/backup-recovery.md). Optional `.env` values can override generated credentials on the first boot only. Never commit `.env`.
+
+For IntelliJ development, run the API with `SPRING_PROFILES_ACTIVE=dev`. The `dev` profile supplies local-only credentials so the API can run without optional plugins. Set `ARTIO_SETUP_SKIP=true` to initialize the local SUPERADMIN automatically; its local-only login is `admin@artio.local` / `ArtioDevOnly!ChangeMe2026`. The skip is rejected unless `dev` is active and is always rejected when `production` is active. Omit the skip flag to use the setup wizard. Never reuse these values outside a local development environment.
+
+```shell
+docker compose up -d
+```
+
+The Backoffice is at `http://localhost:4201` and the API at `http://localhost:8080`; PostgreSQL and a one-shot credential initializer are the only required services. Flyway applies migrations at API startup. On a fresh database, the Backoffice opens the resumable wizard for the default Switzerland settings. The setup token hash is stored in PostgreSQL; the token itself stays in the protected installation volume. Drafts contain no password or integration secrets and are cleared on completion. Customer signup remains disabled until the initial SUPERADMIN exists. Five failed tokens trigger a 15-minute lock. Order confirmation emails are queued durably but sending is disabled by default. The production wizard still requires explicit owner sign-in data; provider credentials are optional.
+
+On Windows, double-click [`Start-Artio.cmd`](Start-Artio.cmd) to build and start the default Artio platform, then open Backoffice at `http://localhost:4201`. Docker Desktop must be running. The customer Storefront is optional and is not started by the standard installation. Double-click [`Stop-Artio.cmd`](Stop-Artio.cmd) to stop the services while keeping database, Kafka and installation data.
+
+Kafka starts automatically as a required KRaft service, persists its log data in a named Docker volume, and initializes the versioned order-events topic before the API starts. Redis, OpenSearch and the Storefront are opt-in Compose profiles (`cache`, `search`, and `storefront`). For example, enable search with `--profile search` and `ARTIO_SEARCH_ENABLED=true`; set a unique `ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD` in `.env` before enabling the service.
+
+### Optional observability plugin pack
+
+The Artio API has no Prometheus registry, Prometheus endpoint, or Grafana dependency. When observability is enabled, Core emits standard OTLP metrics and traces to an OpenTelemetry Collector. Prometheus, Grafana, and Jaeger are packaged separately under `artio-docker/observability` and are not started by the base stack. To enable the add-on, copy `artio-docker/observability/.env.example` to `artio-docker/observability/.env`, replace its password, and start the compose stack with both env files:
+
+```shell
+docker compose --env-file .env --env-file artio-docker/observability/.env \
+  -f artio-docker/docker-compose.yml -f artio-docker/docker-compose.observability.yml up --build
+```
+
+Grafana, Prometheus, and Jaeger are bound to localhost on ports 3000, 9090, and 16686. Disable and remove the add-on containers with `docker compose ... down`; its data volumes can be removed separately when the operator intentionally wants to discard telemetry history. The current plugin manager lifecycle controls individual extension containers; a multi-container observability pack still needs a bundle lifecycle adapter before it can be installed and removed from Backoffice as one plugin.
 
 Set Stripe test credentials and forward Stripe's `checkout.session.completed` and `checkout.session.expired` events to `POST /api/v1/payments/stripe/webhook` to exercise payment confirmation and reservation release. SMTP is optional; set `ARTIO_SMTP_HOST`, `ARTIO_SMTP_PORT`, credentials, and TLS options to send order email. In-app notifications are persisted even without SMTP.
 
@@ -44,7 +54,7 @@ Gradle plugins and Java dependencies resolve from Maven Central. npm dependencie
 
 ## Modules
 
-- Shared primitives and infrastructure: `artio-kernel`, `artio-persistence`, `artio-events`, `artio-observability`
+- Shared primitives: `artio-kernel`; generic unused persistence/event/observability abstractions were removed, while monitoring deployment assets moved to the separately packaged Docker add-on.
 - Domains: `artio-catalog`, `artio-pricing`, `artio-inventory`, `artio-bundles`, `artio-orders`, `artio-users`, `artio-payments`, `artio-notifications`
 - Adapters: PostgreSQL modules for catalog, pricing, inventory and bundles; OpenSearch catalog adapter
 - Applications: `artio-rest-api`, `artio-storefront`, `artio-backoffice`
@@ -52,9 +62,9 @@ Gradle plugins and Java dependencies resolve from Maven Central. npm dependencie
 
 ## Authentication and access
 
-Register a customer with `POST /api/v1/auth/register` using `{"email":"shopper@example.com","password":"at-least-12-characters","firstName":"Ada","lastName":"Lovelace"}`. Log in at `POST /api/v1/auth/login`; use the returned bearer token for cart, checkout, orders, and notifications. Passwords are BCrypt hashes. Access tokens are signed HS256 JWTs and expire after one hour.
+The setup API is versioned under `/api/v1/setup`: `GET /status`, `POST /resume`, `POST /progress`, and `POST /complete`. The wizard sends `X-Artio-Setup-Token`; only the token hash is stored. The status endpoint does not expose the draft; the token-protected resume endpoint returns only non-secret draft fields. In a fresh installation, customer registration is unavailable until the first administrator is created. Afterwards register a customer with `POST /api/v1/auth/register` using `{"email":"shopper@example.com","password":"at-least-12-characters","firstName":"Ada","lastName":"Lovelace"}`. Log in at `POST /api/v1/auth/login`; use the returned bearer token for cart, checkout, orders, and notifications. Passwords are BCrypt hashes. Access tokens are signed HS256 JWTs and expire after one hour.
 
-Catalog, pricing, inventory, bundle administration, reporting, and user-management mutations require an `ADMIN` or `SUPERADMIN` role. The optional bootstrap account receives `SUPERADMIN`. User registration always creates a `CUSTOMER`; only a superadmin can grant roles through `PUT /api/v1/admin/users/{id}/role`. Rate limiting allows 100 requests per minute per IP and 1,000 per minute for a supplied `X-API-Key`, using Redis with a local fallback if Redis is unavailable.
+Catalog, pricing, inventory, bundle administration, reporting, and user-management mutations require an `ADMIN` or `SUPERADMIN` role. The first-run wizard creates the initial `SUPERADMIN`. User registration always creates a `CUSTOMER`; only a superadmin can grant roles through `PUT /api/v1/admin/users/{id}/role`. Rate limiting allows 100 requests per minute per IP and 1,000 per minute for a supplied `X-API-Key`, using Redis with a local fallback. Redis-backed caching is also optional; the default standalone process uses a local in-memory cache.
 
 ## Catalog and search API
 
@@ -78,7 +88,7 @@ Prices are scoped to a sellable UUID, market and channel. A sellable is normally
 - `POST /api/v1/inventory/reservations`, `GET /api/v1/orders/{orderId}/inventory-reservations`, and reservation allocate/release routes
 - Reservations default to a 30-minute TTL (`ARTIO_INVENTORY_RESERVATION_TTL`, ISO-8601 duration). A bounded scheduled task releases expired stock; the interval is configurable with `ARTIO_INVENTORY_EXPIRY_INTERVAL_MS`.
 
-Extension manifest preflight is available to administrators at `POST /api/v1/admin/extensions/validate`. Configure trusted registry hosts with comma-separated `ARTIO_EXTENSION_TRUSTED_REGISTRIES`. An empty value trusts no image registry. The optional Docker lifecycle adapter is disabled by default and the standard Compose setup does not mount the Docker socket. To enable it, explicitly add `-f artio-docker/docker-compose.extensions.yml` to the Compose command and set `ARTIO_EXTENSION_DOCKER_ENABLED=true`. The adapter supports digest-pinned image pull, restricted container start/stop, readiness and health checks, and a bounded authenticated invocation envelope on the `artio-extensions` internal network. It retries one transient 502/503/504 response with the same idempotency key within the original deadline; plugins must deduplicate that key. Backoffice exposes install/enable/disable/health actions. A runnable reference-container proof, secret rotation, update/rollback and complete diagnostics remain in progress. Access to the Docker socket is equivalent to host administration.
+Extension manifest preflight is available to administrators at `POST /api/v1/admin/extensions/validate`. Configure trusted registry hosts with comma-separated `ARTIO_EXTENSION_TRUSTED_REGISTRIES`. An empty value trusts no image registry. The optional Docker lifecycle adapter is disabled by default and the standard Compose setup does not mount the Docker socket. To enable it, explicitly add `-f artio-docker/docker-compose.extensions.yml` to the Compose command and set `ARTIO_EXTENSION_DOCKER_ENABLED=true`. The adapter supports digest-pinned image pull, restricted container start/stop, readiness and health checks, and a bounded authenticated invocation envelope on the `artio-extensions` internal network. It retries one transient 502/503/504 response with the same idempotency key within the original deadline; plugins must deduplicate that key. Backoffice exposes schema-backed configuration and install/enable/disable/health/update/rollback/uninstall operations. `scripts/verify-extension-runtime.ps1` runs a real reference-image lifecycle test. The observability distribution is still not installed and managed from Backoffice as a plugin bundle. Access to the Docker socket is equivalent to host administration.
 
 Create an active warehouse, receive stock for each variant and create an active price before testing checkout. Checkout refreshes all prices, calculates taxes, reserves stock, creates a pending order and requests a Stripe Checkout session. It requires an `Idempotency-Key`; replay returns the original order. Stripe session creation uses a stable order-scoped idempotency key and a 31-minute provider expiry. Immediately before session creation, the API extends all active stock holds through the session window plus a one-minute safety margin under the stock-row locks. Stripe's signed completion event marks the order paid; an expired session releases reservations early. Administrators can ship paid orders and record a tracking number through `/api/v1/admin/orders/{id}/ship`.
 
@@ -100,7 +110,7 @@ Administrators can store DE/IT/FR/EN bundle names and option-group labels with `
 
 The storefront includes responsive catalog browsing, search, bundle configuration, account registration/login, cart, Stripe checkout, order history and order-status views. The backoffice includes product/variant management, bundle setup, price management, customer activation/email-verification, reporting summaries and shipment updates. Both are strict-mode Angular applications with responsive layouts and dark-mode support.
 
-Compose starts PostgreSQL, Redis, Kafka in single-node KRaft mode, OpenSearch, the REST API and both Angular frontends. Docker Compose is the supported deployment path in the current implementation.
+The default Compose stack starts PostgreSQL, Apache Kafka, the REST API and Backoffice. Redis, OpenSearch and the optional Storefront use opt-in profiles; observability remains a separately managed add-on pack. Docker Compose is the supported deployment path.
 
 ## API examples
 

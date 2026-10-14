@@ -10,9 +10,6 @@ dependencyResolutionManagement {
 rootProject.name = "artio"
 include(
     "artio-kernel",
-    "artio-persistence",
-    "artio-observability",
-    "artio-events",
     "artio-catalog",
     "artio-catalog-postgres",
     "artio-catalog-opensearch",

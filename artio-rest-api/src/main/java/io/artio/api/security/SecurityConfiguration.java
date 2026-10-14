@@ -42,7 +42,7 @@ public class SecurityConfiguration {
         CorsConfiguration config=new CorsConfiguration();
         config.setAllowedOrigins(java.util.Arrays.stream(origins.split(",")).map(String::trim).filter(s->!s.isEmpty()).toList());
         config.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization","Content-Type","Idempotency-Key","X-API-Key"));
+        config.setAllowedHeaders(List.of("Authorization","Content-Type","Idempotency-Key","X-API-Key","X-Artio-Setup-Token"));
         config.setAllowCredentials(false); config.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source=new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/api/**",config); return source;
     }
@@ -50,6 +50,7 @@ public class SecurityConfiguration {
             @Value("${artio.security.oauth2-enabled:false}") boolean oauth2Enabled,
             AuthenticationSuccessHandler oauth2SuccessHandler,
             ApiVersioningFilter apiVersioningFilter,
+            InstallationSetupGateFilter installationSetupGateFilter,
             ObjectMapper objectMapper) throws Exception {
         var converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(jwt -> java.util.List.of(new SimpleGrantedAuthority("ROLE_" + jwt.getClaimAsString("role"))));
@@ -69,13 +70,16 @@ public class SecurityConfiguration {
                         "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**", "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/warehouses/**", "/api/stock/**", "/api/orders/*/inventory-reservations",
                         "/api/v1/warehouses/**", "/api/v1/stock/**", "/api/v1/orders/*/inventory-reservations").hasAnyRole("ADMIN", "SUPERADMIN")
-                .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/payments/stripe/webhook",
+                .requestMatchers(HttpMethod.GET, "/api/setup/status", "/api/v1/setup/status").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/setup/progress", "/api/setup/complete", "/api/setup/resume", "/api/v1/setup/progress", "/api/v1/setup/complete", "/api/v1/setup/resume",
+                        "/api/auth/register", "/api/auth/login", "/api/payments/stripe/webhook",
                         "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/payments/stripe/webhook").permitAll()
                 .requestMatchers("/api/public/**", "/api/v1/public/**", "/actuator/health/**", "/actuator/info",
                         "/api/products/**", "/api/variants/**", "/api/categories/**", "/api/brands/**", "/api/attributes/**", "/api/bundles/**", "/api/pricing/quote",
                         "/api/v1/products/**", "/api/v1/variants/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/pricing/quote").permitAll()
                 .requestMatchers("/oauth2/**","/login/oauth2/**").permitAll()
                 .requestMatchers("/v3/api-docs/**").permitAll()
+                .requestMatchers("/api/admin/system/**", "/api/v1/admin/system/**").hasRole("SUPERADMIN")
                 .requestMatchers("/api/admin/**", "/api/v1/admin/**").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers("/graphql").permitAll()
                 .requestMatchers("/ws/**").permitAll()
@@ -88,6 +92,7 @@ public class SecurityConfiguration {
                 .accessDeniedHandler((request, response, exception) ->
                     ApiErrorWriter.write(objectMapper, request, response, org.springframework.http.HttpStatus.FORBIDDEN,
                             "Access is denied")))
+            .addFilterBefore(installationSetupGateFilter, BearerTokenAuthenticationFilter.class)
             .addFilterBefore(apiVersioningFilter, BearerTokenAuthenticationFilter.class);
         if(oauth2Enabled)http.oauth2Login(oauth->oauth.successHandler(oauth2SuccessHandler));
         return http.build();
@@ -96,5 +101,10 @@ public class SecurityConfiguration {
     @Bean
     ApiVersioningFilter apiVersioningFilter() {
         return new ApiVersioningFilter();
+    }
+
+    @Bean
+    InstallationSetupGateFilter installationSetupGateFilter(JdbcTemplate jdbc, ObjectMapper mapper) {
+        return new InstallationSetupGateFilter(jdbc, mapper);
     }
 }

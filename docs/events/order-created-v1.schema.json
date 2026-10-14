@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:artio:events:order-created:1",
+  "title": "Artio OrderCreated event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "type", "occurredAt", "orderId", "userId"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "type": { "const": "ORDER_CREATED" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "orderId": { "type": "string", "format": "uuid" },
+    "userId": { "type": "string", "format": "uuid" }
+  }
+}

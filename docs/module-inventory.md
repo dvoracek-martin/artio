@@ -1,0 +1,85 @@
+# Artio module inventory
+
+**Inventory date:** 2026-10-14
+**Repository:** `D:\Development\Projects\Artio`
+**Counting rule:** approximate tracked production/test source files and physical lines in `src/main`, `src/test`, and `src/integrationTest`. Frontend and Docker counts cover source/configuration files outside generated output, `node_modules`, and Gradle build directories. Angular templates/styles are highly compressed, so physical-line totals understate their logical size. Counts are evidence snapshots, not quality measures.
+
+## Active Gradle modules
+
+| Module | Purpose and production consumers | Direct project dependencies | Approx. production files/lines | Approx. test files/lines | Classification, action, rationale and impact |
+|---|---|---|---:|---:|---|
+| `artio-kernel` | Shared identifiers, domain events and value primitives; consumed by API and domain modules. | — | 8 / 137 | 3 / 93 | **KEEP.** Minimal shared foundation; `AggregateEvent` has active domain consumers. |
+| `artio-catalog` | Product/catalog model and application behavior; API and persistence/search adapters. | — | 52 / 501 | 4 / 229 | **KEEP.** Commerce domain with active API, PostgreSQL and OpenSearch consumers. |
+| `artio-catalog-postgres` | PostgreSQL catalog persistence and migrations; composed by REST API. | `artio-catalog` | 7 / 216 | 0 / 0 | **KEEP.** Active transactional adapter; current adapter-focused tests are not yet in this module. |
+| `artio-catalog-opensearch` | OpenSearch product search/reindex adapter; composed by REST API and catalog use cases. | `artio-catalog` | 1 / 177 | 1 / 62 | **KEEP.** Active `ProductSearch` implementation and tested integration; not a Core vendor dependency. |
+| `artio-pricing` | Money, tax, discount and price-quote rules; API and pricing persistence adapter. | — | 23 / 186 | 1 / 72 | **KEEP.** Core commerce capability; owns provider/framework-neutral rules. |
+| `artio-pricing-postgres` | PostgreSQL pricing/tax storage and migrations; composed by REST API. | `artio-pricing` | 4 / 68 | 0 / 0 | **KEEP.** Active persistence adapter. |
+| `artio-inventory` | Stock and reservation policies; API and inventory persistence adapter. | — | 23 / 101 | 1 / 37 | **KEEP.** Core commerce capability with expiry/release behavior. |
+| `artio-inventory-postgres` | PostgreSQL stock/reservation storage and migrations; composed by REST API. | `artio-inventory` | 4 / 57 | 0 / 0 | **KEEP.** Active persistence adapter. |
+| `artio-bundles` | Configurable bundle aggregate, option constraints, selection and pricing contracts; API and bundle adapter. | — | 16 / 93 | 1 / 35 | **KEEP.** Defining Artio differentiator; do not split or remove its invariants. |
+| `artio-bundles-postgres` | PostgreSQL bundle configuration and migrations; composed by REST API. | `artio-bundles` | 2 / 58 | 0 / 0 | **KEEP.** Active bundle persistence adapter. |
+| `artio-orders` | Order lifecycle and immutable commerce facts; REST API workflows. | — | 9 / 148 | 1 / 26 | **KEEP.** Core commerce capability. |
+| `artio-users` | User identity and customer-facing identity types; REST API/authentication. | — | 7 / 86 | 1 / 19 | **KEEP.** Required by account, checkout and authorization flows. |
+| `artio-payments` | Provider-neutral payment domain types; REST API workflows. | — | 4 / 33 | 1 / 17 | **KEEP.** Preserve the general contract while moving Stripe behavior out of Core in its dependent phase. |
+| `artio-notifications` | Notification domain types; REST API and durable delivery workers. | — | 3 / 14 | 0 / 0 | **KEEP.** Active notification and order-event workflow contracts. |
+| `artio-extensions` | Versioned plugin manifest/config validation, dependency policy and Core-owned runtime port; API and Backoffice. | — | 5 / 349 | 3 / 126 | **KEEP.** Required general-purpose public plugin contract. No AI-specific builders or placeholders. |
+| `artio-rest-api` | Spring Boot application, REST/GraphQL, security, database migrations, workflow composition and OTLP integration. | `artio-kernel`, catalog/pricing/inventory/bundle domains and adapters, orders, users, payments, notifications, extensions | 96 / 4,384 | 13 / 1,625 | **KEEP.** Current application composition root. Observability export uses generic OTLP only; no Prometheus registry or Grafana implementation. Counts refreshed after V26 setup work. |
+| `artio-backoffice` | Angular admin UI for catalog, bundles, pricing, extensions and operations; calls versioned REST API. | REST API contract (HTTP) | 9 / 12,749 | 0 / 0 | **KEEP.** Required product application; frontend is a separate npm/Angular build, not a Java dependency. |
+| `artio-storefront` | Optional Angular reference storefront; consumes public/versioned REST API. | REST API contract (HTTP) | 12 / 12,786 | 0 / 0 | **KEEP / OPTIONAL.** Helpful reference client, not required for Core operation. Dedicated component specs are absent in this inventory. |
+| `artio-docker` | Dockerfiles, base Compose services and separately packaged opt-in integrations. | — | 9 / 310 | 0 / 0 | **KEEP.** Supported deployment path. Prometheus/Grafana assets reside only in `artio-docker/observability`; the multi-service pack still needs bundle lifecycle integration before it is a Backoffice-managed plugin. |
+
+## Cross-module feature audit
+
+This table captures the explicit review requested for candidates that do not appear as standalone Gradle modules. “Tests” refers to current checked-in focused source tests, not a claim that the feature is fully accepted. No item was deleted solely for being incomplete.
+
+| Feature/location | Active production consumers or runtime wiring | Dependencies/evidence inspected | Classification and action | Impact/risk |
+|---|---|---|---|---|
+| Stripe provider implementation in `artio-rest-api` | Cart checkout, refunds, signed webhooks, receipt deduplication, session reconciliation, order/payment state and Storefront checkout. | `PaymentController`, `StripePaymentReconciliationWorker`, `StripePaymentWebhookReceiptRetentionWorker`, configuration, migrations V7/V16/V21/V23, checkout integration tests. | **EXTRACT (staged).** Keep functioning Stripe flow in the current deliverable; provider-neutral Docker implementation remains P8 after the Core provider port is accepted. Current Phase 2 does not claim Stripe has been extracted. | Removing now would break the supported checkout flow, refund path, webhook compatibility and recovery. Current vendor lock-in is documented in architecture and roadmap. |
+| `artio-catalog-opensearch` | REST catalog search/reindex application paths. | `ProductSearch` adapter implementation, REST application composition, OpenSearch 2.17 Testcontainers replacement/query/rollback coverage, Compose `search` profile. | **KEEP.** It is an active search adapter, not an independent Docker search plugin yet. Preserve the existing API/search behavior while a later plugin contract is designed. | Removing or moving it to Docker now removes a working locale-aware search and reindex adapter. |
+| GraphQL read-only catalog API | Public `/graphql` route; no Backoffice or Storefront client found. | Spring GraphQL dependency, controller and schema; no API integration test or frontend query found; Nginx forwards `/graphql`; PWA excludes the route from caching. | **DEFER.** Retain because it is a public API shape and product value/removal compatibility is not settled by this cleanup authorization. Do not expand it in Phase 2. | Keeps one runtime dependency and duplicate catalog read surface until owner approves retirement or defines clients. |
+| Recommendations and fraud assessment in `EnterpriseFeaturesController` | `/api/recommendations`, `/api/interactions` and admin order assessment endpoints backed by PostgreSQL. | Migration V10 tables/indexes and API wiring; no dedicated tests, frontend client, trained model, or external provider found. Fraud endpoint states it is deterministic rules, not ML. | **KEEP (limited).** These are explicitly present business capabilities; keep the deterministic implementation and do not imply machine-learning behavior. Add focused policy/security tests in their roadmap slices. | No model/provider validation exists; recommendations are popularity-only and fraud decision rules require merchant review. |
+| Subscriptions | Admin creation and customer list/status endpoints plus V10 persistence. | `EnterpriseFeaturesController`, `subscriptions` table, existing order/payment flow; no billing scheduler, recurring payment adapter or dedicated tests found. | **KEEP (incomplete).** Do not remove solely because recurring billing is unfinished. Mark billing execution as future work; do not promise automatic recurring charges. | Current status/frequency data is not a recurring billing engine. |
+| Loyalty | Customer points, tier, earn/redeem and transaction ledger; included in privacy export. | `EnterpriseFeaturesController`, V10 tables, order lock and unique order ledger semantics; no focused tests or Backoffice policy editor found. | **KEEP (limited).** Useful business-visible capability, retained pending a roadmap decision; do not remove or expand during cleanup. | Earn/redeem policy, reversal behavior and admin tooling are incomplete. |
+| Gift cards | Admin issuance and authenticated redemption backed by a hashed code and transactional balance ledger. | `EnterpriseFeaturesController`, V10 tables and unique redemption index; no focused API tests or checkout integration found. | **KEEP (limited).** Preserve because codes have balance/financial state and the cleanup rules forbid speculative destructive deletion. | Redemption is not wired into checkout; current issue API has no Backoffice lifecycle. |
+| Authenticated order WebSocket | Private STOMP order updates through `/ws`; bearer token and order ownership are checked in channel interceptors. | `OrderWebSocketConfiguration`, Spring WebSocket dependency and Nginx forwarding; no Backoffice/Storefront STOMP client found. | **KEEP / DEFER client adoption.** Live order delivery is useful but no current first-party UI consumer exists. | Adds runtime complexity; needs focused auth/subscription tests and a client before claiming product UX value. |
+| Redis, Kafka and optional OpenSearch services | API integrations use feature flags; base Compose excludes all three services by default. | Spring Redis/Kafka dependencies, cache/event configuration, Compose profiles and opt-in environment flags. | **KEEP (opt-in).** Dependencies have active code paths and base installation starts without them. | Operators must enable each service and its matching API flag together. |
+| Grafana, Prometheus, Jaeger, OpenTelemetry Collector | Runtime only under the independent observability Compose overlay; Core emits standard OTLP only when enabled. | Separate Compose file/config, dashboards, alert rules, env file, and Compose config validation. | **EXTRACT (in progress).** Deployment assets live outside Core; next work is generic multi-container Artio plugin lifecycle and Backoffice control. | They are still operator-managed Compose services, not one-click Artio plugins. |
+| AI Frontend Builder / AI Module Builder | No source, Gradle project, route, UI or build dependency found. | Search of active source/build paths; explicit current product-owner scope correction. | **DEFER – future product decision.** No AI-specific abstraction or integration point is created in this phase. | None in current release; future hosting/product choice remains undecided. |
+
+## Repository cleanup decision details
+
+The 19 projects currently listed under `settings.gradle.kts` were cross-checked against Gradle project edges, API imports, runtime wiring and active documentation. The removed `artio-persistence`, `artio-events`, and Java `artio-observability` modules had no production consumers; migration/transactions, transactional outbox/Kafka publication, and generic OTLP instrumentation remain in actively used adapter/application code. Mobile, Kubernetes/Istio and Terraform were removed in prior reviewed work and are absent from `settings.gradle.kts`; Docker Compose remains the supported deployment baseline. No other business-visible capability was deleted during this audit. P1-02 remains permanently closed as not applicable by owner decision.
+
+## Setup and development mode
+
+The consolidated `V1__initial_schema.sql` baseline includes the former V26 onboarding and installation-settings schema. At boot, an empty installation requires `ARTIO_SETUP_TOKEN` with at least 32 characters; this secret is supplied via deployment environment, and only the SHA-256 digest is persisted. For systems with an existing admin, setup is marked complete automatically. During first run, `/api/v1/setup/status` is public and returns only booleans/profile state. `POST /resume`, `/progress`, and `/complete` require the setup token header; the persistent draft accepts region, locale, timezone and administrator identity fields only. The first password is accepted once during completion, BCrypt-hashed, and never placed in the draft. Five invalid token attempts cause a 15-minute lock. Completion, creation of the first `SUPERADMIN`, region setup, and draft clearing occur in one database transaction. The Backoffice has a single-page setup wizard that invokes these flows and does not persist the setup token or password in browser storage. Customer registration stays closed until a store administrator exists. The `development` profile only changes the setup badge; it does not bypass security or create fixture users.
+
+## Removed modules and extracted assets
+
+| Removed item | Audit result | Action and impact |
+|---|---|---|
+| `artio-persistence` | Generic `Repository`, `Query`, `UnitOfWork`, transaction manager and schema-version interfaces had no consumers; domain persistence is implemented by explicit adapters and Spring/JDBC application code. | **REMOVE.** Eliminates unused abstractions; active adapters and Flyway migrations remain. |
+| `artio-events` | Generic event bus/store/serializer interfaces had no consumers. `artio-kernel.AggregateEvent` remains actively used. | **REMOVE.** No live event flow removed; transactional order outbox and Kafka delivery remain in REST API. |
+| `artio-observability` Java module | Logging/metrics/tracing abstractions had no consumers; importing a general observability abstraction module was not required. | **REMOVE.** Core exports standard OTLP through maintained libraries/configuration. |
+| `artio-observability/prometheus`, `artio-observability/grafana` | Docker scrape, alert, dashboard and provisioning files are deployment assets, not domain/Core code. | **MERGE/EXTRACT** to `artio-docker/observability`. These now form a separate opt-in Docker distribution alongside the OpenTelemetry Collector. Backoffice bundle lifecycle remains open in `P2-03`. |
+| `artio-mobile`, `artio-kubernetes`, `terraform` | Previously reviewed for active build, runtime, source and documentation consumers; none justified initial-release retention. | **REMOVE.** Docker Compose remains the supported deployment baseline. Historic audit snapshots remain marked as historical. |
+
+## Deferred capabilities
+
+| Capability | Status | Decision |
+|---|---|---|
+| AI Frontend Builder | **DEFERRED – future product decision** | No generator, API, UI, placeholder module or AI-specific architecture. |
+| AI Module Builder | **DEFERRED – future product decision** | No generator, API, UI, placeholder module or AI-specific architecture. |
+| Observability plugin bundle lifecycle | **IN PROGRESS (Phase 2)** | OTLP-based standalone Compose pack exists; service-bundle install/configure/enable/disable/update/uninstall through Backoffice is still required before the monitoring plugin requirement is complete. |
+
+## Audit commands
+
+| Command | Result |
+|---|---|
+| `Get-Content settings.gradle.kts` | Lists 19 active Gradle projects (16 Java modules, two Angular modules, one Docker packaging module). |
+| `rg --files -g build.gradle.kts -g '!buildSrc/**'` | Found one Gradle build file for each active project. |
+| `rg -n 'project\(' */build.gradle.kts` | Confirms the direct project dependency list in this inventory. |
+| `rg -n -i 'prometheus\|grafana\|jaeger\|opentelemetry' buildSrc artio-rest-api/src/main artio-rest-api/build.gradle.kts` | No Prometheus/Grafana/Jaeger implementation in Core; the API has the standard OTLP exporter and observability references only in build comments/README. |
+| `./gradlew.bat :artio-rest-api:compileJava :artio-rest-api:test --no-daemon` | `BUILD SUCCESSFUL` after the Core OTLP and optional infrastructure changes. |
+| `npm run build` (in `artio-backoffice`) | `Application bundle generation complete`. |
+| `docker compose --env-file .env.example --env-file artio-docker/observability/.env.example -f artio-docker/docker-compose.yml -f artio-docker/docker-compose.observability.yml config --quiet` | Exit 0. |

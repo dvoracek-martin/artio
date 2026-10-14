@@ -11,6 +11,8 @@ public interface ExtensionRuntimePort {
     void enable(PluginManifest manifest);
     default void enable(PluginManifest manifest, int credentialGeneration) { enable(manifest); }
     void disable(String pluginId);
+    /** Remove the managed runtime for an already stopped plugin. */
+    default void uninstall(String pluginId) { disable(pluginId); }
     default void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) {
         if (restartIfEnabled) {
             disable(manifest.id());
