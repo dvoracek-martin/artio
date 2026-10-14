@@ -128,6 +128,21 @@ CREATE TABLE inventory_stock_level (
 );
 CREATE INDEX inventory_stock_sellable_idx ON inventory_stock_level(sellable_id, warehouse_id);
 
+CREATE TABLE inventory_stock_movement (
+    id UUID PRIMARY KEY,
+    warehouse_id UUID NOT NULL REFERENCES inventory_warehouse(id),
+    sellable_id UUID NOT NULL,
+    movement_type VARCHAR(24) NOT NULL CHECK (movement_type IN ('RECEIPT','ADJUSTMENT','RESERVATION','RELEASE','ALLOCATION')),
+    on_hand_delta NUMERIC(19,4) NOT NULL,
+    reserved_delta NUMERIC(19,4) NOT NULL,
+    on_hand_after NUMERIC(19,4) NOT NULL CHECK (on_hand_after >= 0),
+    reserved_after NUMERIC(19,4) NOT NULL CHECK (reserved_after >= 0 AND reserved_after <= on_hand_after),
+    reason VARCHAR(500),
+    actor_id UUID,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX inventory_stock_movement_history_idx ON inventory_stock_movement(warehouse_id,sellable_id,occurred_at DESC,id DESC);
+
 CREATE TABLE inventory_reservation (
     id UUID PRIMARY KEY,
     order_id UUID NOT NULL,
@@ -359,6 +374,8 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_audit_actor_time ON audit_logs(user_id,occurred_at DESC);
 CREATE FUNCTION artio_audit_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'audit_logs is append-only'; END $$;
 CREATE TRIGGER audit_logs_immutable BEFORE UPDATE OR DELETE ON audit_logs FOR EACH ROW EXECUTE FUNCTION artio_audit_immutable();
+CREATE FUNCTION artio_inventory_movement_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'inventory_stock_movement is append-only'; END $$;
+CREATE TRIGGER inventory_stock_movement_immutable BEFORE UPDATE OR DELETE ON inventory_stock_movement FOR EACH ROW EXECUTE FUNCTION artio_inventory_movement_immutable();
 
 CREATE TABLE consent_records (
   id UUID PRIMARY KEY,

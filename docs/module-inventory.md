@@ -14,8 +14,8 @@
 | `artio-catalog-opensearch` | OpenSearch product search/reindex adapter; composed by REST API and catalog use cases. | `artio-catalog` | 1 / 177 | 1 / 62 | **KEEP.** Active `ProductSearch` implementation and tested integration; not a Core vendor dependency. |
 | `artio-pricing` | Money, tax, discount and price-quote rules; API and pricing persistence adapter. | — | 23 / 186 | 1 / 72 | **KEEP.** Core commerce capability; owns provider/framework-neutral rules. |
 | `artio-pricing-postgres` | PostgreSQL pricing/tax storage and migrations; composed by REST API. | `artio-pricing` | 4 / 68 | 0 / 0 | **KEEP.** Active persistence adapter. |
-| `artio-inventory` | Stock and reservation policies; API and inventory persistence adapter. | — | 23 / 101 | 1 / 37 | **KEEP.** Core commerce capability with expiry/release behavior. |
-| `artio-inventory-postgres` | PostgreSQL stock/reservation storage and migrations; composed by REST API. | `artio-inventory` | 4 / 57 | 0 / 0 | **KEEP.** Active persistence adapter. |
+| `artio-inventory` | Stock and reservation policies; API and inventory persistence adapter. | — | 23 / 101 | 1 / 37 | **KEEP.** Core commerce capability with expiry/release, stock movement history and corrections constrained by active reservations. |
+| `artio-inventory-postgres` | PostgreSQL stock/reservation/movement storage; composed by REST API. | `artio-inventory` | 4 / 57 | 0 / 0 | **KEEP.** Active persistence adapter; movement rows append atomically with stock writes. |
 | `artio-bundles` | Configurable bundle aggregate, option constraints, selection and pricing contracts; API and bundle adapter. | — | 16 / 93 | 1 / 35 | **KEEP.** Defining Artio differentiator; do not split or remove its invariants. |
 | `artio-bundles-postgres` | PostgreSQL bundle configuration and migrations; composed by REST API. | `artio-bundles` | 2 / 58 | 0 / 0 | **KEEP.** Active bundle persistence adapter. |
 | `artio-orders` | Order lifecycle and immutable commerce facts; REST API workflows. | — | 9 / 148 | 1 / 26 | **KEEP.** Core commerce capability. |

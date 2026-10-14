@@ -704,6 +704,19 @@ class CatalogApiIntegrationTests {
             assertThat(stock.reserved()).isEqualByComparingTo("3");
             assertThat(stock.available()).isEqualByComparingTo("2");
         });
+
+        var adjusted=adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}",HttpMethod.PUT,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(new BigDecimal("6"),"Cycle count correction"),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class,warehouseId,sellableId);
+        assertThat(adjusted.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(adjusted.getBody()).isNotNull();
+        assertThat(adjusted.getBody().onHand()).isEqualByComparingTo("6");
+        var movements=adminExchange("/api/warehouses/{warehouseId}/stock/{sellableId}/movements?limit=20",HttpMethod.GET,null,
+                io.artio.inventory.StockMovement[].class,warehouseId,sellableId);
+        assertThat(movements.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(movements.getBody()).extracting("type").contains("RECEIPT","RESERVATION","ADJUSTMENT");
+        assertThat(movements.getBody()).filteredOn(movement->movement.type().equals("ADJUSTMENT"))
+                .singleElement().satisfies(movement->{assertThat(movement.reason()).isEqualTo("Cycle count correction");assertThat(movement.actorId()).isEqualTo(adminUserId);});
     }
 
     @Test
@@ -1126,6 +1139,10 @@ class CatalogApiIntegrationTests {
                         + "'audit_logs','consent_records','gift_cards','loyalty_accounts','subscriptions')",
                 Integer.class);
         assertThat(enterpriseTables).isEqualTo(8);
+
+        var inventoryMovementTable=jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables "
+                +"WHERE table_schema=current_schema() AND table_name='inventory_stock_movement'",Integer.class);
+        assertThat(inventoryMovementTable).isEqualTo(1);
 
         var storedValueColumns = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns "
                 + "WHERE table_schema=current_schema() AND ((table_name='payments' AND column_name='gift_card_id') "

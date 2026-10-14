@@ -98,7 +98,7 @@ Gradle konvence v `buildSrc`:
 | `artio-catalog-postgres` | PostgreSQL katalog/taxonomie migrace V1–V2 a adaptéry. |
 | `artio-catalog-opensearch` | Vyhledávací adaptér pro OpenSearch. |
 | `artio-pricing`, `artio-pricing-postgres` | Cenová pravidla, slevy, daňová pravidla, výpočet quote a DB adaptéry. |
-| `artio-inventory`, `artio-inventory-postgres` | Sklady, stock levels, rezervace, alokace, uvolnění. |
+| `artio-inventory`, `artio-inventory-postgres` | Sklady, stock levels, rezervace, alokace, uvolnění a append-only ledger pohybů. Backoffice Inventory spravuje sklady, příjem a korekce zásob. |
 | `artio-bundles`, `artio-bundles-postgres` | Bundle aggregate, konfigurační pravidla, quote a persistence. |
 | `artio-orders` | Košík, objednávka, řádkové položky a statusy. |
 | `artio-users` | User a role doména. |
@@ -146,6 +146,7 @@ Všechny JSON API běží pod `/api`, GraphQL pod `/graphql`, realtime STOMP/Web
 - `POST /api/auth/mfa/totp/verify` — ověří TOTP a vrátí sadu jednorázových backup kódů pouze jednou.
 - `DELETE /api/auth/mfa/totp` — MFA deaktivuje po ověření aktuálního TOTP.
 - `GET /api/users/me`, `GET /api/admin/users?q=&activity=ALL|RECENT|STALE|NEVER&limit=100&offset=0` — profil a omezený, vyhledávatelný admin seznam; `lastLogin` se zapisuje po úspěšném heslovém i OAuth přihlášení a zobrazuje ve správě zákazníků s filtrem posledních 30 dnů / starých / nikdy nepřihlášených účtů.
+- `GET /api/warehouses`, `POST /api/warehouses`, `GET /api/warehouses/{id}/stock`, `POST /api/warehouses/{id}/stock/{sellableId}/receipts`, `PUT /api/warehouses/{id}/stock/{sellableId}`, `GET /api/warehouses/{id}/stock/{sellableId}/movements` — správa skladů, příjmu, auditované absolutní korekce s důvodem a historie pohybů. Pohyby se ukládají v transakci se stock stavem a DB trigger brání jejich změně/smazání. UI je v Backoffice Inventory; low-stock alerty zatím nejsou implementovány. Kontrakt: [stock operations v1](docs/inventory/stock-operations-v1.md).
 - `GET /api/admin/audit-logs` — audit metadata s filtry `userId`, `action`, `from`, `to`, `page`, `size`.
 - Rate limit: default 100 requestů/minutu/IP, Redis s lokálním fallbackem; `X-API-Key` dostává samostatný vyšší limit, ale samotný klíč zde nenahrazuje autentizaci.
 
