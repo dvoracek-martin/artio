@@ -632,6 +632,21 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void backofficeCatalogQueryFiltersAndPaginatesProducts() {
+        String uniqueSku="QUERY-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(java.util.Locale.ROOT);
+        var product=adminExchange("/api/v1/products",HttpMethod.POST,
+                new ProductRequest("Query lamp","Query description",uniqueSku),ProductResponse.class);
+        var page=adminExchange("/api/v1/admin/catalog/products?q="+uniqueSku+"&state=ACTIVE&page=0&size=1&sort=name&direction=asc",
+                HttpMethod.GET,null,AdminCatalogProductQueryController.ProductPage.class);
+        assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(page.getBody()).isNotNull();
+        assertThat(page.getBody().total()).isEqualTo(1);
+        assertThat(page.getBody().items()).anySatisfy(item->assertThat(item.id()).isEqualTo(product.getBody().id()));
+        var forbidden=http.getForEntity("/api/v1/admin/catalog/products",AdminCatalogProductQueryController.ProductPage.class);
+        assertThat(forbidden.getStatusCode()).isIn(HttpStatus.UNAUTHORIZED,HttpStatus.FORBIDDEN);
+    }
+
+    @Test
     void rejectedCheckoutCompensationCancelsOrderAndReleasesStockAtomically() {
         UUID orderId = UUID.randomUUID();
         UUID sellableId = UUID.randomUUID();
