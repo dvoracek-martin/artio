@@ -79,13 +79,19 @@ public record PluginManifest(
 
     /** Optional private, non-invokable sidecar belonging to this plugin installation. */
     public record BundleService(String id, String image, int port, String healthPath,
-                                Map<String, String> configurationBindings) {
+                                Map<String, String> configurationBindings, List<String> dependsOn) {
         public BundleService {
             configurationBindings = configurationBindings == null ? Map.of() : Map.copyOf(configurationBindings);
+            dependsOn = dependsOn == null ? List.of() : List.copyOf(dependsOn);
+        }
+
+        public BundleService(String id, String image, int port, String healthPath,
+                             Map<String, String> configurationBindings) {
+            this(id, image, port, healthPath, configurationBindings, List.of());
         }
 
         public BundleService(String id, String image, int port, String healthPath) {
-            this(id, image, port, healthPath, Map.of());
+            this(id, image, port, healthPath, Map.of(), List.of());
         }
     }
 

@@ -93,6 +93,7 @@ class DockerExtensionRuntimeTests {
         var healthCalls = new java.util.concurrent.CopyOnWriteArrayList<String>();
         server.createContext("/health", exchange -> { healthCalls.add("main"); exchange.sendResponseHeaders(204, -1); exchange.close(); });
         server.createContext("/metrics-health", exchange -> { healthCalls.add("metrics"); exchange.sendResponseHeaders(204, -1); exchange.close(); });
+        server.createContext("/trace-health", exchange -> { healthCalls.add("trace"); exchange.sendResponseHeaders(204, -1); exchange.close(); });
         server.start();
         String pluginId = "observability.bundle";
         String mainName = DockerExtensionRuntime.containerName(pluginId);
@@ -101,25 +102,31 @@ class DockerExtensionRuntimeTests {
             DockerClient docker = mock(DockerClient.class);
             var mainCommand = mock(InspectContainerCmd.class);
             var serviceCommand = mock(InspectContainerCmd.class);
+            var traceCommand = mock(InspectContainerCmd.class);
             var mainContainer = runningContainer(pluginId, "main", server.getAddress().getPort());
             var serviceContainer = runningContainer(pluginId, "metrics", server.getAddress().getPort());
+            var traceContainer = runningContainer(pluginId, "trace", server.getAddress().getPort());
             when(docker.inspectContainerCmd(mainName)).thenReturn(mainCommand);
             when(docker.inspectContainerCmd(serviceName)).thenReturn(serviceCommand);
+            when(docker.inspectContainerCmd(DockerExtensionRuntime.serviceName(pluginId, "trace"))).thenReturn(traceCommand);
             when(mainCommand.exec()).thenReturn(mainContainer);
             when(serviceCommand.exec()).thenReturn(serviceContainer);
+            when(traceCommand.exec()).thenReturn(traceContainer);
 
             var manifest = new io.artio.extensions.PluginManifest("1", pluginId, "Observability", "Artio", "1.0.0", "Metrics bundle",
                     "0.1.0", "1.0.0", "ghcr.io/artio/observability@sha256:" + "a".repeat(64), java.util.List.of(),
                     java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics",
                     io.artio.extensions.PluginManifest.GeographicAvailability.global(),
                     java.util.List.of(new io.artio.extensions.PluginManifest.BundleService("metrics",
-                            "ghcr.io/artio/metrics@sha256:" + "b".repeat(64), server.getAddress().getPort(), "/metrics-health")));
+                                    "ghcr.io/artio/metrics@sha256:" + "b".repeat(64), server.getAddress().getPort(), "/metrics-health", Map.of(), java.util.List.of("trace")),
+                            new io.artio.extensions.PluginManifest.BundleService("trace",
+                                    "ghcr.io/artio/trace@sha256:" + "c".repeat(64), server.getAddress().getPort(), "/trace-health")));
             var runtime = new DockerExtensionRuntime(docker, "extensions", server.getAddress().getPort(),
                     new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
 
             runtime.enable(manifest, 1);
 
-            assertThat(healthCalls).containsExactlyInAnyOrder("main", "metrics");
+            assertThat(healthCalls).containsExactly("main", "trace", "metrics");
         } finally {
             server.stop(0);
         }

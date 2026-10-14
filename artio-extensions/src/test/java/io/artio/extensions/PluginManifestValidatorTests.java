@@ -56,6 +56,28 @@ class PluginManifestValidatorTests {
     }
 
     @Test
+    void validatesBundleStartupDependenciesAndRejectsCycles() {
+        var manifest = validManifest();
+        var bundle = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(),
+                manifest.extensionPoints(), manifest.healthPath(), manifest.diagnosticsPath(), manifest.geographicAvailability(),
+                List.of(new PluginManifest.BundleService("grafana", manifest.image(), 3000, "/health", Map.of(), List.of("prometheus")),
+                        new PluginManifest.BundleService("prometheus", manifest.image(), 9090, "/health", Map.of(), List.of("collector")),
+                        new PluginManifest.BundleService("collector", manifest.image(), 13133, "/health")));
+        assertThat(validator.validate(bundle, "0.1.0", Set.of())).isEmpty();
+
+        var cycle = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(),
+                manifest.extensionPoints(), manifest.healthPath(), manifest.diagnosticsPath(), manifest.geographicAvailability(),
+                List.of(new PluginManifest.BundleService("grafana", manifest.image(), 3000, "/health", Map.of(), List.of("prometheus")),
+                        new PluginManifest.BundleService("prometheus", manifest.image(), 9090, "/health", Map.of(), List.of("grafana"))));
+        assertThat(validator.validate(cycle, "0.1.0", Set.of()))
+                .contains("bundle service startup dependencies contain a cycle");
+    }
+
+    @Test
     void acceptsCountrySpecificAvailabilityAndRejectsInvalidOrContradictoryMetadata() {
         var ch = withAvailability(new PluginManifest.GeographicAvailability("COUNTRY_SPECIFIC", List.of("CH")));
         assertThat(validator.validate(ch, "0.1.0", Set.of())).isEmpty();

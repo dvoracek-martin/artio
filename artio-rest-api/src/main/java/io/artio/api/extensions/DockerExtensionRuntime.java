@@ -92,8 +92,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     public void enable(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
         if (credentialGeneration < 1) throw new IllegalArgumentException("Credential generation must be positive");
         try {
-            for (RuntimeService service : services(manifest)) startService(manifest, service, credentialGeneration, configuration);
-            for (RuntimeService service : services(manifest)) awaitReady(manifest.id(), service.id(), service.healthPath());
+            for (RuntimeService service : servicesInStartupOrder(manifest)) {
+                startService(manifest, service, credentialGeneration, configuration);
+                awaitReady(manifest.id(), service.id(), service.healthPath());
+            }
         } catch (RuntimeException failure) {
             disable(manifest.id());
             throw failure;
@@ -125,7 +127,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
         var create = docker.createContainerCmd(service.image()).withName(name).withHostConfig(host)
                 .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(service.port()))
-                .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.extension.service", service.id(), "io.artio.managed", "true"));
+                .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.extension.service", service.id(),
+                        "io.artio.extension.startup-order", Integer.toString(service.startupOrder()), "io.artio.managed", "true"));
         create.withEnv(environment);
         create.exec();
         docker.startContainerCmd(name).exec();
@@ -184,7 +187,9 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     public void disable(String pluginId) {
-        for (InspectContainerResponse current : managedContainers(pluginId)) {
+        var containers = new java.util.ArrayList<>(managedContainers(pluginId));
+        containers.sort(java.util.Comparator.comparingInt(DockerExtensionRuntime::startupOrder).reversed());
+        for (InspectContainerResponse current : containers) {
             if (Boolean.TRUE.equals(current.getState().getRunning())) docker.stopContainerCmd(current.getId()).withTimeout(10).exec();
         }
     }
@@ -419,9 +424,48 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     private java.util.List<RuntimeService> services(PluginManifest manifest) {
         var result = new java.util.ArrayList<RuntimeService>();
-        result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true, manifest.configurationBindings()));
-        for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(), false, service.configurationBindings()));
+        result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true, manifest.configurationBindings(), 0));
+        for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(), false, service.configurationBindings(), 0));
         return java.util.List.copyOf(result);
+    }
+
+    private java.util.List<RuntimeService> servicesInStartupOrder(PluginManifest manifest) {
+        var byId = new java.util.LinkedHashMap<String, RuntimeService>();
+        for (RuntimeService service : services(manifest)) byId.put(service.id(), service);
+        var dependencies = new java.util.LinkedHashMap<String, java.util.Set<String>>();
+        dependencies.put("main", java.util.Set.of());
+        manifest.services().forEach(service -> dependencies.put(service.id(), new java.util.LinkedHashSet<>(service.dependsOn())));
+        var ordered = new java.util.ArrayList<RuntimeService>();
+        var visited = new java.util.HashSet<String>();
+        var visiting = new java.util.HashSet<String>();
+        for (String id : byId.keySet()) visitService(id, byId, dependencies, visited, visiting, ordered);
+        var indexed = new java.util.ArrayList<RuntimeService>();
+        for (int index = 0; index < ordered.size(); index++) {
+            RuntimeService service = ordered.get(index);
+            indexed.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(),
+                    service.primary(), service.configurationBindings(), index));
+        }
+        return java.util.List.copyOf(indexed);
+    }
+
+    private static int startupOrder(InspectContainerResponse container) {
+        var labels = container.getConfig() == null ? null : container.getConfig().getLabels();
+        try { return Integer.parseInt(labels == null ? null : labels.get("io.artio.extension.startup-order")); }
+        catch (RuntimeException legacyContainer) { return -1; }
+    }
+
+    private static void visitService(String id, Map<String, RuntimeService> services,
+            Map<String, java.util.Set<String>> dependencies, java.util.Set<String> visited,
+            java.util.Set<String> visiting, java.util.List<RuntimeService> ordered) {
+        if (visited.contains(id)) return;
+        if (!visiting.add(id)) throw new IllegalArgumentException("Bundle service startup dependencies contain a cycle");
+        for (String dependency : dependencies.getOrDefault(id, java.util.Set.of())) {
+            if (!services.containsKey(dependency)) throw new IllegalArgumentException("Bundle service depends on an unknown service");
+            visitService(dependency, services, dependencies, visited, visiting, ordered);
+        }
+        visiting.remove(id);
+        visited.add(id);
+        ordered.add(services.get(id));
     }
 
     static String serviceName(String pluginId, String serviceId) {
@@ -432,7 +476,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     private record RuntimeService(String id, String image, int port, String healthPath, boolean primary,
-                                  Map<String, String> configurationBindings) { }
+                                  Map<String, String> configurationBindings, int startupOrder) { }
 
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");

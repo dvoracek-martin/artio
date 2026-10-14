@@ -81,7 +81,43 @@ public final class PluginManifestValidator {
             validateConfigurationBindings(service.configurationBindings(), manifest.configuration(),
                     "bundle service " + service.id(), errors);
         }
+        Set<String> knownServiceIds = new HashSet<>(serviceIds);
+        knownServiceIds.add("main");
+        for (var service : manifest.services()) {
+            if (service == null || service.id() == null) continue;
+            Set<String> startupDependencies = new HashSet<>();
+            for (String dependency : service.dependsOn()) {
+                if (dependency == null || !knownServiceIds.contains(dependency)) {
+                    errors.add("bundle service " + service.id() + " depends on an unknown service");
+                } else if (dependency.equals(service.id())) {
+                    errors.add("bundle service cannot depend on itself: " + service.id());
+                } else if (!startupDependencies.add(dependency)) {
+                    errors.add("bundle service has a duplicate startup dependency: " + service.id());
+                }
+            }
+        }
+        if (hasServiceDependencyCycle(manifest.services())) errors.add("bundle service startup dependencies contain a cycle");
         return List.copyOf(errors);
+    }
+
+    private static boolean hasServiceDependencyCycle(List<PluginManifest.BundleService> services) {
+        java.util.Map<String, PluginManifest.BundleService> byId = new java.util.HashMap<>();
+        for (var service : services) if (service != null && service.id() != null) byId.putIfAbsent(service.id(), service);
+        Set<String> visiting = new HashSet<>(), visited = new HashSet<>();
+        for (String id : byId.keySet()) if (hasServiceDependencyCycle(id, byId, visiting, visited)) return true;
+        return false;
+    }
+
+    private static boolean hasServiceDependencyCycle(String id,
+            java.util.Map<String, PluginManifest.BundleService> services, Set<String> visiting, Set<String> visited) {
+        if (visiting.contains(id)) return true;
+        if (!visited.add(id)) return false;
+        visiting.add(id);
+        for (String dependency : services.get(id).dependsOn()) {
+            if (services.containsKey(dependency) && hasServiceDependencyCycle(dependency, services, visiting, visited)) return true;
+        }
+        visiting.remove(id);
+        return false;
     }
 
     private static void validateGeographicAvailability(PluginManifest.GeographicAvailability availability,
