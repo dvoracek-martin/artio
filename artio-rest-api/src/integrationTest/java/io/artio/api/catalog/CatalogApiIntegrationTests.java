@@ -1145,6 +1145,37 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void giftCardAdminCanIssueInspectDisableAndReadLedgerWithoutExposingCodeHash() {
+        var issued = adminExchange("/api/v1/admin/gift-cards", HttpMethod.POST,
+                new io.artio.api.enterprise.EnterpriseFeaturesController.GiftCardRequest(new BigDecimal("25.00"), "CHF", null),
+                io.artio.api.enterprise.EnterpriseFeaturesController.GiftCardIssued.class);
+        assertThat(issued.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(issued.getBody()).isNotNull();
+        var card = issued.getBody();
+        assertThat(card.code()).isNotBlank();
+        assertThat(jdbc.queryForObject("SELECT code_hash FROM gift_cards WHERE id=?", String.class, card.id())).isNotEqualTo(card.code());
+
+        var listed = adminExchange("/api/v1/admin/gift-cards", HttpMethod.GET, null,
+                io.artio.api.enterprise.EnterpriseFeaturesController.GiftCardAdminView[].class);
+        assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(listed.getBody()).extracting("id").contains(card.id());
+        assertThat(listed.getBody()[0].toString()).doesNotContain(card.code());
+
+        var ledger = adminExchange("/api/v1/admin/gift-cards/{id}/transactions", HttpMethod.GET, null,
+                io.artio.api.enterprise.EnterpriseFeaturesController.GiftCardTransactionView[].class, card.id());
+        assertThat(ledger.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(ledger.getBody()).isEmpty();
+
+        var disabled = adminExchange("/api/v1/admin/gift-cards/{id}/active", HttpMethod.PUT,
+                new io.artio.api.enterprise.EnterpriseFeaturesController.GiftCardActivation(false),
+                io.artio.api.enterprise.EnterpriseFeaturesController.GiftCardAdminView.class, card.id());
+        assertThat(disabled.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(disabled.getBody()).isNotNull();
+        assertThat(disabled.getBody().active()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs WHERE user_id=? AND action='GIFT_CARD_OFF'", Integer.class, adminUserId)).isEqualTo(1);
+    }
+
+    @Test
     void requiresAuthenticationForMfaEnrollment() {
         var response = http.postForEntity("/api/v1/auth/mfa/totp/enrollment", Map.of(), ApiError.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);

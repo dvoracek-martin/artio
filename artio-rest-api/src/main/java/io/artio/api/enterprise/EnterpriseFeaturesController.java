@@ -57,7 +57,44 @@ public class EnterpriseFeaturesController {
 
     // Gift-card codes are returned once and only their SHA-256 digests are stored.
     @PostMapping("/api/admin/gift-cards") @Transactional
-    public GiftCardIssued issueGiftCard(@RequestBody GiftCardRequest request){if(request==null||request.amount()==null||request.amount().signum()<=0||request.amount().scale()>4||request.currency()==null||!request.currency().matches("[A-Za-z]{3}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A positive amount and ISO currency are required");String code=randomGiftCode();UUID id=UUID.randomUUID();jdbc.update("INSERT INTO gift_cards(id,code_hash,initial_balance,balance,currency,expires_at) VALUES (?,?,?,?,?,?)",id,sha256(code),request.amount(),request.amount(),request.currency().toUpperCase(Locale.ROOT),request.expiresAt()==null?null:java.sql.Timestamp.from(request.expiresAt()));return new GiftCardIssued(id,code,request.amount(),request.currency().toUpperCase(Locale.ROOT),request.expiresAt());}
+    public GiftCardIssued issueGiftCard(@RequestBody GiftCardRequest request){
+        if(request==null||request.amount()==null||request.amount().signum()<=0||request.currency()==null||!request.currency().matches("(?i)[a-z]{3}")||request.expiresAt()!=null&&!request.expiresAt().isAfter(Instant.now()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A positive amount, ISO currency and future optional expiry are required");
+        String currency=request.currency().toUpperCase(Locale.ROOT);int fractionDigits;
+        try{fractionDigits=Currency.getInstance(currency).getDefaultFractionDigits();}catch(IllegalArgumentException invalid){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Unknown ISO currency",invalid);}
+        if(fractionDigits<0||request.amount().stripTrailingZeros().scale()>fractionDigits)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Amount exceeds the currency's minor-unit precision");
+        String code=randomGiftCode();UUID id=UUID.randomUUID();jdbc.update("INSERT INTO gift_cards(id,code_hash,initial_balance,balance,currency,expires_at) VALUES (?,?,?,?,?,?)",id,sha256(code),request.amount(),request.amount(),currency,request.expiresAt()==null?null:java.sql.Timestamp.from(request.expiresAt()));
+        return new GiftCardIssued(id,code,request.amount(),currency,request.expiresAt());
+    }
+
+    @GetMapping("/api/admin/gift-cards")
+    public List<GiftCardAdminView> giftCards(@RequestParam(defaultValue="100") int limit){
+        if(limit<1||limit>200)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"limit must be between 1 and 200");
+        return jdbc.query("SELECT id,initial_balance,balance,currency,expires_at,active,created_at FROM gift_cards ORDER BY created_at DESC,id LIMIT ?",
+                (rs,n)->new GiftCardAdminView(rs.getObject("id",UUID.class),rs.getBigDecimal("initial_balance"),rs.getBigDecimal("balance"),rs.getString("currency").trim(),rs.getTimestamp("expires_at")==null?null:rs.getTimestamp("expires_at").toInstant(),rs.getBoolean("active"),rs.getTimestamp("created_at").toInstant()),limit);
+    }
+
+    @GetMapping("/api/admin/gift-cards/{id}/transactions")
+    public List<GiftCardTransactionView> giftCardTransactions(@PathVariable UUID id,@RequestParam(defaultValue="100") int limit){
+        if(limit<1||limit>200)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"limit must be between 1 and 200");
+        if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM gift_cards WHERE id=?)",Boolean.class,id)))throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Gift card not found");
+        return jdbc.query("SELECT id,order_id,payment_refund_id,amount,kind,created_at FROM gift_card_transactions WHERE gift_card_id=? ORDER BY created_at DESC,id LIMIT ?",
+                (rs,n)->new GiftCardTransactionView(rs.getObject("id",UUID.class),rs.getObject("order_id",UUID.class),rs.getObject("payment_refund_id",UUID.class),rs.getBigDecimal("amount"),rs.getString("kind"),rs.getTimestamp("created_at").toInstant()),id,limit);
+    }
+
+    @PutMapping("/api/admin/gift-cards/{id}/active") @Transactional
+    public GiftCardAdminView setGiftCardActive(@PathVariable UUID id,@RequestBody GiftCardActivation request,JwtAuthenticationToken auth){
+        if(request==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"An active state is required");
+        var existing=jdbc.query("SELECT active FROM gift_cards WHERE id=? FOR UPDATE",(rs,n)->rs.getBoolean(1),id);
+        if(existing.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Gift card not found");
+        if(existing.getFirst()!=request.active()){
+            jdbc.update("UPDATE gift_cards SET active=? WHERE id=?",request.active(),id);
+            UUID actor=user(auth);
+            jdbc.update("INSERT INTO audit_logs(id,user_id,action,path,status,occurred_at) VALUES (?,?,?,'/api/admin/gift-cards/'||CAST(? AS text)||'/active',200,now())",
+                    UUID.randomUUID(),actor,request.active()?"GIFT_CARD_ON":"GIFT_CARD_OFF",id);
+        }
+        return giftCards(200).stream().filter(card->card.id().equals(id)).findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Gift card not found"));
+    }
 
     @PostMapping("/api/gift-cards/redeem") @Transactional
     public GiftCardRedemption redeem(@RequestBody GiftCardRedeem request,JwtAuthenticationToken auth){
@@ -135,6 +172,9 @@ public class EnterpriseFeaturesController {
     public record ConsentView(boolean essential,boolean analytics,boolean marketing,String policyVersion,Instant recordedAt){}
     public record GiftCardRequest(BigDecimal amount,String currency,Instant expiresAt){}
     public record GiftCardIssued(UUID id,String code,BigDecimal balance,String currency,Instant expiresAt){}
+    public record GiftCardAdminView(UUID id,BigDecimal initialBalance,BigDecimal balance,String currency,Instant expiresAt,boolean active,Instant createdAt){}
+    public record GiftCardTransactionView(UUID id,UUID orderId,UUID paymentRefundId,BigDecimal amount,String kind,Instant createdAt){}
+    public record GiftCardActivation(boolean active){}
     public record GiftCardRedeem(String code,BigDecimal amount,String currency,UUID orderId){}
     public record GiftCardBalance(UUID id,BigDecimal balance,String currency){}
     public record GiftCardRedemption(UUID id,BigDecimal balance,String currency,BigDecimal appliedAmount,BigDecimal remainingDue,String orderStatus){}

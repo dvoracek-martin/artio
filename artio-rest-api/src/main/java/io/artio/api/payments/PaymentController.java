@@ -423,6 +423,7 @@ public class PaymentController {
                 providerReference = reference;
             }
         } catch (RuntimeException failure) {
+            if ("GIFT_CARD".equals(payment.method()) && failure instanceof ResponseStatusException responseStatus) throw responseStatus;
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "Payment provider did not confirm the refund; retry with the same Idempotency-Key");
         }
