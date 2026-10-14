@@ -26,6 +26,8 @@ This review covers the Artio Core API, PostgreSQL extension registry, isolated D
 
 ## Threats and controls
 
+The packaged controller omits Springdoc and commerce route registration. Its `/internal/v1/` filter checks the controller bearer before reading or parsing bodies, caps fixed-length/chunked envelopes at 8 MiB, and returns stable JSON 401/413 codes. Tomcat defers `100 Continue` until body reading and drains at most 16 MiB of an aborted upload; extremely large or interrupted uploads may still close the transport. Smaller RPC and OTLP limits remain in force. The real packaged-container gate exercises these boundaries as well as private bundle ports and credential rotation.
+
 | Threat | Controls in place | Residual risk |
 |---|---|---|
 | Malicious manifest requests unsafe image or unsupported capability | Structural/schema validation, compatible Core-version bounds, registry allowlist, sha256 image pin, declared permissions and extension points; no manifest-provided Docker flags or commands | Trusted registry administrators can publish malicious content; signatures and provenance attestations are not checked |

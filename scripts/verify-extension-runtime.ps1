@@ -1,3 +1,8 @@
+param([string[]]$Tests = @(
+    'io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests',
+    'io.artio.api.extensions.PackagedExtensionControllerIntegrationTests'
+))
+
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $fixturePath = Join-Path $repoRoot 'artio-extensions\reference-runtime'
@@ -39,7 +44,9 @@ try {
 
     Push-Location $repoRoot
     try {
-        & .\gradlew.bat :artio-rest-api:integrationTest --rerun-tasks --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests
+        $verificationArguments = @(':artio-rest-api:integrationTest', '--rerun', '--no-daemon')
+        foreach ($test in $Tests) { $verificationArguments += @('--tests', $test) }
+        & .\gradlew.bat @verificationArguments
         if ($LASTEXITCODE -ne 0) { throw 'The real Docker extension lifecycle integration test failed.' }
     } finally { Pop-Location }
 } finally {

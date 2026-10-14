@@ -50,9 +50,16 @@ tasks.register<org.springframework.boot.gradle.tasks.bundling.BootJar>("extensio
     description = "Builds the isolated Docker lifecycle controller application."
     archiveFileName.set("artio-extension-controller.jar")
     mainClass.set("io.artio.api.extensions.controller.ExtensionControllerApplication")
-    classpath = sourceSets.main.get().runtimeClasspath + sourceSets.main.get().compileClasspath
+    // The privileged controller must not publish the commerce/OpenAPI surface through auto-configuration.
+    classpath = (sourceSets.main.get().runtimeClasspath + sourceSets.main.get().compileClasspath)
+        .filter { !it.name.startsWith("springdoc-") }
     targetJavaVersion.set(tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar")
         .flatMap { it.targetJavaVersion })
 }
 
 tasks.named("assemble") { dependsOn("extensionControllerBootJar") }
+
+tasks.named<Test>("integrationTest") {
+    dependsOn("extensionControllerBootJar")
+    systemProperty("artio.test.controller-jar", layout.buildDirectory.file("libs/artio-extension-controller.jar").get().asFile.absolutePath)
+}
