@@ -9,6 +9,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from decimal import Decimal, InvalidOperation
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
@@ -55,15 +56,25 @@ def access_token(configuration):
     cache_key = hashlib.sha256((client_id + "\0" + secret).encode()).hexdigest()
     with _token_lock:
         cached = _token_cache.get(cache_key)
-        if cached:
-            return cached
+        if cached and cached[1] > time.monotonic():
+            return cached[0]
         form = urlencode({"grant_type": "client_credentials", "client_id": client_id,
                           "client_secret": secret, "scope": "DCAPI_BARCODE_READ"}).encode()
         response = post_request(configuration, TOKEN_URL, "POST", form, "application/x-www-form-urlencoded")
         token = response.get("access_token")
         if not isinstance(token, str) or not token or len(token) > 16_384:
             raise ProviderError(502, "Swiss Post returned an invalid access token")
-        _token_cache[cache_key] = token
+        expires_in = response.get("expires_in")
+        if type(expires_in) is int and 0 < expires_in <= 86_400:
+            # Refresh 30 seconds early to avoid using a token that expires in-flight.
+            cache_seconds = expires_in - 30
+            if cache_seconds > 0:
+                _token_cache[cache_key] = (token, time.monotonic() + cache_seconds)
+            else:
+                _token_cache.pop(cache_key, None)
+        else:
+            # The token can still be used for this request, but must not live forever in cache.
+            _token_cache.pop(cache_key, None)
         return token
 
 

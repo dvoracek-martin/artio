@@ -18,6 +18,8 @@ Swiss Post's client credentials authorize access to a registered client; actual 
 
 This source package is not yet an installable release: the Artio image digest remains an explicit placeholder until a release pipeline builds and publishes the image. Sandbox/live API behavior and actual merchant acceptance must be verified with Swiss Post-issued credentials before production use. The plugin does not claim cancellation, live carrier pricing, delivery dates, or tracking updates.
 
+OAuth token responses are cached only until 30 seconds before their `expires_in` deadline; responses without a valid expiry are used once and not cached. See the [Swiss Post Digital Commerce API authentication reference](https://developer.post.ch/en/digital-commerce-api).
+
 ## Local checks
 
 ```powershell

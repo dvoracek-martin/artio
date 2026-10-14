@@ -24,6 +24,7 @@ class FakeResponse:
 
 class SwissPostTests(unittest.TestCase):
     def setUp(self):
+        server._token_cache.clear()
         self.temp = tempfile.TemporaryDirectory()
         self.db = str(Path(self.temp.name) / "shipments.db")
         self.config = {"clientId": "client", "clientSecret": "a-long-test-secret",
@@ -51,6 +52,26 @@ class SwissPostTests(unittest.TestCase):
         result = server.operation(self.config, "quote", self.shipment, self.envelope)
         self.assertEqual("8.50", result["amount"])
         self.assertEqual("CHF", result["currency"])
+
+    def test_access_token_cache_expires_before_provider_deadline_and_refreshes(self):
+        body = json.dumps({"access_token": "short-lived-token", "expires_in": 300}).encode()
+        with patch.object(server.time, "monotonic", side_effect=[100.0, 369.0, 370.0, 370.0]), \
+                patch.object(server, "urlopen", return_value=FakeResponse(body)) as request:
+            first = server.access_token(self.config)
+            cached = server.access_token(self.config)
+            refreshed = server.access_token(self.config)
+
+        self.assertEqual("short-lived-token", first)
+        self.assertEqual(first, cached)
+        self.assertEqual(first, refreshed)
+        self.assertEqual(2, request.call_count)
+
+    def test_access_token_without_valid_expiry_is_not_cached(self):
+        body = json.dumps({"access_token": "uncached-token", "expires_in": "300"}).encode()
+        with patch.object(server, "urlopen", return_value=FakeResponse(body)) as request:
+            self.assertEqual("uncached-token", server.access_token(self.config))
+            self.assertEqual("uncached-token", server.access_token(self.config))
+        self.assertEqual(2, request.call_count)
 
     def test_shipment_maps_swiss_barcode_request_and_replays_completed_idempotency_key(self):
         expected = {"shipmentReference": "993590003400000002", "trackingReference": "993590003400000002",
