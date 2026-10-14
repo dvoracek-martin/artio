@@ -1209,6 +1209,9 @@ class CatalogApiIntegrationTests {
         assertThat(variants.getBody()[0].sku()).isEqualTo("LAP-0001-16-512");
 
         var variantId = createdVariant.getBody().id();
+        var anonymousStatusChange=http.exchange("/api/variants/{id}/active",HttpMethod.PUT,
+                new HttpEntity<>(new SetActiveRequest(false)),VariantResponse.class,variantId);
+        assertThat(anonymousStatusChange.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         adminExchange("/api/variants/{id}/active", HttpMethod.PUT, new SetActiveRequest(false), String.class, variantId);
         var inactive = http.getForEntity("/api/variants/{id}", VariantResponse.class, variantId);
         assertThat(inactive.getBody()).isNotNull();
