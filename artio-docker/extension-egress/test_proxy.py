@@ -1,4 +1,6 @@
 import unittest
+import socket
+import threading
 from unittest.mock import patch
 
 import proxy
@@ -26,6 +28,22 @@ class EgressPolicyTests(unittest.TestCase):
             (proxy.socket.AF_INET, proxy.socket.SOCK_STREAM, 6, "", ("10.0.0.2", 443)),
         ]
         self.assertEqual([], proxy.resolve_public_addresses("api.stripe.com"))
+
+    def test_connection_limit_rejects_before_spawning_another_worker(self):
+        old_slots = proxy.SLOTS
+        proxy.SLOTS = threading.BoundedSemaphore(0)
+        server = proxy.ThreadedProxyServer(("127.0.0.1", 0), proxy.ProxyHandler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            with socket.create_connection(server.server_address, timeout=2) as client:
+                response = client.recv(256)
+            self.assertIn(b"503 Service Unavailable", response)
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
+            proxy.SLOTS = old_slots
 
 
 if __name__ == "__main__":

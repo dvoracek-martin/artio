@@ -43,13 +43,7 @@ def valid_target(authority):
 
 class ProxyHandler(socketserver.BaseRequestHandler):
     def handle(self):
-        if not SLOTS.acquire(blocking=False):
-            self.request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n")
-            return
-        try:
-            self._handle_connect()
-        finally:
-            SLOTS.release()
+        self._handle_connect()
 
     def _handle_connect(self):
         self.request.settimeout(3)
@@ -115,6 +109,26 @@ class ThreadedProxyServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
     daemon_threads = True
     request_queue_size = MAX_CONNECTIONS
+
+    def process_request(self, request, client_address):
+        if not SLOTS.acquire(blocking=False):
+            try:
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            SLOTS.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            SLOTS.release()
 
 
 if __name__ == "__main__":
