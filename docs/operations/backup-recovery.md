@@ -7,7 +7,7 @@ Run commands from the repository root with the normal Compose project name (`art
 ## Create a backup
 
 ```powershell
-docker compose stop rest-api event-worker notification-worker
+docker compose stop rest-api event-worker notification-worker extension-controller
 New-Item -ItemType Directory -Force .\backup | Out-Null
 $postgres = (docker compose ps -q postgres).Trim()
 docker compose exec -T postgres pg_dump -U artio -d artio -Fc -f /tmp/artio-postgres.dump
@@ -17,17 +17,17 @@ docker run --rm -v artio_artio-installation-secrets:/source:ro -v "${PWD}/backup
 docker run --rm -v artio_artio-catalog-media:/source:ro -v "${PWD}/backup:/backup" alpine:3.20 `
   tar czf /backup/artio-catalog-media.tar.gz -C /source .
 Get-FileHash .\backup\artio-postgres.dump, .\backup\artio-installation-secrets.tar.gz, .\backup\artio-catalog-media.tar.gz -Algorithm SHA256 | Format-Table
-docker compose start rest-api event-worker notification-worker
+docker compose start rest-api event-worker notification-worker extension-controller
 ```
 
 The PostgreSQL custom-format dump is transaction-consistent. Stopping the API and both workers also prevents media/database changes while archives are captured. Keep multiple generations, copy the checksum-verified set to encrypted storage outside the host, and test restores in an isolated Compose project before relying on a backup.
 
 ## Restore to the same Compose installation
 
-Stop the API and both database workers so no application transaction can race the restore. Restore the exact matching secret volume first, then restore the database dump into the existing PostgreSQL volume:
+Stop the API, both database workers and controller so no application transaction can race the restore and no controller process retains pre-restore credentials in memory. Restore the exact matching secret volume first, then restore the database dump into the existing PostgreSQL volume:
 
 ```powershell
-docker compose stop rest-api event-worker notification-worker
+docker compose stop rest-api event-worker notification-worker extension-controller
 docker run --rm -v artio_artio-installation-secrets:/target -v "${PWD}/backup:/backup" alpine:3.20 `
   sh -c 'tar xzf /backup/artio-installation-secrets.tar.gz -C /target && chmod 700 /target && chmod 600 /target/*'
 docker run --rm -v artio_artio-catalog-media:/target -v "${PWD}/backup:/backup" alpine:3.20 `
@@ -64,6 +64,17 @@ Do not continue until PostgreSQL reports healthy. Verify readiness, setup status
 
 ## Key loss and rotation
 
+The isolated `BackupRecoveryIntegrationTests` rehearsal runs `pg_dump -Fc`, archives the installation-secret and media Docker volumes, checks archive checksums, terminates the original PostgreSQL container, restores the archives into fresh labelled volumes, initializes a fresh PostgreSQL instance from the restored password file, verifies the dump checksum after transfer, and runs `pg_restore --exit-on-error`. It validates Flyway history, MFA/plugin/DLQ decryption, stable plugin credentials, secret file permissions, and product image retrieval through the media application service. A wrong AES key must fail. Only generated fixture resources are used and removed. Run it together with the rotation and clean-install gates:
+
+```powershell
+.\gradlew.bat :artio-rest-api:integrationTest `
+  --tests io.artio.api.security.BackupRecoveryIntegrationTests `
+  --tests io.artio.api.catalog.CatalogApiIntegrationTests.encryptionRotationRequiresSuperadminAndRewrapsMfaAndPluginSecrets `
+  --tests io.artio.api.catalog.MigrationIntegrationTests.installsCleanlyThroughCurrentSchemaWithoutTenantModel --no-daemon
+```
+
+This proves the database/secrets/media restore primitives on a fresh host. It does not replace a deployment-specific rehearsal of traffic switching, external provider credentials, object-storage backups, or full Backoffice login after disaster recovery.
+
 If an AES encryption key is lost, PostgreSQL commerce data remains readable but values encrypted with that key cannot be recovered; restore the matching key from the same backup set or configure new provider credentials. The separate `extension-auth-key` must also be restored: changing it changes every plugin runtime credential.
 
 New ciphertexts use `v2.<key-id>.<base64>` AES-256-GCM envelopes. Legacy unversioned ciphertext remains readable while its key is supplied. The active key id is the full 64-character lowercase SHA-256 digest of the UTF-8 key material. During rotation, Artio reads up to eight previous keys from a JSON file in the protected installation secret volume. The file maps each key id to its raw key material; `ARTIO_ENCRYPTION_KEYRING_FILE` contains only the file path. Never put raw key material in `.env`, send it to an Artio API endpoint or commit it to the repository.
@@ -71,8 +82,8 @@ New ciphertexts use `v2.<key-id>.<base64>` AES-256-GCM envelopes. Legacy unversi
 To rotate safely:
 
 1. Create a normal encrypted backup set and verify that the matching `extension-auth-key` is retained.
-2. Generate a new random active AES key in the installation secrets volume. Keep the prior active key in a JSON file such as `/run/artio-secrets/encryption-keyring.json`, keyed by its derived id, and set `ARTIO_ENCRYPTION_KEYRING_FILE=/run/artio-secrets/encryption-keyring.json` for both API and event-worker. Restart them to load the new active key and prior keyring. Keep `extension-auth-key` unchanged.
+2. Generate a new random active AES key in the installation secrets volume. Keep the prior active key in a JSON file such as `/run/artio-secrets/encryption-keyring.json`, keyed by its derived id, and set `ARTIO_ENCRYPTION_KEYRING_FILE=/run/artio-secrets/encryption-keyring.json` for API, event-worker and notification-worker. Restart all three processes to load the new active key and prior keyring. Keep `extension-auth-key` unchanged.
 3. As SUPERADMIN, call `POST /api/v1/admin/system/security/encryption/rotate`. The endpoint accepts no key material. It locks and rewraps every MFA secret, extension secret, and non-null Kafka dead-letter payload (including already replayed records) in one database transaction and appends an audit event. Null Kafka tombstones remain null; replay status and metadata are preserved. A failure rolls the entire transaction back. Its response reports the active key id and the counts `mfaSecretsRewrapped`, `extensionSecretsRewrapped`, and `deadLetterPayloadsRewrapped`. The last field is an additive API change; no database migration is needed.
-4. Verify that MFA authentication and configured plugin invocations still work, then take another database-and-secrets backup. Remove the prior AES key from the keyring and restart API/event-worker only after that verification. Retain the previous backup according to the normal recovery policy.
+4. Verify that MFA authentication and configured plugin invocations still work, then take another database-and-secrets backup. Remove the prior AES key from the keyring and restart API/event-worker/notification-worker only after that verification. Retain the previous backup according to the normal recovery policy.
 
 If the rotation request fails because a ciphertext cannot be decrypted, leave the previous key in the keyring, restore the matching backup if needed, and resolve the key mismatch before retrying. The endpoint is idempotent: values already encrypted by the active key are left unchanged. This flow does not rotate the stable plugin-authentication key.
