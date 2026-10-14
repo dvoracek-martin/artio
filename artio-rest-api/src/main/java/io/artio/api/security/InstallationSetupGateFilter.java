@@ -40,6 +40,7 @@ final class InstallationSetupGateFilter extends OncePerRequestFilter {
         response.setContentType("application/json");
         response.setHeader("Retry-After", "30");
         mapper.writeValue(response.getOutputStream(), new ApiError(Instant.now(), HttpStatus.SERVICE_UNAVAILABLE.value(),
-                "Service Unavailable", "Initial setup is required", request.getRequestURI()));
+                "Service Unavailable", ApiError.codeFor(HttpStatus.SERVICE_UNAVAILABLE.value()),
+                "Initial setup is required", request.getRequestURI()));
     }
 }

@@ -16,6 +16,7 @@ const MESSAGES: Record<StoreLocale, Record<string, string>> = {
     successEyebrow:'All set', thankYou:'Thank you for your order.', viewOrders:'View your orders',
     privacyNotice:'Privacy notice', consentTitle:'Your privacy matters', consentBody:'Essential storage keeps Artio working. Optional analytics and marketing stay off unless you choose them.', essential:'Essential', analytics:'Analytics', marketing:'Marketing', accept:'Save preferences', reject:'Reject optional', manage:'Privacy choices', mfa:'Authenticator code or backup code',
     footer:'Objects with intention. Made for living.',
+    apiError_BAD_REQUEST:'Please check the information and try again.', apiError_UNAUTHORIZED:'Sign in to continue.', apiError_FORBIDDEN:'You do not have permission to do that.', apiError_NOT_FOUND:'The requested information could not be found.', apiError_CONFLICT:'This action conflicts with the current state. Refresh and try again.', apiError_RATE_LIMITED:'Too many attempts. Wait a moment and try again.', apiError_SERVICE_UNAVAILABLE:'This service is temporarily unavailable. Try again shortly.', apiError_SERVER_ERROR:'Something went wrong on our side. Try again shortly.', apiError_REQUEST_FAILED:'The request could not be completed.',
   },
   de: {
     shop:'Shop', bundles:'Bundle zusammenstellen', cart:'Warenkorb', orders:'Meine Bestellungen', signIn:'Anmelden', signOut:'Abmelden', bag:'Tasche',
@@ -29,6 +30,7 @@ const MESSAGES: Record<StoreLocale, Record<string, string>> = {
     successEyebrow:'Geschafft', thankYou:'Vielen Dank für Ihre Bestellung.', viewOrders:'Bestellungen ansehen',
     privacyNotice:'Datenschutzhinweis', consentTitle:'Ihre Privatsphäre ist wichtig', consentBody:'Notwendiger Speicher hält Artio funktionsfähig. Analyse und Marketing bleiben deaktiviert, bis Sie zustimmen.', essential:'Notwendig', analytics:'Analyse', marketing:'Marketing', accept:'Einstellungen speichern', reject:'Optionale ablehnen', manage:'Datenschutzeinstellungen', mfa:'Authenticator- oder Ersatzcode',
     footer:'Dinge mit Haltung. Für den Alltag gemacht.',
+    apiError_BAD_REQUEST:'Bitte überprüfen Sie die Angaben und versuchen Sie es erneut.', apiError_UNAUTHORIZED:'Melden Sie sich an, um fortzufahren.', apiError_FORBIDDEN:'Sie sind nicht berechtigt, diese Aktion auszuführen.', apiError_NOT_FOUND:'Die angeforderten Informationen wurden nicht gefunden.', apiError_CONFLICT:'Diese Aktion steht im Konflikt mit dem aktuellen Status. Aktualisieren Sie die Seite und versuchen Sie es erneut.', apiError_RATE_LIMITED:'Zu viele Versuche. Bitte warten Sie kurz und versuchen Sie es erneut.', apiError_SERVICE_UNAVAILABLE:'Dieser Dienst ist vorübergehend nicht verfügbar. Bitte versuchen Sie es später erneut.', apiError_SERVER_ERROR:'Ein Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.', apiError_REQUEST_FAILED:'Die Anfrage konnte nicht abgeschlossen werden.',
   },
   fr: {
     shop:'Boutique', bundles:'Composer un ensemble', cart:'Panier', orders:'Mes commandes', signIn:'Connexion', signOut:'Déconnexion', bag:'Panier',
@@ -42,6 +44,7 @@ const MESSAGES: Record<StoreLocale, Record<string, string>> = {
     successEyebrow:'C’est prêt', thankYou:'Merci pour votre commande.', viewOrders:'Voir vos commandes',
     privacyNotice:'Avis de confidentialité', consentTitle:'Votre vie privée compte', consentBody:'Le stockage essentiel assure le fonctionnement d’Artio. Les analyses et le marketing restent désactivés sans votre accord.', essential:'Essentiel', analytics:'Analyse', marketing:'Marketing', accept:'Enregistrer mes choix', reject:'Refuser les options', manage:'Choix de confidentialité', mfa:'Code d’authentification ou code de secours',
     footer:'Des objets pensés pour la vie quotidienne.',
+    apiError_BAD_REQUEST:'Vérifiez les informations et réessayez.', apiError_UNAUTHORIZED:'Connectez-vous pour continuer.', apiError_FORBIDDEN:'Vous n’êtes pas autorisé à effectuer cette action.', apiError_NOT_FOUND:'Les informations demandées sont introuvables.', apiError_CONFLICT:'Cette action est incompatible avec l’état actuel. Actualisez et réessayez.', apiError_RATE_LIMITED:'Trop de tentatives. Patientez un instant puis réessayez.', apiError_SERVICE_UNAVAILABLE:'Ce service est temporairement indisponible. Réessayez bientôt.', apiError_SERVER_ERROR:'Une erreur est survenue. Réessayez bientôt.', apiError_REQUEST_FAILED:'La demande n’a pas pu aboutir.',
   },
   it: {
     shop:'Negozio', bundles:'Crea un set', cart:'Carrello', orders:'I miei ordini', signIn:'Accedi', signOut:'Esci', bag:'Carrello',
@@ -55,6 +58,7 @@ const MESSAGES: Record<StoreLocale, Record<string, string>> = {
     successEyebrow:'Fatto', thankYou:'Grazie per il tuo ordine.', viewOrders:'Visualizza i tuoi ordini',
     privacyNotice:'Informativa sulla privacy', consentTitle:'La tua privacy è importante', consentBody:'La memoria essenziale mantiene Artio operativo. Analisi e marketing restano disattivati senza il tuo consenso.', essential:'Essenziale', analytics:'Analisi', marketing:'Marketing', accept:'Salva le preferenze', reject:'Rifiuta le opzioni', manage:'Scelte sulla privacy', mfa:'Codice autenticatore o di recupero',
     footer:'Oggetti pensati per la vita di ogni giorno.',
+    apiError_BAD_REQUEST:'Controlla le informazioni e riprova.', apiError_UNAUTHORIZED:'Accedi per continuare.', apiError_FORBIDDEN:'Non hai l’autorizzazione per eseguire questa azione.', apiError_NOT_FOUND:'Le informazioni richieste non sono state trovate.', apiError_CONFLICT:'Questa azione è in conflitto con lo stato attuale. Aggiorna e riprova.', apiError_RATE_LIMITED:'Troppi tentativi. Attendi e riprova.', apiError_SERVICE_UNAVAILABLE:'Il servizio è temporaneamente non disponibile. Riprova tra poco.', apiError_SERVER_ERROR:'Si è verificato un errore. Riprova tra poco.', apiError_REQUEST_FAILED:'Non è stato possibile completare la richiesta.',
   },
 };
 

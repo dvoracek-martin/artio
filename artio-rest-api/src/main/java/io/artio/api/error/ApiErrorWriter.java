@@ -19,6 +19,6 @@ public final class ApiErrorWriter {
         response.setStatus(status.value());
         response.setContentType("application/json");
         mapper.writeValue(response.getOutputStream(), new ApiError(
-                Instant.now(), status.value(), status.getReasonPhrase(), message, path));
+                Instant.now(), status.value(), status.getReasonPhrase(), ApiError.codeFor(status.value()), message, path));
     }
 }

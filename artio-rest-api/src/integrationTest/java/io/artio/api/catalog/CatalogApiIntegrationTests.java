@@ -428,12 +428,14 @@ class CatalogApiIntegrationTests {
 
         var invalid = adminExchange("/api/v1/admin/extensions?country=XX", HttpMethod.GET, null, ApiError.class);
         assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(invalid.getBody().code()).isEqualTo("BAD_REQUEST");
     }
 
     @Test
     void installationSettingsAreRestrictedToSuperadminAndAudited() {
         var denied = adminExchange("/api/v1/admin/system/settings", HttpMethod.GET, null, ApiError.class);
         assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(denied.getBody().code()).isEqualTo("FORBIDDEN");
 
         UUID ownerId = UUID.randomUUID();
         String ownerEmail = "owner-" + ownerId + "@example.test";

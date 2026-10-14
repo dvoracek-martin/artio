@@ -74,7 +74,7 @@ public class ApiExceptionHandler {
         Object originalPath = request.getAttribute(ApiVersioningFilter.ORIGINAL_REQUEST_PATH_ATTRIBUTE);
         String path = originalPath instanceof String value ? value : request.getRequestURI();
         return ResponseEntity.status(status).body(new ApiError(java.time.Instant.now(), status.value(),
-                reason, message, path));
+                reason, ApiError.codeFor(status.value()), message, path));
     }
 
 }

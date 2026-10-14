@@ -124,7 +124,7 @@ The default Compose stack starts PostgreSQL, Apache Kafka, the REST API and Back
 
 ## API examples
 
-The REST surface is generated as OpenAPI at `http://localhost:8080/v3/api-docs` (also served through the frontend reverse proxy). Use `/api/v1` as the canonical versioned API. Unversioned `/api` routes remain compatibility aliases. API errors use a stable JSON envelope with timestamp, HTTP status, reason, safe message, and request path.
+The REST surface is generated as OpenAPI at `http://localhost:8080/v3/api-docs` (also served through the frontend reverse proxy). Use `/api/v1` as the canonical versioned API. Unversioned `/api` routes remain compatibility aliases. API errors use a stable JSON envelope with `timestamp`, `status`, `error`, `code`, `message`, and `path`. The `code` is a locale-independent client key (`BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVICE_UNAVAILABLE`, `SERVER_ERROR`, or `REQUEST_FAILED`); `message` is safe diagnostic text and may be English. Clients should branch on `code`, not parse `message` or `error`.
 
 Price request:
 
