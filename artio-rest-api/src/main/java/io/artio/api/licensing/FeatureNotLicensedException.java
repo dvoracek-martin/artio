@@ -4,7 +4,7 @@ public final class FeatureNotLicensedException extends RuntimeException {
     private final EnterpriseFeature feature;
 
     public FeatureNotLicensedException(EnterpriseFeature feature) {
-        super("Feature requires an active Enterprise entitlement");
+        super("Enterprise entitlement is unavailable for this operation");
         this.feature = java.util.Objects.requireNonNull(feature);
     }
 

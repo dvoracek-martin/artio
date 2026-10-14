@@ -115,6 +115,9 @@ class CatalogApiIntegrationTests {
         registry.add("artio.events.kafka.enabled", () -> "true");
         registry.add("artio.events.kafka.consumer-enabled", () -> "false");
         registry.add("artio.workers.enabled", () -> "false");
+        // This aggregate business suite legitimately exceeds one client's default minute quota.
+        // Dedicated RateLimitFilterTests retain real threshold/fallback/error-contract coverage.
+        registry.add("artio.rate-limit.requests-per-minute", () -> "10000");
         registry.add("artio.payments.provider", () -> "none");
     }
 
@@ -134,8 +137,10 @@ class CatalogApiIntegrationTests {
                 "Test", "Administrator");
         adminTotpSecret=io.artio.api.security.Totp.newSecret();
         jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret,verified,verified_at) VALUES (?,?,TRUE,now())",userId,encryption.encrypt(adminTotpSecret));
-        var login = http.postForObject("/api/auth/login",
+        var loginResponse = http.postForEntity("/api/auth/login",
                 Map.of("email", "admin-" + userId + "@example.test", "password", "admin-password-123","mfaCode",io.artio.api.TestTotp.code(adminTotpSecret,java.time.Instant.now())), LoginResponse.class);
+        assertThat(loginResponse.getStatusCode()).as("Fixture administrator login status").isEqualTo(HttpStatus.OK);
+        var login = loginResponse.getBody();
         assertThat(login).isNotNull();
         assertThat(login.accessToken()).isNotBlank();
         adminToken = login.accessToken();
@@ -890,6 +895,8 @@ class CatalogApiIntegrationTests {
         assertThat(downloaded.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.IMAGE_PNG);
 
         var second = uploadProductImage(product.getBody().id(), testPng(4, 1), "Side view");
+        assertThat(second.getStatusCode()).as("Second media upload status").isEqualTo(HttpStatus.CREATED);
+        assertThat(second.getBody()).isNotNull();
         var order = adminExchange("/api/v1/products/{id}/media/order", HttpMethod.PUT,
                 new ProductMediaController.OrderRequest(List.of(second.getBody().id(), first.getBody().id())),
                 ProductMediaController.MediaResponse[].class, product.getBody().id());
@@ -1606,7 +1613,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
-        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31");
+        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "

@@ -31,7 +31,7 @@ class CartControllerShippingTests {
     private final ObjectProvider<ShippingProvider> providerRef=mock(ObjectProvider.class);
     private final CartController controller=new CartController(mock(JdbcTemplate.class),mock(PricingApplicationService.class),
             mock(InventoryApplicationService.class),mock(BundleApplicationService.class),new ObjectMapper(),new BigDecimal("4.50"),
-            mock(ObjectProvider.class),providerRef);
+            mock(ObjectProvider.class),providerRef,mock(io.artio.api.licensing.LicensingService.class));
     private final UUID userId=UUID.randomUUID();
 
     @Test

@@ -61,11 +61,19 @@ class LicenseApiIntegrationTests {
     @Autowired JwtEncoder jwt;
     @Autowired ObjectMapper mapper;
     @Autowired LicensingService licensing;
+    // Availability only: financial assertions use real PostgreSQL gift-card tender, never mocked provider outcomes.
+    @org.springframework.boot.test.mock.mockito.MockBean io.artio.extensions.commerce.PaymentProvider paymentProvider;
     @LocalServerPort int port;
     private UUID owner;
     private String ownerToken;
     private String adminToken;
     private String customerToken;
+    private UUID customer;
+
+    @org.junit.jupiter.api.AfterEach
+    void noExternalProviderOutcomeWasSimulated() {
+        org.mockito.Mockito.verifyNoInteractions(paymentProvider);
+    }
 
     @DynamicPropertySource
     static void configuration(DynamicPropertyRegistry registry) {
@@ -81,6 +89,8 @@ class LicenseApiIntegrationTests {
         registry.add("artio.events.kafka.enabled", () -> "false");
         registry.add("artio.events.kafka.consumer-enabled", () -> "false");
         registry.add("artio.extensions.docker.enabled", () -> "false");
+        registry.add("artio.checkout.shipping-cost", () -> "0.00");
+        registry.add("artio.rate-limit.requests-per-minute", () -> "10000");
     }
 
     @BeforeEach
@@ -90,7 +100,8 @@ class LicenseApiIntegrationTests {
         owner = user("SUPERADMIN");
         ownerToken = token(owner, "SUPERADMIN");
         adminToken = token(user("ADMIN"), "ADMIN");
-        customerToken = token(user("CUSTOMER"), "CUSTOMER");
+        customer = user("CUSTOMER");
+        customerToken = token(customer, "CUSTOMER");
     }
 
     @Test
@@ -145,6 +156,156 @@ class LicenseApiIntegrationTests {
         return http.exchange(path, method, new HttpEntity<>(body, headers), JsonNode.class);
     }
 
+    @Test
+    void communityCheckoutPaymentAndRefundWorkWithoutCreatingNewPointsEntitlement() throws Exception {
+        Checkout checkout = checkout(true);
+        assertThat(jdbc.queryForObject("SELECT loyalty_eligible FROM orders WHERE id=?", Boolean.class, checkout.id())).isFalse();
+        UUID payment = payWithGiftCard(checkout.id());
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, checkout.id())).isEqualTo("PAID");
+        assertThat(json("/api/v1/loyalty/me", HttpMethod.GET, null, customerToken, null).getBody().path("points").asLong()).isZero();
+        assertNotLicensed(json("/api/v1/loyalty/earn/" + checkout.id(), HttpMethod.POST, null, customerToken, null));
+        var refunded = json("/api/v1/payments/" + payment + "/refund", HttpMethod.POST, Map.of("amount", 10), ownerToken, UUID.randomUUID().toString());
+        assertThat(refunded.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(refunded.getBody().path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM loyalty_transactions WHERE order_id=?", Integer.class, checkout.id())).isZero();
+    }
+
+    @Test
+    void orderTimePromiseSurvivesExpiryPaymentRedemptionRefundAndCheckoutReplay() throws Exception {
+        installFeatures(List.of("LOYALTY"), false);
+        Checkout checkout = checkout();
+        assertThat(jdbc.queryForObject("SELECT loyalty_eligible FROM orders WHERE id=?", Boolean.class, checkout.id())).isTrue();
+        installFeatures(List.of("LOYALTY"), true);
+        assertThat(licensing.status().state()).isEqualTo("EXPIRED");
+        UUID payment = payWithGiftCard(checkout.id());
+        assertThat(json("/api/v1/loyalty/me", HttpMethod.GET, null, customerToken, null).getBody().path("points").asLong()).isEqualTo(216);
+        var earnedAgain = json("/api/v1/loyalty/earn/" + checkout.id(), HttpMethod.POST, null, customerToken, null);
+        assertThat(earnedAgain.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(earnedAgain.getBody().path("points").asLong()).isEqualTo(216);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM loyalty_transactions WHERE order_id=? AND kind='EARN'", Integer.class, checkout.id())).isEqualTo(1);
+        String redemptionKey = UUID.randomUUID().toString();
+        var redeemed = json("/api/v1/loyalty/redeem", HttpMethod.POST, Map.of("points", 100), customerToken, redemptionKey);
+        assertThat(redeemed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(redeemed.getBody().path("points").asLong()).isEqualTo(116);
+        assertThat(json("/api/v1/loyalty/redeem", HttpMethod.POST, Map.of("points", 100), customerToken, redemptionKey).getBody().path("points").asLong()).isEqualTo(116);
+        String refundKey = UUID.randomUUID().toString();
+        var refunded = json("/api/v1/payments/" + payment + "/refund", HttpMethod.POST, Map.of("amount", 10), ownerToken, refundKey);
+        assertThat(refunded.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(refunded.getBody().path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(json("/api/v1/loyalty/me", HttpMethod.GET, null, customerToken, null).getBody().path("points").asLong()).isEqualTo(107);
+        assertThat(json("/api/v1/payments/" + payment + "/refund", HttpMethod.POST, Map.of("amount", 10), ownerToken, refundKey).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM loyalty_transactions WHERE order_id=? AND kind='REFUND'", Integer.class, checkout.id())).isEqualTo(1);
+        var replay = json("/api/v1/cart/checkout", HttpMethod.POST, checkoutRequest(), customerToken, checkout.key());
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(replay.getBody().path("orderId").asText()).isEqualTo(checkout.id().toString());
+        assertThat(jdbc.queryForObject("SELECT loyalty_eligible FROM orders WHERE id=?", Boolean.class, checkout.id())).isTrue();
+        Checkout newCommunityOrder = checkout();
+        assertThat(jdbc.queryForObject("SELECT loyalty_eligible FROM orders WHERE id=?", Boolean.class, newCommunityOrder.id())).isFalse();
+        assertThat(json("/api/v1/admin/loyalty/" + customer, HttpMethod.GET, null, ownerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(json("/api/v1/privacy/export", HttpMethod.GET, null, customerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void newProgramAdjustmentsRequireLicenseButCommittedAdjustmentReplayDoesNot() throws Exception {
+        String path = "/api/v1/admin/loyalty/" + customer + "/adjust";
+        Map<String, Object> request = Map.of("points", 250, "reason", "Approved service award");
+        assertNotLicensed(json(path, HttpMethod.POST, request, ownerToken, UUID.randomUUID().toString()));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM loyalty_accounts WHERE user_id=?", Integer.class, customer)).isZero();
+        installFeatures(List.of("LOYALTY"), false);
+        String key = UUID.randomUUID().toString();
+        assertThat(json(path, HttpMethod.POST, request, ownerToken, key).getStatusCode()).isEqualTo(HttpStatus.OK);
+        installFeatures(List.of("LOYALTY"), true);
+        assertThat(json(path, HttpMethod.POST, request, ownerToken, key).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertNotLicensed(json(path, HttpMethod.POST, request, ownerToken, UUID.randomUUID().toString()));
+        assertThat(jdbc.queryForObject("SELECT points FROM loyalty_accounts WHERE user_id=?", Long.class, customer)).isEqualTo(250);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM loyalty_transactions WHERE user_id=? AND kind='ADJUST'", Integer.class, customer)).isEqualTo(1);
+    }
+
+    @Test
+    void subscriptionCreationAndReactivationRequireLicenseWhileExistingContractCanBeReadPausedAndCancelled() throws Exception {
+        var request = Map.of("userId", customer.toString(), "frequency", "MONTHLY", "items", List.of(Map.of("variantId", UUID.randomUUID().toString(), "quantity", 1)));
+        assertNotLicensed(json("/api/v1/admin/subscriptions", HttpMethod.POST, request, ownerToken, null));
+        installFeatures(List.of("SUBSCRIPTIONS"), false);
+        var created = json("/api/v1/admin/subscriptions", HttpMethod.POST, request, ownerToken, null);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String id = created.getBody().path("id").asText();
+        assertNotLicensed(json("/api/v1/admin/loyalty/" + customer + "/adjust", HttpMethod.POST,
+                Map.of("points", 250, "reason", "Different Enterprise feature"), ownerToken, UUID.randomUUID().toString()));
+        installFeatures(List.of("SUBSCRIPTIONS"), true);
+        assertThat(json("/api/v1/subscriptions", HttpMethod.GET, null, customerToken, null).getBody().size()).isEqualTo(1);
+        String status = "/api/v1/subscriptions/" + id + "/status";
+        assertThat(json(status, HttpMethod.PUT, Map.of("status", "ACTIVE"), customerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(json(status, HttpMethod.PUT, Map.of("status", "PAUSED"), customerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertNotLicensed(json(status, HttpMethod.PUT, Map.of("status", "ACTIVE"), customerToken, null));
+        assertThat(jdbc.queryForObject("SELECT status FROM subscriptions WHERE id=?", String.class, UUID.fromString(id))).isEqualTo("PAUSED");
+        assertThat(json(status, HttpMethod.PUT, Map.of("status", "CANCELLED"), customerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(json(status, HttpMethod.PUT, Map.of("status", "CANCELLED"), customerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(json(status, HttpMethod.PUT, Map.of("status", "PAUSED"), ownerToken, null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertNotLicensed(json("/api/v1/admin/subscriptions", HttpMethod.POST, request, ownerToken, null));
+    }
+
+    private void installFeatures(List<String> features, boolean expired) throws Exception {
+        Instant now = Instant.now().minusSeconds(1);
+        Instant issued = now.minus(java.time.Duration.ofDays(expired ? 2 : 3));
+        byte[] document = signed(licensing.status().installationId(), features, issued,
+                expired ? now.minusSeconds(3600) : now.plusSeconds(86400), expired ? now.minusSeconds(1) : now.plusSeconds(172800));
+        assertThat(exchange("/api/v1/admin/system/license", HttpMethod.POST, document, ownerToken).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    private Checkout checkout() throws Exception {
+        return checkout(false);
+    }
+
+    private Checkout checkout(boolean attemptClientSuppliedEligibility) throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+        var product = json("/api/v1/products", HttpMethod.POST, Map.of("name", "Entitlement fixture", "description", "Fixture", "sku", "LIC-" + suffix), ownerToken, null);
+        assertThat(product.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var variant = json("/api/v1/products/" + product.getBody().path("id").asText() + "/variants", HttpMethod.POST,
+                Map.of("name", "Default", "sku", "LIC-V-" + suffix), ownerToken, null);
+        assertThat(variant.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID variantId = UUID.fromString(variant.getBody().path("id").asText());
+        assertThat(json("/api/v1/prices", HttpMethod.POST, new io.artio.api.pricing.PricingApplicationService.PriceRequest(
+                variantId, "CH", "WEB", new java.math.BigDecimal("200.00"), "CHF", Instant.now().minusSeconds(60), null), ownerToken, null).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var warehouse = json("/api/v1/warehouses", HttpMethod.POST, new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest("LIC-" + suffix, "Entitlement fixture", "CH"), ownerToken, null);
+        assertThat(warehouse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(json("/api/v1/warehouses/" + warehouse.getBody().path("id").asText() + "/stock/" + variantId + "/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(java.math.BigDecimal.TEN), ownerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(json("/api/v1/cart/items", HttpMethod.POST, new io.artio.api.orders.CartController.AddItemRequest(
+                variantId, java.math.BigDecimal.ONE, "CH", "WEB", "CH"), customerToken, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        String key = UUID.randomUUID().toString();
+        var body = new java.util.HashMap<String, Object>(checkoutRequest());
+        if (attemptClientSuppliedEligibility) body.put("loyaltyEligible", true);
+        var placed = json("/api/v1/cart/checkout", HttpMethod.POST, body, customerToken, key);
+        assertThat(placed.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        return new Checkout(UUID.fromString(placed.getBody().path("orderId").asText()), key);
+    }
+
+    private UUID payWithGiftCard(UUID order) throws Exception {
+        var card = json("/api/v1/admin/gift-cards", HttpMethod.POST, Map.of("amount", 1000, "currency", "CHF"), ownerToken, null);
+        assertThat(card.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var paid = json("/api/v1/gift-cards/redeem", HttpMethod.POST, Map.of("orderId", order.toString(), "code", card.getBody().path("code").asText()), customerToken, null);
+        assertThat(paid.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(paid.getBody().path("orderStatus").asText()).isEqualTo("PAID");
+        return jdbc.queryForObject("SELECT id FROM payments WHERE order_id=? AND method='GIFT_CARD'", UUID.class, order);
+    }
+
+    private Map<String, Object> checkoutRequest() {
+        return Map.of("shippingAddress", "Fixture Street 1", "billingAddress", "Fixture Street 1", "shippingCountry", "CH", "locale", "en");
+    }
+
+    private org.springframework.http.ResponseEntity<JsonNode> json(String path, HttpMethod method, Object body, String token, String key) throws Exception {
+        var headers = new HttpHeaders(); headers.setBearerAuth(token); headers.setContentType(MediaType.APPLICATION_JSON);
+        if (key != null) headers.set("Idempotency-Key", key);
+        return http.exchange(path, method, new HttpEntity<>(body == null ? null : mapper.writeValueAsBytes(body), headers), JsonNode.class);
+    }
+
+    private static void assertNotLicensed(org.springframework.http.ResponseEntity<JsonNode> response) {
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody().path("code").asText()).isEqualTo("FEATURE_NOT_LICENSED");
+    }
+
+    private record Checkout(UUID id, String key) { }
+
     private UUID user(String role) {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) VALUES (?,?,'fixture-hash','License','Fixture',?,now())",
@@ -160,9 +321,13 @@ class LicenseApiIntegrationTests {
 
     private byte[] signed(UUID identity) throws Exception {
         Instant now = Instant.now().minusSeconds(1);
+        return signed(identity, List.of("LOYALTY"), now, now.plusSeconds(3600), now.plusSeconds(7200));
+    }
+
+    private byte[] signed(UUID identity, List<String> features, Instant issued, Instant expires, Instant grace) throws Exception {
         byte[] payload = mapper.writeValueAsBytes(Map.of("version", 1, "licenseId", UUID.randomUUID().toString(),
-                "installationId", identity.toString(), "issuedAt", now.getEpochSecond(), "notBefore", now.getEpochSecond(),
-                "expiresAt", now.plusSeconds(3600).getEpochSecond(), "graceUntil", now.plusSeconds(7200).getEpochSecond(), "features", List.of("LOYALTY")));
+                "installationId", identity.toString(), "issuedAt", issued.getEpochSecond(), "notBefore", issued.getEpochSecond(),
+                "expiresAt", expires.getEpochSecond(), "graceUntil", grace.getEpochSecond(), "features", features));
         Signature signature = Signature.getInstance("Ed25519"); signature.initSign(ISSUER.getPrivate()); signature.update(payload);
         var encoder = Base64.getUrlEncoder().withoutPadding();
         return mapper.writeValueAsBytes(Map.of("keyId", "fixture", "payload", encoder.encodeToString(payload), "signature", encoder.encodeToString(signature.sign())));

@@ -72,6 +72,10 @@ Tax, invoice, currency, address, payment/shipping availability, units and roundi
 
 Authorization is checked on the server for every privileged action and resource. Replace broad hard-coded roles with explicit permission policy as workflows warrant. Enterprise entitlement verification is local and signature-based; a private signing key never ships in Core or customer installations. Entitlement refresh is scheduled/controlled over HTTPS with an explicit grace/failure policy; no synchronous licensing-server dependency is permitted for routine requests.
 
+The owner-approved [edition contract](licensing/entitlements-v1.md) makes loyalty, subscriptions and advanced reporting Enterprise capabilities. V32 snapshots loyalty eligibility on each new order and preserves pre-boundary promises. Payment settlement, existing points redemption/refund, committed idempotent adjustment replay and subscription cancellation remain available after expiry. New awards/adjustments and new/reactivated subscription contracts are checked at the API/use-case boundary. Advanced reporting and Backoffice edition presentation remain the next licensing slice.
+
+HTTP request quotas retain the production defaults of 100 requests per IP per minute and a shared 1000-request API-key budget. Redis outages fall back to local minute windows; expired fallback entries are pruned as traffic advances to a new minute. Denials use the common versioned `ApiError` envelope with `RATE_LIMITED` and `Retry-After`. Aggregate business integration fixtures use a larger test-only IP quota; dedicated tests retain quota, API-key hashing, Redis-failure and minute-reset coverage.
+
 Credentials and provider secrets are injected/stored through an operator-controlled secret boundary, redacted from logs/telemetry/errors/exports and rotated by a documented process. TLS applies at actual deployment boundaries. Webhooks require signature verification, timestamp/replay handling and idempotency. No PCI/GDPR/Swiss-data-protection compliance is claimed from code presence alone.
 
 ## Migration sequence and current divergence

@@ -16,6 +16,16 @@ An unavailable Enterprise feature returns HTTP 403 with code `FEATURE_NOT_LICENS
 
 Standard and advanced monetary aggregates must remain separate by currency; adding CHF and EUR is invalid. The current reporting endpoint mixes standard and advanced fields and must be separated while retaining useful Community reports.
 
+## Implemented loyalty and subscription boundaries
+
+V32 adds `orders.loyalty_eligible`. Checkout snapshots the locally available `LOYALTY` grant into this flag when inserting a new order; idempotent replay returns the original order and cannot change its promise. Orders already present before V32 retain eligibility because the previous implementation promised points on every paid order. The new column defaults to false for subsequent orders. There is no API that turns an ineligible order into a promised order retroactively.
+
+Payment/capture/reconciliation, gift-card settlement and the customer earn endpoint honor the stored flag. They do not require a currently active license to fulfill an existing order promise. New Community orders remain payable/refundable and do not accrue points. The customer earn endpoint checks ownership and paid status and returns `FEATURE_NOT_LICENSED` for an order without eligibility. Existing points remain readable and redeemable; refund reversals remain available. New discretionary adjustments require `LOYALTY`, while replay of an already committed matching idempotency key returns its prior result without another award or current-license dependency.
+
+Creating a subscription requires `SUBSCRIPTIONS`. Customer status changes lock the owned contract transactionally. Changing a paused/cancelled contract to active requires the grant; an idempotent active-to-active request does not. Read, pause, cancellation and cancellation replay remain available after expiry, with ownership checks intact. The first due date uses weekly/monthly/quarterly calendar periods in the configured store timezone (the Switzerland default is Europe/Zurich), handling short months and DST. This does not claim an automatic recurring-charge engine or provider sandbox verification.
+
+Real API/PostgreSQL scenarios verify Community checkout/payment/refund, an order promised while licensed and paid after a signed expired grant is installed, points redemption/refund and idempotent replays after expiry, protected new adjustments, subscription creation/reactivation denial and continued read/pause/cancel. Payments in these tests use the real persisted gift-card ledger. A test-only external-provider availability mock permits creation of the pending order and is asserted never to be invoked; no external payment outcome is simulated or claimed. The V30 upgrade test verifies existing orders keep their points promise and new orders default to no promise.
+
 ## Local signed contract
 
 Normal requests evaluate a previously verified local document. There is no synchronous network call on an application request. Signing is external: Core and customer installations contain public verification keys only, never an issuer private key.
@@ -79,4 +89,4 @@ The status has `installationId`, `edition`, `state`, available `features`, `expi
 
 Runtime integration is implemented with PostgreSQL persistence, local cache, owner-only API, bounded HTTPS refresh and a dedicated scheduler. PostgreSQL/real-TLS integration tests cover restart, expiry, successful refresh with a file credential, safe responses, tampering/malformed/oversized/redirect/slow/TLS failure, transactional rollback and stale replacement across processes. Real API tests cover role authorization and fixed/chunked upload limits; migration and backup tests verify persistent identity. Consult the task ledger for the latest executed gates.
 
-Remaining completion gates: use-case feature boundaries, payment/loyalty expiry obligation tests, subscription cancellation/reactivation tests, currency-separated reporting tests, and Backoffice edition/status behavior. The runtime foundation alone does not finish the licensing phase.
+Loyalty and subscription use-case boundaries and expiry obligation tests are implemented. Remaining licensing completion gates: currency-separated standard/advanced reports with `ADVANCED_REPORTING` enforcement, and Backoffice edition/status behavior. The licensing phase is not complete until those pass too.

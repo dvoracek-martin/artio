@@ -12,6 +12,10 @@ public final class LoyaltyAccounting {
     public static void earnForOrder(JdbcTemplate jdbc, UUID userId, UUID orderId, BigDecimal orderTotal) {
         long points = pointsForOrder(orderTotal);
         if (points <= 0) return;
+        // Fulfill the immutable order-time promise, independently of current license state.
+        if (!Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM orders WHERE id=? AND user_id=? AND loyalty_eligible)",
+                Boolean.class, orderId, userId))) return;
         jdbc.update("INSERT INTO loyalty_accounts(user_id) VALUES (?) ON CONFLICT DO NOTHING", userId);
         int inserted = jdbc.update("INSERT INTO loyalty_transactions(id,user_id,order_id,points,kind) VALUES (?,?,?,?,'EARN') ON CONFLICT DO NOTHING",
                 UUID.randomUUID(), userId, orderId, points);
