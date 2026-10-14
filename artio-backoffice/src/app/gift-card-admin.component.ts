@@ -1,6 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject } from '@angular/core';
+import { CURRENCY_OPTIONS } from './commerce-options';
+import { SearchSelectComponent } from './search-select.component';
 import { FormsModule } from '@angular/forms';
 
 type GiftCard = { id: string; initialBalance: number; balance: number; currency: string; expiresAt: string | null; active: boolean; createdAt: string };
@@ -9,14 +11,14 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
 @Component({
   selector: 'artio-gift-card-admin',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SearchSelectComponent],
   template: `
     <section>
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">STORED VALUE</p><h2>Issue a gift card</h2></div></div>
         <form class="create-form" (ngSubmit)="issue()">
           <label>Initial amount<input type="number" min="0.01" step="0.01" [(ngModel)]="draft.amount" name="amount" required></label>
-          <label>Currency<input maxlength="3" minlength="3" [(ngModel)]="draft.currency" name="currency" required></label>
+          <label>Currency<artio-search-select [(ngModel)]="draft.currency" name="currency" label="Gift card currency" [options]="currencyOptions"></artio-search-select></label>
           <label>Expiry date (optional)<input type="date" [(ngModel)]="draft.expiresAt" name="expiresAt"></label>
           <button class="primary" [disabled]="busy">{{busy?'Issuing…':'Issue gift card'}}</button>
         </form>
@@ -46,6 +48,7 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
   `
 })
 export class GiftCardAdminComponent {
+  currencyOptions=CURRENCY_OPTIONS;
   private readonly http = inject(HttpClient);
   cards: GiftCard[] = [];
   transactions: GiftCardTransaction[] = [];

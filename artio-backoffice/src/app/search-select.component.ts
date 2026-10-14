@@ -9,9 +9,10 @@ let nextSelectId = 0;
   providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SearchSelectComponent), multi: true }],
   template: `
     <div class="search-select" [class.is-open]="open" [class.is-disabled]="disabled">
-      <button type="button" class="search-select-trigger" [id]="id" [disabled]="disabled" [attr.aria-label]="label" [attr.aria-expanded]="open" [attr.aria-controls]="id+'-options'" aria-haspopup="listbox" (click)="toggle()" (keydown.arrowdown)="openMenu($event)">
+      <button type="button" class="search-select-trigger" [id]="id" [disabled]="disabled" [attr.aria-label]="label" [attr.aria-describedby]="id+'-selection'" [attr.aria-expanded]="open" [attr.aria-controls]="id+'-options'" aria-haspopup="listbox" (click)="toggle()" (keydown.arrowdown)="openMenu($event)">
         <span class="select-values"><ng-container *ngIf="multiple; else single"><span class="select-chip" *ngFor="let option of selectedOptions">{{option.label}}</span><span *ngIf="!values.length" class="select-placeholder">{{placeholder}}</span></ng-container><ng-template #single><span [class.select-placeholder]="!values.length">{{selectedLabel}}</span></ng-template></span><span aria-hidden="true">⌄</span>
       </button>
+      <span class="sr-only" [id]="id+'-selection'">{{selectionSummary}}</span>
       <div *ngIf="open" class="search-select-popover" [style.left.px]="position.left" [style.top.px]="position.top" [style.width.px]="position.width" [style.max-height.px]="position.height">
         <div class="select-search"><span aria-hidden="true">⌕</span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="'Search '+label" [placeholder]="'Search '+label.toLowerCase()+'…'" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
         <p *ngIf="loading" class="select-no-results" role="status">Loading options…</p>
@@ -43,13 +44,14 @@ export class SearchSelectComponent implements ControlValueAccessor {
   private touched: () => void = () => {};
   get selectedOptions(): SelectOption[] { return this.values.map(value => this.options.find(x => x.value === value) ?? { value, label: value }); }
   get selectedLabel():string{return this.selectedOptions.length ? this.selectedOptions[0].label : this.placeholder;}
+  get selectionSummary():string{return this.selectedOptions.length?this.selectedOptions.map(option=>option.label).join(', '):'Nothing selected';}
   get filtered(): SelectOption[] { const query = this.query.trim().toLocaleLowerCase(); const options=[...this.options,...this.selectedOptions.filter(x=>!this.options.some(option=>option.value===x.value))]; return options.filter(x => (x.label + ' ' + x.value + ' ' + (x.detail ?? '')).toLocaleLowerCase().includes(query)); }
   writeValue(value: string | string[] | null): void { this.values = Array.isArray(value) ? [...value] : value ? [value] : []; }
   registerOnChange(fn: (value: string | string[]) => void): void { this.change = fn; }
   registerOnTouched(fn: () => void): void { this.touched = fn; }
   setDisabledState(value: boolean): void { this.disabled = value; if (value) this.open = false; }
   toggle(): void { this.open ? this.close() : this.openMenu(); }
-  openMenu(event?: Event): void { event?.preventDefault(); if (this.disabled) return; const rect=this.host.nativeElement.getBoundingClientRect();const width=Math.min(Math.max(rect.width,260),window.innerWidth-24);const below=window.innerHeight-rect.bottom-12;const above=rect.top-12;const up=below<270&&above>below;const height=Math.min(this.multiple?370:310,up?above:below);this.position={left:Math.max(12,Math.min(rect.left,window.innerWidth-width-12)),top:up?rect.top-height-6:rect.bottom+6,width,height:Math.max(150,height)};this.open = true; this.query = ''; setTimeout(() => this.host.nativeElement.querySelector<HTMLInputElement>('input')?.focus()); }
+  openMenu(event?: Event): void { event?.preventDefault(); if (this.disabled) return; const rect=this.host.nativeElement.getBoundingClientRect();const width=Math.min(Math.max(rect.width,260),window.innerWidth-24);const below=window.innerHeight-rect.bottom-12;const above=rect.top-12;const up=below<270&&above>below;const height=Math.min(this.multiple?370:310,up?above:below);this.position={left:Math.max(12,Math.min(rect.left,window.innerWidth-width-12)),top:up?rect.top-height-6:rect.bottom+6,width,height:Math.max(150,height)};this.open = true; this.query = ''; this.search.emit(''); setTimeout(() => this.host.nativeElement.querySelector<HTMLInputElement>('input')?.focus()); }
   close(): void { this.open = false; this.touched(); this.host.nativeElement.querySelector<HTMLButtonElement>('.search-select-trigger')?.focus(); }
   choose(value: string): void {
     if(this.options.find(x=>x.value===value)?.disabled)return;
@@ -58,7 +60,16 @@ export class SearchSelectComponent implements ControlValueAccessor {
     if (!this.multiple) this.close();
   }
   clear(): void { this.values = this.multiple?this.values.filter(value=>this.options.find(x=>x.value===value)?.disabled):[]; this.change(this.multiple ? [...this.values] : ''); this.touched(); }
-  focusOption(event: Event, index: number): void { event.preventDefault(); const options = this.host.nativeElement.querySelectorAll<HTMLButtonElement>('.select-option'); if (index < 0) this.host.nativeElement.querySelector<HTMLInputElement>('input')?.focus(); else options[Math.min(index,options.length-1)]?.focus(); }
+  focusOption(event: Event, index: number): void {
+    event.preventDefault();
+    const options=this.host.nativeElement.querySelectorAll<HTMLButtonElement>('.select-option');
+    const direction=(event as KeyboardEvent).key==='ArrowUp'?-1:1;
+    let target=index;
+    while(target>=0&&target<options.length&&options[target].disabled)target+=direction;
+    if(target<0||!options.length)this.host.nativeElement.querySelector<HTMLInputElement>('input')?.focus();
+    else if(target<options.length)options[target].focus();
+  }
+
   @HostListener('document:pointerdown', ['$event']) outside(event: Event): void { if (this.open && !this.host.nativeElement.contains(event.target as Node)) { this.open = false; this.touched(); } }
   @HostListener('window:resize') resize():void{this.open=false;}
   @HostListener('window:scroll') scroll():void{this.open=false;}

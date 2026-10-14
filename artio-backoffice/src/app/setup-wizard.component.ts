@@ -2,7 +2,8 @@ import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { SearchSelectComponent, SelectOption } from './search-select.component';
+import { COUNTRY_OPTIONS, CURRENCY_OPTIONS, LANGUAGE_OPTIONS, LOCALE_OPTIONS, TIMEZONE_OPTIONS } from './commerce-options';
+import { SearchSelectComponent } from './search-select.component';
 import { firstValueFrom } from 'rxjs';
 
 type SetupDraft = { storeName: string; countryCode: string; currencyCode: string; locale: string; timezone: string; availableLanguages: string; externalBaseUrl: string; email: string; firstName: string; lastName: string };
@@ -25,12 +26,11 @@ export class SetupWizardComponent implements OnInit {
   confirmation = '';
   showPassword = false;
   draft: SetupDraft = { storeName: 'Artio Store', countryCode: 'CH', currencyCode: 'CHF', locale: 'de-CH', timezone: 'Europe/Zurich', availableLanguages: 'de,fr,it,en', externalBaseUrl: '', email: '', firstName: '', lastName: '' };
-  languageOptions: SelectOption[] = [{value:'de',label:'German',detail:'Deutsch · de'},{value:'fr',label:'French',detail:'Français · fr'},{value:'it',label:'Italian',detail:'Italiano · it'},{value:'en',label:'English',detail:'English · en'}];
-  localeOptions: SelectOption[] = [{value:'de-CH',label:'German · Switzerland',detail:'de-CH'},{value:'fr-CH',label:'French · Switzerland',detail:'fr-CH'},{value:'it-CH',label:'Italian · Switzerland',detail:'it-CH'},{value:'en-CH',label:'English · Switzerland',detail:'en-CH'}];
-  private countryNames = new Intl.DisplayNames(['en'], {type:'region'});
-  countryOptions: SelectOption[] = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ').map(value=>({value,label:this.countryNames.of(value) ?? value,detail:value})).sort((a,b)=>a.label.localeCompare(b.label));
-  currencyOptions: SelectOption[] = Intl.supportedValuesOf('currency').map(value=>({value,label:new Intl.DisplayNames(['en'],{type:'currency'}).of(value) ?? value,detail:value}));
-  timezoneOptions: SelectOption[] = Intl.supportedValuesOf('timeZone').map(value=>({value,label:value.replaceAll('_',' ')}));
+  languageOptions=LANGUAGE_OPTIONS;
+  localeOptions=LOCALE_OPTIONS;
+  countryOptions=COUNTRY_OPTIONS;
+  currencyOptions=CURRENCY_OPTIONS;
+  timezoneOptions=TIMEZONE_OPTIONS;
   private languageSelection=['de','fr','it','en'];
   get selectedLanguages():string[]{return this.languageSelection;}
   set selectedLanguages(value:string[]){this.languageSelection=value;this.draft.availableLanguages=value.join(',');}
@@ -52,7 +52,7 @@ export class SetupWizardComponent implements OnInit {
     try {
       if (this.step === 0) {
         const status = await firstValueFrom(this.http.post<{ required: boolean; draft: Partial<SetupDraft> }>('/api/v1/setup/resume', {}, { headers: this.headers() }));
-        if (!status.required) { this.step = 5; this.focus(); return; }
+        if (!status.required) { this.password=this.confirmation=this.token=''; this.step = 5; this.focus(); return; }
         // Resume only before editing; never replace current fields during final submission.
         this.draft = { ...this.draft, ...status.draft };
         this.languageSelection = this.languages;

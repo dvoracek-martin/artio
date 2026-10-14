@@ -116,6 +116,7 @@ export class InventoryAdminComponent {
   }
 
   receive(): void {
+    if(!this.draft.sellableId){this.error='Choose a product variant before receiving stock.';return;}
     if (!this.selectedWarehouse) return;
     this.apply('POST', this.draft.sellableId.trim(), { quantity: Number(this.draft.quantity), reason: this.draft.reason.trim() || null });
   }

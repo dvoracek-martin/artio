@@ -13,3 +13,7 @@ Each step validates before continuing. Back preserves current browser fields. Th
 `/api/v1/setup/status`, `/resume`, `/progress` and `/complete` remain unchanged. The first password is sent only to `/complete`, and token/password fields are cleared after success. The new frontend does not alter authentication, token rate limits, region provisioning or production MFA. Developer mode preserves the documented prefills; sign-in prefills are kept only when the user actually completed setup with the unchanged demo identity and password.
 
 Modern selection behavior and reusable components are described in [Backoffice interaction patterns](../backoffice-ux.md). Setup styles live in the Backoffice layout stylesheet, using Artio's existing brand tokens.
+
+## Verification (2026-10-15)
+
+The five-step flow was exercised in a browser against the real unchanged setup API and an isolated PostgreSQL database. Checks covered token verification, custom store identity, searchable language selection, desktop and 390px mobile layouts, non-secret progress saving, reload/resume, edits after resume, review, successful completion and sign-in with the created demo owner. Database inspection confirmed the selected store name/languages, one SUPERADMIN, a completion timestamp and an empty draft after launch. A saved draft contained no password field. Early step drafts remain browser-only until the complete non-secret progress payload can be saved.

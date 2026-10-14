@@ -1,0 +1,9 @@
+import type { SelectOption } from './search-select.component';
+
+const countryNames = new Intl.DisplayNames(['en'], {type:'region'});
+const currencyNames = new Intl.DisplayNames(['en'], {type:'currency'});
+export const LANGUAGE_OPTIONS:SelectOption[] = [{value:'de',label:'German',detail:'Deutsch · de'},{value:'fr',label:'French',detail:'Français · fr'},{value:'it',label:'Italian',detail:'Italiano · it'},{value:'en',label:'English',detail:'English · en'}];
+export const LOCALE_OPTIONS:SelectOption[] = [{value:'de-CH',label:'German · Switzerland',detail:'de-CH'},{value:'fr-CH',label:'French · Switzerland',detail:'fr-CH'},{value:'it-CH',label:'Italian · Switzerland',detail:'it-CH'},{value:'en-CH',label:'English · Switzerland',detail:'en-CH'}];
+export const COUNTRY_OPTIONS:SelectOption[] = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ').map(value=>({value,label:countryNames.of(value) ?? value,detail:value})).sort((a,b)=>a.label.localeCompare(b.label));
+export const CURRENCY_OPTIONS:SelectOption[] = Intl.supportedValuesOf('currency').map(value=>({value,label:currencyNames.of(value) ?? value,detail:value}));
+export const TIMEZONE_OPTIONS:SelectOption[] = Intl.supportedValuesOf('timeZone').map(value=>({value,label:value.replaceAll('_',' ')}));
