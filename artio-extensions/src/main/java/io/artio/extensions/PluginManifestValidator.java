@@ -30,29 +30,36 @@ public final class PluginManifestValidator {
         if (!ID.matcher(manifest.id()).matches()) errors.add("id must be a lowercase reverse-DNS style identifier");
         if (manifest.name().isBlank() || manifest.name().length() > 120) errors.add("name must contain 1 to 120 characters");
         if (manifest.vendor().isBlank() || manifest.vendor().length() > 120) errors.add("vendor must contain 1 to 120 characters");
-        if (!SEMVER.matcher(manifest.version()).matches()) errors.add("version must use semantic versioning");
+        if (!isSemver(manifest.version())) errors.add("version must use semantic versioning");
         if (manifest.description().length() > 2000) errors.add("description exceeds 2000 characters");
-        if (!SEMVER.matcher(manifest.minimumCoreVersion()).matches() || !SEMVER.matcher(manifest.maximumCoreVersion()).matches()) errors.add("Core compatibility bounds must use semantic versions");
+        if (!isSemver(manifest.minimumCoreVersion()) || !isSemver(manifest.maximumCoreVersion())) errors.add("Core compatibility bounds must use semantic versions");
         else if (compare(coreVersion, manifest.minimumCoreVersion()) < 0 || compare(coreVersion, manifest.maximumCoreVersion()) > 0) errors.add("plugin is incompatible with this Core version");
         validateImage(manifest.image(), "image", errors);
         validateGeographicAvailability(manifest.geographicAvailability(), errors);
         Set<String> permissions = new HashSet<>();
         for (String permission : manifest.permissions()) {
-            if (!PERMISSIONS.contains(permission)) errors.add("unsupported permission: " + permission);
+            if (permission == null || !PERMISSIONS.contains(permission)) errors.add("unsupported permission: " + permission);
             if (!permissions.add(permission)) errors.add("duplicate permission: " + permission);
         }
         Set<String> points = new HashSet<>();
         for (String point : manifest.extensionPoints()) {
-            if (!EXTENSION_POINTS.contains(point)) errors.add("unsupported extension point: " + point);
+            if (point == null || !EXTENSION_POINTS.contains(point)) errors.add("unsupported extension point: " + point);
             if (!points.add(point)) errors.add("duplicate extension point: " + point);
         }
         Set<String> dependencies = new HashSet<>();
         for (var dependency : manifest.dependencies()) {
-            if (!ID.matcher(dependency.id()).matches()) errors.add("invalid dependency id: " + dependency.id());
-            if (!dependencies.add(dependency.id())) errors.add("duplicate dependency: " + dependency.id());
-            if (dependency.id().equals(manifest.id())) errors.add("plugin cannot depend on itself");
-            if (!installedPluginIds.contains(dependency.id())) errors.add("missing dependency: " + dependency.id());
-            if (!SEMVER.matcher(dependency.minimumVersion()).matches() || !SEMVER.matcher(dependency.maximumVersion()).matches()) errors.add("invalid dependency version range: " + dependency.id());
+            if (dependency == null) { errors.add("dependency cannot be null"); continue; }
+            String dependencyId = dependency.id();
+            boolean validId = dependencyId != null && ID.matcher(dependencyId).matches();
+            if (!validId) errors.add("invalid dependency id: " + dependencyId);
+            if (!dependencies.add(dependencyId)) errors.add("duplicate dependency: " + dependencyId);
+            if (manifest.id().equals(dependencyId)) errors.add("plugin cannot depend on itself");
+            if (validId && !installedPluginIds.contains(dependencyId)) errors.add("missing dependency: " + dependencyId);
+            if (!isSemver(dependency.minimumVersion()) || !isSemver(dependency.maximumVersion())) {
+                errors.add("invalid dependency version range: " + dependencyId);
+            } else if (compare(dependency.minimumVersion(), dependency.maximumVersion()) > 0) {
+                errors.add("inverted dependency version range: " + dependencyId);
+            }
         }
         if (manifest.configuration().size() > 100) errors.add("configuration schema exceeds 100 fields");
         manifest.configuration().forEach((key, field) -> validateField(key, field, errors));
@@ -112,7 +119,7 @@ public final class PluginManifestValidator {
 
     private static void validateField(String key, PluginManifest.ConfigField field, List<String> errors) {
         if (!key.matches("[a-zA-Z][a-zA-Z0-9_.-]{0,63}")) errors.add("invalid configuration field key: " + key);
-        if (!FIELD_TYPES.contains(field.type())) errors.add("unsupported type for configuration field: " + key);
+        if (field.type() == null || !FIELD_TYPES.contains(field.type())) errors.add("unsupported type for configuration field: " + key);
         if (field.label() == null || field.label().isBlank() || field.label().length() > 120) errors.add("invalid label for configuration field: " + key);
         if (field.description() != null && field.description().length() > 500) errors.add("description too long for configuration field: " + key);
         if (field.secret() != "secret".equals(field.type())) errors.add("secret flag/type mismatch for configuration field: " + key);
@@ -121,6 +128,10 @@ public final class PluginManifestValidator {
         if (field.minimum() != null && field.maximum() != null && field.minimum() > field.maximum()) errors.add("inverted numeric range for configuration field: " + key);
         if ("enum".equals(field.type()) && (field.options().isEmpty() || field.options().size() > 100 || field.options().stream().anyMatch(String::isBlank))) errors.add("enum requires 1 to 100 non-empty options: " + key);
         if (field.format() != null && !Set.of("email", "uri", "hostname").contains(field.format())) errors.add("unsupported format for configuration field: " + key);
+    }
+
+    private static boolean isSemver(String version) {
+        return version != null && SEMVER.matcher(version).matches();
     }
 
     private static void validatePath(String path, String field, List<String> errors) {

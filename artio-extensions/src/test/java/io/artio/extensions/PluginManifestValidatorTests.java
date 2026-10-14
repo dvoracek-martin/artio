@@ -99,6 +99,33 @@ class PluginManifestValidatorTests {
                 .contains("plugin cannot depend on itself", "duplicate dependency: payments.stripe", "duplicate extension point: payment.provider.v1");
     }
 
+    @Test
+    void reportsMalformedNullableFieldsInsteadOfThrowing() {
+        var manifest = validManifest();
+        var malformed = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), List.of(new PluginManifest.Dependency(null, null, "1.0.0")), manifest.permissions(),
+                Map.of("apiKey", new PluginManifest.ConfigField(null, true, true, "API key", null, null,
+                        List.of(), null, null, null, null)), manifest.extensionPoints(), manifest.healthPath(),
+                manifest.diagnosticsPath());
+
+        assertThat(validator.validate(malformed, "0.1.0", Set.of()))
+                .contains("invalid dependency id: null", "invalid dependency version range: null",
+                        "unsupported type for configuration field: apiKey");
+    }
+
+    @Test
+    void rejectsInvertedDependencyVersionRange() {
+        var manifest = validManifest();
+        var malformed = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), List.of(new PluginManifest.Dependency("common.logger", "2.0.0", "1.0.0")),
+                manifest.permissions(), manifest.configuration(), manifest.extensionPoints(), manifest.healthPath(),
+                manifest.diagnosticsPath());
+        assertThat(validator.validate(malformed, "0.1.0", Set.of("common.logger")))
+                .contains("inverted dependency version range: common.logger");
+    }
+
     private static PluginManifest validManifest() {
         return new PluginManifest("1", "payments.stripe", "Stripe", "Artio", "1.0.0", "Payment adapter",
                 "0.1.0", "1.0.0", "ghcr.io/artio/stripe@sha256:" + "a".repeat(64), List.of(), List.of("payment.process"),
