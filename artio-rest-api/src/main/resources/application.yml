@@ -103,6 +103,9 @@ artio:
     extension-plugin-id: ${ARTIO_PAYMENTS_EXTENSION_PLUGIN_ID:}
     stripe-secret-key: ${ARTIO_STRIPE_SECRET_KEY:}
     stripe-webhook-secret: ${ARTIO_STRIPE_WEBHOOK_SECRET:}
+  shipping:
+    provider: ${ARTIO_SHIPPING_PROVIDER:static}
+    extension-plugin-id: ${ARTIO_SHIPPING_EXTENSION_PLUGIN_ID:}
   storefront-url: ${ARTIO_STOREFRONT_URL:http://localhost:4200}
   checkout:
     shipping-cost: ${ARTIO_CHECKOUT_SHIPPING_COST:0.00}

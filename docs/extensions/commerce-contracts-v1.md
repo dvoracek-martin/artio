@@ -10,7 +10,7 @@ The Core retains inventory reservation and compensation guarantees. A provider r
 
 ## Shipping provider
 
-`ShippingProvider` defines method discovery, quotes, shipment creation and tracking, with explicit geographic coverage and capability flags. A carrier may implement quotes without label creation, or tracking without shipment creation. Country availability is discovery metadata and does not prevent a merchant from configuring another compatible market.
+`ShippingProvider` defines method discovery, quotes, shipment creation and tracking, with explicit geographic coverage and capability flags. Set `ARTIO_SHIPPING_PROVIDER=extension` and `ARTIO_SHIPPING_EXTENSION_PLUGIN_ID` to load an enabled `shipping.provider.v1` plugin. The adapter maps `capabilities`, `methods`, `quote`, `createShipment` and `track`; quote/method operations require `shipping.quote`, and shipment/tracking operations require `shipping.label`. Shipment creation requires a caller-owned idempotency key. A carrier may implement quotes without label creation, or tracking without shipment creation. Country availability is discovery metadata and does not prevent a merchant from configuring another compatible market. The current checkout still uses its configured flat shipping cost, and admin shipment/label workflows have not yet been connected to this adapter.
 
 ## Notification transport
 
