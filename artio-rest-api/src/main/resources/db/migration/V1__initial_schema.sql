@@ -193,6 +193,38 @@ CREATE TABLE carts (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(
 CREATE TABLE cart_items (cart_id UUID NOT NULL REFERENCES carts(id) ON DELETE CASCADE, variant_id UUID NOT NULL, quantity INTEGER NOT NULL CHECK (quantity > 0), unit_price NUMERIC(19,4) NOT NULL CHECK (unit_price >= 0), currency CHAR(3) NOT NULL, PRIMARY KEY (cart_id, variant_id));
 CREATE TABLE orders (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), status VARCHAR(32) NOT NULL, subtotal NUMERIC(19,4) NOT NULL, tax NUMERIC(19,4) NOT NULL, shipping NUMERIC(19,4) NOT NULL, total NUMERIC(19,4) NOT NULL, currency CHAR(3) NOT NULL, shipping_address TEXT NOT NULL, billing_address TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, shipping_method_id VARCHAR(120), shipping_parcel_weight_kg NUMERIC(12,3), shipment_reference VARCHAR(255), shipping_label_url TEXT);
 CREATE TABLE order_items (id UUID PRIMARY KEY, order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE, variant_id UUID NOT NULL, quantity INTEGER NOT NULL CHECK (quantity > 0), unit_price NUMERIC(19,4) NOT NULL, currency CHAR(3) NOT NULL);
+CREATE TABLE order_returns (
+  id UUID PRIMARY KEY,
+  order_id UUID NOT NULL REFERENCES orders(id),
+  customer_id UUID NOT NULL REFERENCES users(id),
+  status VARCHAR(20) NOT NULL CHECK (status IN ('REQUESTED','APPROVED','REJECTED','COMPLETED')),
+  reason VARCHAR(1000) NOT NULL,
+  customer_note VARCHAR(2000),
+  staff_note VARCHAR(2000),
+  idempotency_key VARCHAR(128) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reviewed_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  UNIQUE (customer_id, idempotency_key)
+);
+CREATE INDEX idx_order_returns_order ON order_returns(order_id, created_at DESC);
+CREATE TABLE order_return_items (
+  id UUID PRIMARY KEY,
+  return_id UUID NOT NULL REFERENCES order_returns(id) ON DELETE CASCADE,
+  order_item_id UUID NOT NULL REFERENCES order_items(id),
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  restock_warehouse_id UUID REFERENCES inventory_warehouse(id),
+  restocked_at TIMESTAMPTZ,
+  UNIQUE (return_id, order_item_id)
+);
+CREATE TABLE order_return_events (
+  id UUID PRIMARY KEY,
+  return_id UUID NOT NULL REFERENCES order_returns(id) ON DELETE CASCADE,
+  actor_id UUID REFERENCES users(id),
+  event_type VARCHAR(32) NOT NULL,
+  note VARCHAR(2000),
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE INDEX idx_orders_user ON orders(user_id);
 CREATE INDEX idx_orders_created ON orders(created_at DESC);
 CREATE INDEX idx_carts_user ON carts(user_id);
