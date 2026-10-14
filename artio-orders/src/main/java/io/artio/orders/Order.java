@@ -68,10 +68,15 @@ public final class Order extends Aggregate<OrderId> {
 
     public static Order checkout(UUID userId, List<OrderLineItem> items, String shippingAddress, String billingAddress,
                                  Money subtotal, Money tax, Money shipping) {
+        return checkout(UUID.randomUUID(), userId, items, shippingAddress, billingAddress, subtotal, tax, shipping);
+    }
+
+    public static Order checkout(UUID orderId, UUID userId, List<OrderLineItem> items, String shippingAddress, String billingAddress,
+                                 Money subtotal, Money tax, Money shipping) {
         if (items.isEmpty()) throw new IllegalArgumentException("Cart is empty");
         if (shippingAddress == null || shippingAddress.isBlank()) throw new IllegalArgumentException("Shipping address is required");
         if (!subtotal.currency().equals(tax.currency()) || !subtotal.currency().equals(shipping.currency())) throw new IllegalArgumentException("Order currency mismatch");
-        var order = new Order(new OrderId(UUID.randomUUID()), userId, items, subtotal, tax, shipping, shippingAddress,
+        var order = new Order(new OrderId(orderId), userId, items, subtotal, tax, shipping, shippingAddress,
                 billingAddress == null ? shippingAddress : billingAddress, OrderStatus.PENDING, Instant.now());
         order.recordEvent(new OrderCreated(order.getId(), order.userId));
         return order;

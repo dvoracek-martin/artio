@@ -75,7 +75,9 @@ public class ExtensionShippingProvider implements ShippingProvider {
     @Override public ShipmentResult createShipment(ShipmentRequest request) {
         if (request.idempotencyKey() == null || request.idempotencyKey().isBlank()) throw new IllegalArgumentException("Shipment idempotency key is required");
         ShipmentResult result = read(invoke("createShipment", request, request.idempotencyKey()), ShipmentResult.class);
-        if (result.shipmentReference() == null || result.shipmentReference().isBlank()) throw protocol("Shipping plugin omitted the shipment reference");
+        if (result.shipmentReference() == null || result.shipmentReference().isBlank() || result.shipmentReference().length() > 255
+                || result.trackingReference() != null && result.trackingReference().length() > 255
+                || result.labelUrl() != null && result.labelUrl().length() > 2_100_000) throw protocol("Shipping plugin returned an invalid shipment reference, tracking reference or label");
         return result;
     }
 

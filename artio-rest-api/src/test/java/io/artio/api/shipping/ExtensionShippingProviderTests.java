@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.extensions.ManagedExtensionInvoker;
 import io.artio.extensions.commerce.ShippingProvider.Address;
 import io.artio.extensions.commerce.ShippingProvider.ShipmentRequest;
+import io.artio.extensions.commerce.ShippingProvider.ShippingRequest;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -41,5 +42,20 @@ class ExtensionShippingProviderTests {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> provider.createShipment(request))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("idempotency");
+    }
+
+    @Test
+    void mapsAndValidatesProviderQuote() {
+        var request=new ShippingRequest("order-123","swiss-post-pri",new Address("CH","8000","Zürich","Main 1",null,"Ada"),
+                new BigDecimal("1.250"),new BigDecimal("80.00"),"CHF");
+        String stableKey=UUID.nameUUIDFromBytes("artio:quote:quote:order-123:swiss-post-pri".getBytes(StandardCharsets.UTF_8)).toString();
+        when(invoker.invoke(eq("shipping.swiss-post"),eq("shipping.provider.v1"),eq("quote"),eq(stableKey),eq(request)))
+                .thenReturn(new ObjectMapper().valueToTree(new io.artio.extensions.commerce.ShippingProvider.ShippingQuote("swiss-post-pri",new BigDecimal("9.50"),"CHF","Merchant configured")));
+
+        var quote=provider.quote(request);
+
+        assertThat(quote.amount()).isEqualByComparingTo("9.50");
+        assertThat(quote.currency()).isEqualTo("CHF");
+        verify(invoker).invoke("shipping.swiss-post","shipping.provider.v1","quote",stableKey,request);
     }
 }

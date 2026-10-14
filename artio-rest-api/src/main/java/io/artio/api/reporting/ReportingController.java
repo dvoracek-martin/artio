@@ -18,8 +18,8 @@ public class ReportingController {
 
     @GetMapping("/orders")
     public List<OrderSummary> orders() {
-        return jdbc.query("SELECT id,user_id,status,total,currency,created_at,tracking_number FROM orders ORDER BY created_at DESC LIMIT 100",
-                (rs,n) -> new OrderSummary(rs.getObject("id", java.util.UUID.class), rs.getObject("user_id", java.util.UUID.class), rs.getString("status"), rs.getBigDecimal("total"), rs.getString("currency").trim(), rs.getTimestamp("created_at").toInstant(),rs.getString("tracking_number")));
+        return jdbc.query("SELECT id,user_id,status,total,currency,created_at,tracking_number,shipping_method_id,shipping_label_url FROM orders ORDER BY created_at DESC LIMIT 100",
+                (rs,n) -> new OrderSummary(rs.getObject("id", java.util.UUID.class), rs.getObject("user_id", java.util.UUID.class), rs.getString("status"), rs.getBigDecimal("total"), rs.getString("currency").trim(), rs.getTimestamp("created_at").toInstant(),rs.getString("tracking_number"),rs.getString("shipping_method_id"),rs.getString("shipping_label_url")!=null));
     }
 
     @GetMapping("/reports")
@@ -34,7 +34,7 @@ public class ReportingController {
         BigDecimal clv = jdbc.queryForObject("SELECT COALESCE(AVG(lifetime),0) FROM (SELECT user_id,SUM(total) lifetime FROM orders WHERE status NOT IN ('CANCELLED','RETURNED') GROUP BY user_id) customer_values", BigDecimal.class);
         return new ReportSummary(since, revenue, orderCount == null ? 0 : orderCount, activeCustomers == null ? 0 : activeCustomers, clv, byStatus, topVariants);
     }
-    public record OrderSummary(java.util.UUID id, java.util.UUID userId, String status, BigDecimal total, String currency, Instant createdAt,String trackingNumber) { }
+    public record OrderSummary(java.util.UUID id, java.util.UUID userId, String status, BigDecimal total, String currency, Instant createdAt,String trackingNumber,String shippingMethodId,boolean shippingLabelAvailable) { }
     public record StatusCount(String status, long orders) { }
     public record TopVariant(java.util.UUID variantId, BigDecimal unitsSold, BigDecimal grossSales) { }
     public record ReportSummary(Instant since, BigDecimal revenue, long orders, long activeCustomers, BigDecimal averageCustomerLifetimeValue, List<StatusCount> ordersByStatus, List<TopVariant> topVariants) { }

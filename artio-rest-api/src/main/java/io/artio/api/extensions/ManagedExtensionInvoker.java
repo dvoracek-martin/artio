@@ -86,7 +86,7 @@ public class ManagedExtensionInvoker {
             case "catalog.search.v1", "catalog.enrichment.v1" -> "catalog.read";
             case "payment.provider.v1" -> "payment.process";
             case "notification.channel.v1" -> "notifications.send";
-            case "shipping.provider.v1" -> Set.of("quote", "methods").contains(operation)
+            case "shipping.provider.v1" -> Set.of("capabilities", "methods", "quote").contains(operation)
                     ? "shipping.quote" : "shipping.label";
             default -> throw new IllegalArgumentException("Unsupported plugin extension point");
         };

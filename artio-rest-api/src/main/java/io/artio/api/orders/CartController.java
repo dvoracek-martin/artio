@@ -15,6 +15,7 @@ import io.artio.kernel.Quantity;
 import io.artio.orders.Order;
 import io.artio.orders.OrderLineItem;
 import io.artio.extensions.commerce.PaymentProvider;
+import io.artio.extensions.commerce.ShippingProvider;
 import java.math.BigDecimal;
 import java.util.Currency;
 import java.util.List;
@@ -39,7 +40,48 @@ public class CartController {
     private final BigDecimal shippingCost;
     private final String stripeKey;
     private final ObjectProvider<PaymentProvider> paymentProvider;
-    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey,ObjectProvider<PaymentProvider> paymentProvider) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey;this.paymentProvider=paymentProvider; }
+    private final ObjectProvider<ShippingProvider> shippingProvider;
+    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey,ObjectProvider<PaymentProvider> paymentProvider,ObjectProvider<ShippingProvider> shippingProvider) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey;this.paymentProvider=paymentProvider;this.shippingProvider=shippingProvider; }
+
+    @GetMapping("/shipping-methods")
+    public List<ShippingMethodView> shippingMethods(@RequestParam String country, @RequestParam(required=false) String postalCode,
+            @RequestParam(required=false) String locality, @RequestParam(required=false) String addressLine1, @RequestParam(required=false) String recipientName) {
+        Market market = marketForCountry(country);
+        var destination = new ShippingProvider.Address(country.toUpperCase(java.util.Locale.ROOT), postalCode, locality,
+                addressLine1, null, recipientName);
+        ShippingProvider provider = shippingProvider.getIfAvailable();
+        if (provider == null) return List.of(new ShippingMethodView("standard", "Standard delivery", null, shippingCost, market.currency()));
+        if (blank(postalCode) || blank(locality) || blank(addressLine1) || blank(recipientName)) return List.of();
+        var capabilities = provider.capabilities();
+        if (!capabilities.countries().contains(destination.countryCode())) return List.of();
+        return provider.methods(destination, market.currency()).stream()
+                .map(method -> new ShippingMethodView(method.methodId(), method.name(), method.estimatedDelivery(), null, market.currency())).toList();
+    }
+
+    @PostMapping("/shipping-quote")
+    public ShippingQuoteView shippingQuote(@RequestBody ShippingQuoteRequest request, JwtAuthenticationToken auth) {
+        if (request == null || request.destination() == null || request.methodId() == null || request.methodId().isBlank()) throw new IllegalArgumentException("Shipping method and destination are required");
+        ShippingProvider provider = shippingProvider.getIfAvailable();
+        String country=request.destination().countryCode()==null?null:request.destination().countryCode().toUpperCase(java.util.Locale.ROOT);
+        var destination=new ShippingProvider.Address(country,request.destination().postalCode(),request.destination().locality(),request.destination().addressLine1(),request.destination().addressLine2(),request.destination().recipientName());
+        Market market = marketForCountry(country);
+        if (provider == null) {
+            if (!"standard".equals(request.methodId())) throw new IllegalArgumentException("Unknown shipping method");
+            return new ShippingQuoteView("standard", shippingCost, market.currency(), null);
+        }
+        if(blank(destination.postalCode())||blank(destination.locality())||blank(destination.addressLine1())||blank(destination.recipientName()))throw new IllegalArgumentException("Recipient and complete delivery address are required");
+        if (!provider.capabilities().countries().contains(country)) throw new IllegalArgumentException("Shipping provider does not serve this country");
+        var method = provider.methods(destination, market.currency()).stream()
+                .filter(candidate -> candidate.methodId().equals(request.methodId())).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown shipping method"));
+        BigDecimal weight = validWeight(request.parcelWeightKg());
+        BigDecimal declaredValue = request.declaredValue() == null ? BigDecimal.ZERO : request.declaredValue();
+        if (declaredValue.signum() < 0) throw new IllegalArgumentException("Declared value cannot be negative");
+        var quote = provider.quote(new ShippingProvider.ShippingRequest("cart:" + userId(auth), method.methodId(), destination,
+                weight, declaredValue, market.currency()));
+        validateShippingQuote(quote, method.methodId(), market.currency());
+        return new ShippingQuoteView(quote.methodId(), quote.amount(), quote.currency(), quote.estimatedDelivery());
+    }
 
     @GetMapping
     public CartView get(JwtAuthenticationToken auth) {
@@ -120,11 +162,40 @@ public class CartController {
             }
         }
         if(subtotal.signum()<0)throw new IllegalArgumentException("Order total must not be negative");
-        Money shipping=new Money(shippingCost,currency);
-        var order=Order.checkout(userId,orderItems,request.shippingAddress(),request.billingAddress(),new Money(subtotal,currency),new Money(tax,currency),shipping);
-        Map<String,Object> taxSnapshot=Map.of("schemaVersion",2,"calculatedAt",Instant.now(),"shippingCountry",request.shippingCountry().toUpperCase(java.util.Locale.ROOT),"market",market.market(),"jurisdiction",market.jurisdiction(),"currency",currency.getCurrencyCode(),"lines",List.copyOf(taxLines),"bundles",List.copyOf(bundleSnapshots));
+        ShippingProvider provider = shippingProvider.getIfAvailable();
+        BigDecimal shippingAmount = shippingCost;
+        String shippingMethodId = null;
+        BigDecimal parcelWeight = null;
+        String persistedShippingAddress = request.shippingAddress();
+        String persistedBillingAddress=request.billingAddress();
+        if (provider != null) {
+            if (request.shippingMethodId() == null || request.shippingDetails() == null) throw new IllegalArgumentException("Choose a shipping method and provide a structured delivery address");
+            var destination = request.shippingDetails().toAddress(request.shippingCountry());
+            if (!provider.capabilities().countries().contains(destination.countryCode())) throw new IllegalArgumentException("Shipping provider does not serve this country");
+            var method = provider.methods(destination, currency.getCurrencyCode()).stream()
+                    .filter(candidate -> candidate.methodId().equals(request.shippingMethodId())).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Selected shipping method is no longer available"));
+            parcelWeight = validWeight(request.parcelWeightKg());
+            shippingMethodId = method.methodId();
+            try { persistedShippingAddress = mapper.writeValueAsString(destination); }
+            catch (com.fasterxml.jackson.core.JsonProcessingException failure) { throw new IllegalStateException("Shipping address could not be stored", failure); }
+            if(persistedBillingAddress==null||persistedBillingAddress.isBlank())persistedBillingAddress=String.join(", ",destination.recipientName(),destination.addressLine1(),destination.postalCode(),destination.locality(),destination.countryCode());
+        }
+        UUID orderId = UUID.randomUUID();
+        ShippingProvider.ShippingQuote providerQuote = null;
+        if (provider != null) {
+            var destination = request.shippingDetails().toAddress(request.shippingCountry());
+            providerQuote = provider.quote(new ShippingProvider.ShippingRequest(orderId.toString(), shippingMethodId, destination,
+                    parcelWeight, subtotal.add(tax), currency.getCurrencyCode()));
+            validateShippingQuote(providerQuote, shippingMethodId, currency.getCurrencyCode());
+            shippingAmount = providerQuote.amount();
+        }
+        Money shipping=new Money(shippingAmount,currency);
+        var order=Order.checkout(orderId,userId,orderItems,persistedShippingAddress,persistedBillingAddress,new Money(subtotal,currency),new Money(tax,currency),shipping);
+        Map<String,Object> taxSnapshot=new HashMap<>();taxSnapshot.put("schemaVersion",2);taxSnapshot.put("calculatedAt",Instant.now());taxSnapshot.put("shippingCountry",request.shippingCountry().toUpperCase(java.util.Locale.ROOT));taxSnapshot.put("market",market.market());taxSnapshot.put("jurisdiction",market.jurisdiction());taxSnapshot.put("currency",currency.getCurrencyCode());taxSnapshot.put("lines",List.copyOf(taxLines));taxSnapshot.put("bundles",List.copyOf(bundleSnapshots));
+        if(providerQuote!=null){taxSnapshot.put("shippingMethodId",providerQuote.methodId());taxSnapshot.put("shippingAmount",providerQuote.amount());taxSnapshot.put("shippingCurrency",providerQuote.currency());taxSnapshot.put("shippingEstimatedDelivery",providerQuote.estimatedDelivery());taxSnapshot.put("shippingParcelWeightKg",parcelWeight);}
         String taxSnapshotJson;try{taxSnapshotJson=mapper.writeValueAsString(taxSnapshot);}catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Order tax snapshot could not be serialized",e);}
-        var inserted=jdbc.query("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?) ON CONFLICT(user_id,idempotency_key) DO NOTHING RETURNING id",(rs,n)->rs.getObject(1,UUID.class),order.getId().value(),userId,order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),order.shippingAddress(),request.billingAddress()==null?request.shippingAddress():request.billingAddress(),java.sql.Timestamp.from(order.createdAt()),request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshotJson,idempotencyKey);
+        var inserted=jdbc.query("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key,shipping_method_id,shipping_parcel_weight_kg) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?) ON CONFLICT(user_id,idempotency_key) DO NOTHING RETURNING id",(rs,n)->rs.getObject(1,UUID.class),order.getId().value(),userId,order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),order.shippingAddress(),persistedBillingAddress==null?persistedShippingAddress:persistedBillingAddress,java.sql.Timestamp.from(order.createdAt()),request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshotJson,idempotencyKey,shippingMethodId,parcelWeight);
         if(inserted.isEmpty()){OrderView winner=findByIdempotencyKey(userId,idempotencyKey);if(winner==null)throw new IllegalStateException("Idempotent order was not visible after insert conflict");return org.springframework.http.ResponseEntity.ok(winner);}
         order.items().forEach(i->jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,?,?,?,?)",UUID.randomUUID(),order.getId().value(),i.variantId(),i.quantity().value(),i.unitPrice().amount(),i.unitPrice().currency().getCurrencyCode(),i.bundleId()));
         var warehouses=inventory.warehouses().stream().filter(InventoryApplicationService.WarehouseView::active).toList();
@@ -147,6 +218,18 @@ public class CartController {
         return jdbc.query("SELECT id,status,subtotal,tax,shipping,total,currency,tracking_number,shipping_country,market,tax_jurisdiction,tax_snapshot FROM orders WHERE user_id=? ORDER BY created_at DESC", (rs,n) -> {try{return new OrderView(UUID.fromString(rs.getString(1)),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getBigDecimal(5),rs.getBigDecimal(6),rs.getString(7).trim(),rs.getString(8),rs.getString(9).trim(),rs.getString(10),rs.getString(11),mapper.readValue(rs.getString(12),new TypeReference<Map<String,Object>>(){}));}catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Stored order tax snapshot is invalid",e);}}, userId(auth));
     }
 
+    private static BigDecimal validWeight(BigDecimal weight) {
+        if (weight == null || weight.signum() <= 0 || weight.compareTo(new BigDecimal("1000")) > 0 || weight.stripTrailingZeros().scale() > 3)
+            throw new IllegalArgumentException("Parcel weight must be greater than 0 and no more than 1000 kg");
+        return weight.setScale(3, RoundingMode.UNNECESSARY);
+    }
+    private static boolean blank(String value){return value==null||value.isBlank();}
+    private static void validateShippingQuote(ShippingProvider.ShippingQuote quote, String method, String currency) {
+        if (quote == null || !method.equals(quote.methodId()) || quote.amount() == null || quote.amount().signum() < 0
+                || quote.amount().compareTo(new BigDecimal("1000000")) > 0 || quote.amount().precision() > 15
+                || quote.amount().stripTrailingZeros().scale() > 4 || !currency.equals(quote.currency())) throw new IllegalArgumentException("Shipping provider returned a quote with invalid method, amount or currency");
+    }
+
     private OrderView findByIdempotencyKey(UUID userId,String key){var matches=jdbc.query("SELECT id,status,subtotal,tax,shipping,total,currency,tracking_number,shipping_country,market,tax_jurisdiction,tax_snapshot FROM orders WHERE user_id=? AND idempotency_key=?",(rs,n)->{try{return new OrderView(rs.getObject("id",UUID.class),rs.getString("status"),rs.getBigDecimal("subtotal"),rs.getBigDecimal("tax"),rs.getBigDecimal("shipping"),rs.getBigDecimal("total"),rs.getString("currency").trim(),rs.getString("tracking_number"),rs.getString("shipping_country").trim(),rs.getString("market"),rs.getString("tax_jurisdiction"),mapper.readValue(rs.getString("tax_snapshot"),new TypeReference<Map<String,Object>>(){}));}catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Stored order tax snapshot is invalid",e);}},userId,key);return matches.stream().findFirst().orElse(null);}
 
     private UUID ensureCart(UUID userId) {
@@ -164,11 +247,23 @@ public class CartController {
 
     public record AddItemRequest(UUID variantId, BigDecimal quantity, String market, String channel, String jurisdiction) { }
     public record AddBundleRequest(UUID bundleId,Map<String,Set<UUID>> selectedOptions,BigDecimal bundleQuantity,String market,String channel,String jurisdiction){}
-    public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale) {
+    public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale,
+                                  String shippingMethodId, ShippingAddressDetails shippingDetails, BigDecimal parcelWeightKg) {
         public CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry) {
-            this(shippingAddress, billingAddress, shippingCountry, "en");
+            this(shippingAddress, billingAddress, shippingCountry, "en", null, null, null);
+        }
+        public CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale) { this(shippingAddress,billingAddress,shippingCountry,locale,null,null,null); }
+    }
+    public record ShippingAddressDetails(String recipientName, String postalCode, String locality, String addressLine1, String addressLine2) {
+        ShippingProvider.Address toAddress(String country) {
+            if (recipientName == null || recipientName.isBlank() || postalCode == null || postalCode.isBlank() || locality == null || locality.isBlank()
+                    || addressLine1 == null || addressLine1.isBlank()) throw new IllegalArgumentException("Recipient, postal code, locality and street address are required");
+            return new ShippingProvider.Address(country.toUpperCase(java.util.Locale.ROOT),postalCode,locality,addressLine1,addressLine2,recipientName);
         }
     }
+    public record ShippingQuoteRequest(String methodId, ShippingProvider.Address destination, BigDecimal parcelWeightKg, BigDecimal declaredValue) { }
+    public record ShippingMethodView(String methodId,String name,String estimatedDelivery,BigDecimal flatAmount,String currency) { }
+    public record ShippingQuoteView(String methodId,BigDecimal amount,String currency,String estimatedDelivery) { }
     public record ItemView(UUID variantId, BigDecimal quantity, BigDecimal unitPrice, String currency,UUID bundleId) { }
     public record CartView(UUID cartId, List<ItemView> items) { }
     public record OrderView(UUID orderId, String status, BigDecimal subtotal, BigDecimal tax, BigDecimal shipping, BigDecimal total, String currency,String trackingNumber,String shippingCountry,String market,String taxJurisdiction,Map<String,Object> taxSnapshot) { }
