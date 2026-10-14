@@ -1043,6 +1043,22 @@ class CatalogApiIntegrationTests {
                 .isEqualTo("Retry body");
     }
 
+    @Test
+    void notificationOutboxRemainsDurableWhenNoPluginIsSelected() {
+        UUID deliveryId = UUID.randomUUID();
+        jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body) VALUES (?,?,?,?,?,?)",
+                deliveryId, "integration-email-unconfigured:" + deliveryId, adminUserId, UUID.randomUUID(), "Queued order", "Queued body");
+        org.springframework.beans.factory.ObjectProvider<io.artio.extensions.commerce.NotificationTransport> provider =
+                org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(null);
+
+        new io.artio.api.notifications.OrderNotificationHandler(jdbc, provider, true).deliverPendingBatch();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT attempts FROM notification_delivery_outbox WHERE id=?", Integer.class, deliveryId)).isZero();
+        assertThat(jdbc.queryForObject("SELECT subject || body FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("Queued orderQueued body");
+    }
+
     private io.artio.api.orders.CartController.OrderView readOrder(String json) {
         try { return mapper.readValue(json, io.artio.api.orders.CartController.OrderView.class); }
         catch (Exception e) { throw new AssertionError("Could not decode checkout response: " + json, e); }
