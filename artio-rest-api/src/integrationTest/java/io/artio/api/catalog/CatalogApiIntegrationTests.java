@@ -591,6 +591,32 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void lowStockPoliciesTrackAvailableStockAndCanBeDisabled() {
+        var warehouse = adminExchange("/api/v1/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest("LOW-01", "Low stock warehouse", "CH-ZH"),
+                io.artio.api.inventory.InventoryApplicationService.WarehouseView.class);
+        UUID warehouseId = warehouse.getBody().id();
+        UUID sellableId = UUID.randomUUID();
+        adminExchange("/api/v1/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(new BigDecimal("5")),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouseId, sellableId);
+        adminExchange("/api/v1/warehouses/{warehouseId}/stock/{sellableId}/low-stock-policy", HttpMethod.PUT,
+                new io.artio.api.inventory.InventoryApplicationService.LowStockPolicyRequest(new BigDecimal("4"), true),
+                io.artio.api.inventory.InventoryApplicationService.LowStockPolicyView.class, warehouseId, sellableId);
+        assertThat(inventory.lowStock()).noneMatch(alert -> alert.sellableId().equals(sellableId));
+        inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(UUID.randomUUID(), warehouseId, sellableId, new BigDecimal("2")));
+        assertThat(inventory.lowStock()).anySatisfy(alert -> {
+            assertThat(alert.sellableId()).isEqualTo(sellableId);
+            assertThat(alert.available()).isEqualByComparingTo("3");
+            assertThat(alert.threshold()).isEqualByComparingTo("4");
+        });
+        adminExchange("/api/v1/warehouses/{warehouseId}/stock/{sellableId}/low-stock-policy", HttpMethod.PUT,
+                new io.artio.api.inventory.InventoryApplicationService.LowStockPolicyRequest(new BigDecimal("4"), false),
+                io.artio.api.inventory.InventoryApplicationService.LowStockPolicyView.class, warehouseId, sellableId);
+        assertThat(inventory.lowStock()).noneMatch(alert -> alert.sellableId().equals(sellableId));
+    }
+
+    @Test
     void rejectedCheckoutCompensationCancelsOrderAndReleasesStockAtomically() {
         UUID orderId = UUID.randomUUID();
         UUID sellableId = UUID.randomUUID();

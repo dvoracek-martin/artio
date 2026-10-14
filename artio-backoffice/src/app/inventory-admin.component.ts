@@ -6,6 +6,7 @@ import { FormsModule } from '@angular/forms';
 type Warehouse = { id: string; code: string; name: string; location: string; active: boolean };
 type Stock = { warehouseId: string; sellableId: string; onHand: number; reserved: number; available: number };
 type Movement = { id: string; type: string; onHandDelta: number; reservedDelta: number; onHandAfter: number; reservedAfter: number; reason: string | null; actorId: string | null; occurredAt: string };
+type LowStock = { warehouseId: string; sellableId: string; available: number; threshold: number };
 
 @Component({
   selector: 'artio-inventory-admin',
@@ -13,6 +14,10 @@ type Movement = { id: string; type: string; onHandDelta: number; reservedDelta: 
   imports: [CommonModule, FormsModule],
   template: `
     <section>
+      <div class="panel" *ngIf="lowStock.length">
+        <div class="panel-heading"><div><p class="eyebrow">REPLENISHMENT</p><h2>Low stock</h2></div><button class="link-button" (click)="loadLowStock()">Refresh</button></div>
+        <div class="row" *ngFor="let row of lowStock"><span class="row-main"><strong>{{row.sellableId}}</strong><small>{{warehouseName(row.warehouseId)}} · {{row.available}} available · threshold {{row.threshold}}</small></span><button class="link-button" (click)="openLowStock(row)">Manage</button></div>
+      </div>
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">STOCK LOCATIONS</p><h2>Warehouses</h2></div><button class="link-button" (click)="loadWarehouses()">Refresh</button></div>
         <form class="create-form" (ngSubmit)="createWarehouse()">
@@ -44,6 +49,8 @@ type Movement = { id: string; type: string; onHandDelta: number; reservedDelta: 
           <h3>Movement history</h3>
           <div class="row" *ngFor="let item of movements"><span class="row-main"><strong>{{item.type}} · Δ on hand {{item.onHandDelta}} · Δ reserved {{item.reservedDelta}}</strong><small>{{item.occurredAt | date:'medium'}} · now {{item.onHandAfter}} on hand / {{item.reservedAfter}} reserved · {{item.reason||'System movement'}}{{item.actorId?' · staff '+item.actorId:''}}</small></span></div>
           <p *ngIf="!movements.length" class="empty">No stock movements recorded.</p>
+          <h3>Low-stock alert</h3>
+          <form class="create-form" (ngSubmit)="saveLowStockPolicy()"><input [(ngModel)]="policyDraft.threshold" name="lowStockThreshold" type="number" min="0" step="0.0001" placeholder="Alert when available is at or below" required><label><input type="checkbox" [(ngModel)]="policyDraft.active" name="lowStockActive"> Enabled</label><button class="primary" [disabled]="busy">Save threshold</button></form>
         </div>
       </ng-container>
       <p class="error" *ngIf="error" role="alert">{{error}}</p>
@@ -55,6 +62,8 @@ export class InventoryAdminComponent {
   warehouses: Warehouse[] = [];
   stocks: Stock[] = [];
   movements: Movement[] = [];
+  lowStock: LowStock[] = [];
+  policyDraft = { threshold: 0, active: true };
   selectedWarehouse: Warehouse | null = null;
   selectedStock: Stock | null = null;
   warehouseDraft = { code: '', name: '', location: '' };
@@ -62,7 +71,12 @@ export class InventoryAdminComponent {
   busy = false;
   error = '';
 
-  constructor() { this.loadWarehouses(); }
+  constructor() { this.loadWarehouses(); this.loadLowStock(); }
+
+  loadLowStock(): void { this.http.get<LowStock[]>('/api/v1/inventory/low-stock').subscribe({next:rows=>this.lowStock=rows,error:e=>this.error=e.error?.detail??'Could not load low-stock alerts.'}); }
+  warehouseName(id:string):string{return this.warehouses.find(row=>row.id===id)?.name??id;}
+  openLowStock(row:LowStock):void{const warehouse=this.warehouses.find(item=>item.id===row.warehouseId);if(!warehouse)return;this.selectedWarehouse=warehouse;this.loadStock();this.http.get<Array<{sellableId:string;threshold:number;active:boolean}>>(`/api/v1/warehouses/${warehouse.id}/stock-policies`).subscribe({next:policies=>{const policy=policies.find(item=>item.sellableId===row.sellableId);this.policyDraft=policy?{threshold:policy.threshold,active:policy.active}:{threshold:row.threshold,active:true};this.selectedStock={warehouseId:row.warehouseId,sellableId:row.sellableId,onHand:0,reserved:0,available:row.available};this.loadMovements();},error:e=>this.error=e.error?.detail??'Could not load stock policies.'});}
+  saveLowStockPolicy():void{if(!this.selectedWarehouse||!this.selectedStock)return;this.busy=true;this.http.put(`/api/v1/warehouses/${this.selectedWarehouse.id}/stock/${this.selectedStock.sellableId}/low-stock-policy`,this.policyDraft).subscribe({next:()=>{this.busy=false;this.error='';this.loadLowStock();},error:e=>{this.busy=false;this.error=e.error?.detail??'Could not save low-stock threshold.';}});}
 
   loadWarehouses(): void {
     this.http.get<Warehouse[]>('/api/v1/warehouses').subscribe({
@@ -120,7 +134,7 @@ export class InventoryAdminComponent {
     const url = `/api/v1/warehouses/${this.selectedWarehouse.id}/stock/${sellableId}` + (method === 'POST' ? '/receipts' : '');
     const request = method === 'POST' ? this.http.post<Stock>(url, body) : this.http.put<Stock>(url, body);
     request.subscribe({
-      next: row => { this.busy = false; this.error = ''; this.draft.sellableId = row.sellableId; this.selectedStock = row; this.loadStock(); this.loadMovements(); },
+      next: row => { this.busy = false; this.error = ''; this.draft.sellableId = row.sellableId; this.selectedStock = row; this.loadStock(); this.loadMovements(); this.loadLowStock(); },
       error: e => { this.error = e.error?.detail ?? 'Could not update inventory.'; this.busy = false; }
     });
   }

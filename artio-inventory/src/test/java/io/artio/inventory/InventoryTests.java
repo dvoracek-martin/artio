@@ -6,6 +6,15 @@ import io.artio.kernel.Quantity; import java.math.BigDecimal; import java.util.U
 import org.junit.jupiter.api.Test;
 
 class InventoryTests {
+    @Test void lowStockPolicyRequiresAValidNonNegativeThreshold() {
+        var policy = new LowStockPolicy(UUID.randomUUID(), new WarehouseId(UUID.randomUUID()), UUID.randomUUID(), new BigDecimal("2.5000"), true);
+        assertThat(policy.threshold()).isEqualByComparingTo("2.5");
+        assertThatThrownBy(() -> new LowStockPolicy(UUID.randomUUID(), policy.warehouseId(), policy.sellableId(), new BigDecimal("-1"), true))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LowStockPolicy(UUID.randomUUID(), policy.warehouseId(), policy.sellableId(), new BigDecimal("0.00001"), true))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test void reservationsReduceAvailabilityAndAllocationConsumesOnHand() {
         var stock=StockLevel.create(new StockLevelId(UUID.randomUUID()),new WarehouseId(UUID.randomUUID()),UUID.randomUUID());
         stock.receive(new Quantity(new BigDecimal("10")));

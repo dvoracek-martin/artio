@@ -71,7 +71,7 @@ public class SecurityConfiguration {
                 .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/brands/**", "/api/attributes/**", "/api/bundles/**", "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**", "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
                         "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**", "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/warehouses/**", "/api/stock/**", "/api/orders/*/inventory-reservations",
-                        "/api/v1/warehouses/**", "/api/v1/stock/**", "/api/v1/orders/*/inventory-reservations").hasAnyRole("ADMIN", "SUPERADMIN")
+                        "/api/inventory/**", "/api/v1/warehouses/**", "/api/v1/stock/**", "/api/v1/inventory/**", "/api/v1/orders/*/inventory-reservations").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/setup/status", "/api/v1/setup/status").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/setup/progress", "/api/setup/complete", "/api/setup/resume", "/api/v1/setup/progress", "/api/v1/setup/complete", "/api/v1/setup/resume",
                         "/api/auth/register", "/api/auth/login", "/api/payments/stripe/webhook", "/api/payments/provider/webhook",
