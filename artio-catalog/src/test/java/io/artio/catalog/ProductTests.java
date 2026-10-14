@@ -60,6 +60,40 @@ class ProductTests {
     }
 
     @Test
+    void scheduledPublicationActivatesOnlyWhenDueAndCanBeCancelled() {
+        var product = product();
+        product.deactivate();
+        var now = java.time.Instant.parse("2026-10-14T10:00:00Z");
+        var publishAt = now.plusSeconds(60);
+        product.schedulePublication(publishAt, now);
+        assertThat(product.getScheduledPublishAt()).isEqualTo(publishAt);
+        assertThat(product.publishIfDue(publishAt.minusSeconds(1))).isFalse();
+        assertThat(product.isActive()).isFalse();
+        assertThat(product.publishIfDue(publishAt)).isTrue();
+        assertThat(product.isActive()).isTrue();
+        assertThat(product.getScheduledPublishAt()).isNull();
+        assertThat(product.getDomainEvents()).last().isEqualTo(new ProductPublished(product.getId(), publishAt));
+
+        product.deactivate();
+        product.schedulePublication(publishAt.plusSeconds(60), now);
+        product.cancelScheduledPublication(now);
+        assertThat(product.getScheduledPublishAt()).isNull();
+        assertThatThrownBy(() -> product.cancelScheduledPublication(now)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void scheduledPublicationRequiresAFutureTimeAndManualActivationCancelsIt() {
+        var product = product();
+        product.deactivate();
+        var now = java.time.Instant.now();
+        assertThatThrownBy(() -> product.schedulePublication(now, now)).isInstanceOf(IllegalArgumentException.class);
+        product.schedulePublication(now.plusSeconds(60), now);
+        product.activate();
+        assertThat(product.isActive()).isTrue();
+        assertThat(product.getScheduledPublishAt()).isNull();
+    }
+
+    @Test
     void productNameCannotBeEmptyOrBlank() {
         assertThatThrownBy(() -> new ProductName(""))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Name required");

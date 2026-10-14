@@ -132,6 +132,37 @@ public class ProductApplicationService {
     }
 
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
+    public ProductResponse schedulePublication(UUID id, java.time.Instant publishAt) {
+        searchIndexLock.lockCatalogWrite();
+        var product = findProduct(id);
+        product.schedulePublication(publishAt, java.time.Instant.now());
+        products.save(product);
+        return ProductResponse.from(product);
+    }
+
+    @CacheEvict(cacheNames = "catalog-products", allEntries = true)
+    public ProductResponse cancelScheduledPublication(UUID id) {
+        searchIndexLock.lockCatalogWrite();
+        var product = findProduct(id);
+        product.cancelScheduledPublication(java.time.Instant.now());
+        products.save(product);
+        return ProductResponse.from(product);
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = "catalog-products", allEntries = true)
+    public int publishDueProducts(java.time.Instant now, int limit) {
+        var due = products.lockDueForPublication(now, limit);
+        for (var product : due) {
+            if (product.publishIfDue(now)) {
+                products.save(product);
+                index(product);
+            }
+        }
+        return due.size();
+    }
+
+    @CacheEvict(cacheNames = "catalog-products", allEntries = true)
     public ProductResponse archive(UUID id) {
         searchIndexLock.lockCatalogWrite();
         var product=findProduct(id);

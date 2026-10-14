@@ -77,6 +77,9 @@ class CatalogApiIntegrationTests {
     private VariantApplicationService variantApplicationService;
 
     @Autowired
+    private ProductApplicationService productApplicationService;
+
+    @Autowired
     private io.artio.api.notifications.OrderEventOutboxPublisher orderEventOutboxPublisher;
 
     @Autowired
@@ -704,6 +707,29 @@ class CatalogApiIntegrationTests {
         assertThat(updated.getBody().attributes()).containsEntry("size", "M");
         var persisted = http.getForEntity("/api/v1/variants/{id}", VariantResponse.class, created.getBody().id());
         assertThat(persisted.getBody().attributes()).containsEntry("color", "navy").containsEntry("size", "M");
+    }
+
+    @Test
+    void scheduledProductPublicationCanBeCancelledOrPublishedWhenDue() {
+        var product = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Scheduled item", "Publication test", "SCH-" + UUID.randomUUID().toString().substring(0, 8)), ProductResponse.class);
+        adminExchange("/api/v1/products/{id}/active", HttpMethod.PUT,
+                new SetActiveRequest(false), ProductResponse.class, product.getBody().id());
+        var publishAt = java.time.Instant.now().plusSeconds(120).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        var scheduled = adminExchange("/api/v1/products/{id}/publication-schedule", HttpMethod.PUT,
+                new ProductController.PublicationScheduleRequest(publishAt), ProductResponse.class, product.getBody().id());
+        assertThat(scheduled.getBody().active()).isFalse();
+        assertThat(scheduled.getBody().scheduledPublishAt()).isEqualTo(publishAt);
+
+        var anonymousCancel = http.exchange("/api/v1/products/{id}/publication-schedule", HttpMethod.DELETE,
+                HttpEntity.EMPTY, ApiError.class, product.getBody().id());
+        assertThat(anonymousCancel.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        int processed = productApplicationService.publishDueProducts(publishAt, 100);
+        assertThat(processed).isGreaterThanOrEqualTo(1);
+        var published = http.getForEntity("/api/v1/products/{id}", ProductResponse.class, product.getBody().id());
+        assertThat(published.getBody().active()).isTrue();
+        assertThat(published.getBody().scheduledPublishAt()).isNull();
     }
 
     @Test

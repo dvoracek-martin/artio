@@ -57,16 +57,17 @@ public class AdminCatalogProductQueryController {
         if (categoryId != null) { where.append(" AND EXISTS (SELECT 1 FROM catalog_product_category pc WHERE pc.product_id=p.id AND pc.category_id=?)"); args.add(categoryId); }
         long total = jdbc.queryForObject("SELECT count(*) FROM catalog_product p" + where, Long.class, args.toArray());
         List<Object> pageArgs = new ArrayList<>(args); pageArgs.add(size); pageArgs.add((long) page * size);
-        List<ProductSummary> items = jdbc.query("SELECT p.id,p.name,p.description,p.sku,p.active,p.created_at,p.updated_at,p.brand_id,p.seo_slug,p.seo_title,p.seo_description,p.archived_at " +
+        List<ProductSummary> items = jdbc.query("SELECT p.id,p.name,p.description,p.sku,p.active,p.created_at,p.updated_at,p.brand_id,p.seo_slug,p.seo_title,p.seo_description,p.archived_at,p.scheduled_publish_at " +
                         "FROM catalog_product p" + where + " ORDER BY " + sortColumn + " " + order + ",p.id ASC LIMIT ? OFFSET ?",
                 (rs, row) -> new ProductSummary(rs.getObject("id", UUID.class), rs.getString("name"), rs.getString("description"), rs.getString("sku"),
                         rs.getBoolean("active"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
                         rs.getObject("brand_id", UUID.class), rs.getString("seo_slug"), rs.getString("seo_title"), rs.getString("seo_description"),
-                        rs.getTimestamp("archived_at") != null), pageArgs.toArray());
+                        rs.getTimestamp("archived_at") != null,
+                        rs.getTimestamp("scheduled_publish_at") == null ? null : rs.getTimestamp("scheduled_publish_at").toInstant()), pageArgs.toArray());
         return new ProductPage(items, total, page, size);
     }
 
     public record ProductSummary(UUID id, String name, String description, String sku, boolean active, Instant createdAt, Instant updatedAt,
-            UUID brandId, String seoSlug, String seoTitle, String seoDescription, boolean archived) { }
+            UUID brandId, String seoSlug, String seoTitle, String seoDescription, boolean archived, Instant scheduledPublishAt) { }
     public record ProductPage(List<ProductSummary> items, long total, int page, int size) { }
 }

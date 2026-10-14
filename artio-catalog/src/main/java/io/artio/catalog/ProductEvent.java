@@ -4,6 +4,7 @@ import io.artio.kernel.AggregateEvent;
 
 public sealed interface ProductEvent extends AggregateEvent
         permits ProductCreated, ProductActivated, ProductDeactivated, ProductRenamed, ProductDescriptionUpdated,
-        ProductClassificationChanged, ProductAttributeChanged, ProductSeoMetadataUpdated, ProductArchived, ProductRestored {
+        ProductClassificationChanged, ProductAttributeChanged, ProductSeoMetadataUpdated, ProductArchived, ProductRestored,
+        ProductPublicationScheduled, ProductPublicationCancelled, ProductPublished {
     ProductId productId();
 }

@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -68,6 +69,17 @@ public class ProductController {
     @PutMapping("/{id}/restore")
     public ProductResponse restore(@PathVariable UUID id) { return products.restore(id); }
 
+    @PutMapping("/{id}/publication-schedule")
+    public ProductResponse schedulePublication(@PathVariable UUID id,
+            @RequestBody PublicationScheduleRequest request) {
+        return products.schedulePublication(id, request.publishAt());
+    }
+
+    @DeleteMapping("/{id}/publication-schedule")
+    public ProductResponse cancelScheduledPublication(@PathVariable UUID id) {
+        return products.cancelScheduledPublication(id);
+    }
+
     @PutMapping("/{id}/catalog-metadata")
     public ProductResponse updateCatalogMetadata(@PathVariable UUID id,
             @RequestBody ProductApplicationService.CatalogMetadataRequest request) {
@@ -78,4 +90,6 @@ public class ProductController {
     public ProductResponse updateSeo(@PathVariable UUID id, @RequestBody ProductApplicationService.SeoMetadataRequest request) {
         return products.updateSeo(id, request);
     }
+
+    public record PublicationScheduleRequest(java.time.Instant publishAt) { }
 }

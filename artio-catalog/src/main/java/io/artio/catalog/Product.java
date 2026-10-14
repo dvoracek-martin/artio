@@ -21,6 +21,7 @@ public final class Product extends Aggregate<ProductId> {
     private final Map<String, String> attributes = new LinkedHashMap<>();
     private ProductSeoMetadata seoMetadata;
     private Instant archivedAt;
+    private Instant scheduledPublishAt;
 
     private Product(ProductId id, ProductName name, ProductDescription description, Sku sku,
                     boolean active, Instant createdAt, Instant updatedAt) {
@@ -63,6 +64,50 @@ public final class Product extends Aggregate<ProductId> {
         var product = reconstitute(id, name, description, sku, active, createdAt, updatedAt, brandId, categoryIds, attributes, seoMetadata);
         product.archivedAt = archivedAt;
         return product;
+    }
+
+    public static Product reconstitute(ProductId id, ProductName name, ProductDescription description, Sku sku,
+                                       boolean active, Instant createdAt, Instant updatedAt, BrandId brandId,
+                                       Set<CategoryId> categoryIds, Map<String, String> attributes, ProductSeoMetadata seoMetadata,
+                                       Instant archivedAt, Instant scheduledPublishAt) {
+        var product = reconstitute(id, name, description, sku, active, createdAt, updatedAt,
+                brandId, categoryIds, attributes, seoMetadata, archivedAt);
+        product.scheduledPublishAt = scheduledPublishAt;
+        return product;
+    }
+
+    public void schedulePublication(Instant publishAt, Instant now) {
+        Objects.requireNonNull(publishAt, "Publication time is required");
+        Objects.requireNonNull(now, "Current time is required");
+        if (!publishAt.isAfter(now)) throw new IllegalArgumentException("Publication time must be in the future");
+        if (isArchived()) throw new IllegalStateException("Archived products cannot be scheduled for publication");
+        if (active) throw new IllegalStateException("Active products cannot be scheduled for publication");
+        if (publishAt.equals(scheduledPublishAt)) return;
+        scheduledPublishAt = publishAt;
+        updatedAt = now;
+        recordEvent(new ProductPublicationScheduled(getId(), publishAt));
+    }
+
+    public void cancelScheduledPublication(Instant now) {
+        if (scheduledPublishAt == null) throw new IllegalStateException("Product has no scheduled publication");
+        scheduledPublishAt = null;
+        updatedAt = Objects.requireNonNull(now, "Current time is required");
+        recordEvent(new ProductPublicationCancelled(getId()));
+    }
+
+    public boolean publishIfDue(Instant now) {
+        if (scheduledPublishAt == null || scheduledPublishAt.isAfter(now)) return false;
+        if (isArchived() || active) {
+            scheduledPublishAt = null;
+            updatedAt = now;
+            recordEvent(new ProductPublicationCancelled(getId()));
+            return true;
+        }
+        scheduledPublishAt = null;
+        active = true;
+        updatedAt = now;
+        recordEvent(new ProductPublished(getId(), now));
+        return true;
     }
 
     public static Product reconstitute(ProductId id, ProductName name, ProductDescription description, Sku sku,
@@ -113,6 +158,7 @@ public final class Product extends Aggregate<ProductId> {
     public void activate() {
         if (isArchived()) throw new IllegalStateException("Archived product must be restored before activation");
         if (active) throw new IllegalStateException("Already active");
+        cancelScheduleWhenPresent();
         active = true;
         updatedAt = Instant.now();
         recordEvent(new ProductActivated(getId()));
@@ -127,6 +173,7 @@ public final class Product extends Aggregate<ProductId> {
 
     public void archive() {
         if (isArchived()) throw new IllegalStateException("Already archived");
+        cancelScheduleWhenPresent();
         active = false;
         archivedAt = Instant.now();
         updatedAt = archivedAt;
@@ -170,5 +217,13 @@ public final class Product extends Aggregate<ProductId> {
     public Map<String, String> getAttributes() { return Map.copyOf(attributes); }
     public ProductSeoMetadata getSeoMetadata() { return seoMetadata; }
     public Instant getArchivedAt() { return archivedAt; }
+    public Instant getScheduledPublishAt() { return scheduledPublishAt; }
     public boolean isArchived() { return archivedAt != null; }
+
+    private void cancelScheduleWhenPresent() {
+        if (scheduledPublishAt != null) {
+            scheduledPublishAt = null;
+            recordEvent(new ProductPublicationCancelled(getId()));
+        }
+    }
 }

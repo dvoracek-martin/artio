@@ -10,6 +10,7 @@ import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -52,11 +53,18 @@ public class ProductPostgresRepository implements ProductRepository {
     }
 
     @Override
+    public List<Product> lockDueForPublication(Instant now, int limit) {
+        int bounded = Math.max(1, Math.min(limit, 500));
+        return jdbc.query("SELECT * FROM catalog_product WHERE scheduled_publish_at <= ? AND active = FALSE AND archived_at IS NULL ORDER BY scheduled_publish_at, id LIMIT ? FOR UPDATE SKIP LOCKED",
+                PRODUCT_ROW, Timestamp.from(now), bounded).stream().map(this::hydrate).toList();
+    }
+
+    @Override
     @Transactional
     public void save(Product product) {
         jdbc.update("""
-                INSERT INTO catalog_product (id, name, description, sku, active, created_at, updated_at, brand_id, seo_slug, seo_title, seo_description, archived_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO catalog_product (id, name, description, sku, active, created_at, updated_at, brand_id, seo_slug, seo_title, seo_description, archived_at, scheduled_publish_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     description = EXCLUDED.description,
@@ -67,7 +75,8 @@ public class ProductPostgresRepository implements ProductRepository {
                     seo_slug = EXCLUDED.seo_slug,
                     seo_title = EXCLUDED.seo_title,
                     seo_description = EXCLUDED.seo_description,
-                    archived_at = EXCLUDED.archived_at
+                    archived_at = EXCLUDED.archived_at,
+                    scheduled_publish_at = EXCLUDED.scheduled_publish_at
                 """,
                 product.getId().value(), product.getName().value(), product.getDescription().value(),
                 product.getSku().value(), product.isActive(), Timestamp.from(product.getCreatedAt()),
@@ -75,7 +84,8 @@ public class ProductPostgresRepository implements ProductRepository {
                 product.getSeoMetadata() == null ? null : product.getSeoMetadata().slug(),
                 product.getSeoMetadata() == null ? null : product.getSeoMetadata().title(),
                 product.getSeoMetadata() == null ? null : product.getSeoMetadata().description(),
-                product.getArchivedAt() == null ? null : Timestamp.from(product.getArchivedAt()));
+                product.getArchivedAt() == null ? null : Timestamp.from(product.getArchivedAt()),
+                product.getScheduledPublishAt() == null ? null : Timestamp.from(product.getScheduledPublishAt()));
         UUID productId = product.getId().value();
         jdbc.update("DELETE FROM catalog_product_category WHERE product_id = ?", productId);
         product.getCategoryIds().forEach(categoryId -> jdbc.update(
@@ -97,8 +107,9 @@ public class ProductPostgresRepository implements ProductRepository {
         var seo = jdbc.query("SELECT seo_slug,seo_title,seo_description FROM catalog_product WHERE id=? AND seo_slug IS NOT NULL",
                 rs -> rs.next() ? new io.artio.catalog.ProductSeoMetadata(rs.getString(1), rs.getString(2), rs.getString(3)) : null, id);
         var archivedAt = jdbc.query("SELECT archived_at FROM catalog_product WHERE id=?", rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null, id);
+        var scheduledPublishAt = jdbc.query("SELECT scheduled_publish_at FROM catalog_product WHERE id=?", rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null, id);
         return Product.reconstitute(stored.getId(), stored.getName(), stored.getDescription(), stored.getSku(),
                 stored.isActive(), stored.getCreatedAt(), stored.getUpdatedAt(),
-                brand == null ? null : new io.artio.catalog.BrandId(brand), categoryIds, attributes, seo, archivedAt);
+                brand == null ? null : new io.artio.catalog.BrandId(brand), categoryIds, attributes, seo, archivedAt, scheduledPublishAt);
     }
 }
