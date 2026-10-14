@@ -29,6 +29,9 @@ class ExtensionControllerApplicationTests {
     void internalLifecycleRoutesRejectCallsWithoutTheControllerCredential() {
         var response = http.postForEntity("/internal/v1/extensions/test-plugin/disable", null, String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        var bundleHealth = http.postForEntity("/internal/v1/extensions/test-plugin/bundle-health",
+                new ManifestHealthRequest(null), String.class);
+        assertThat(bundleHealth.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -36,4 +39,6 @@ class ExtensionControllerApplicationTests {
         assertThat(http.getForEntity("/graphql", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(http.getForEntity("/v3/api-docs", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
+
+    private record ManifestHealthRequest(Object manifest) { }
 }

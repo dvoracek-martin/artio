@@ -81,6 +81,17 @@ final class ExtensionRuntimeController {
         return runtime.health(pluginId, request.healthPath());
     }
 
+    @PostMapping("/{pluginId}/bundle-health")
+    ExtensionRuntimePort.RuntimeHealth bundleHealth(@RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable String pluginId, @RequestBody ManifestHealthRequest request) {
+        security.authorize(authorization);
+        if (request.manifest() == null || !pluginId.equals(request.manifest().id())) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Bundle health manifest identity does not match route");
+        }
+        return runtime.health(request.manifest());
+    }
+
     @PostMapping("/invoke")
     ExtensionRuntimePort.InvocationResult invoke(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody InvocationRequest request) {
@@ -98,6 +109,7 @@ final class ExtensionRuntimeController {
         RotationRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
     }
     record HealthRequest(String healthPath) { }
+    record ManifestHealthRequest(PluginManifest manifest) { }
     record InvocationRequest(String pluginId, int credentialGeneration, String extensionPoint, String operation,
             String idempotencyKey, String configurationJson, String requestJson, long deadlineMillis) { }
 }

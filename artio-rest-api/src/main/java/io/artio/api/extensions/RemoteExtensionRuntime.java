@@ -60,6 +60,9 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     @Override public RuntimeHealth health(String pluginId, String healthPath) {
         return post("internal/v1/extensions/" + segment(pluginId) + "/health", new HealthRequest(healthPath), Duration.ofSeconds(10), RuntimeHealth.class);
     }
+    @Override public RuntimeHealth health(PluginManifest manifest) {
+        return post("internal/v1/extensions/" + segment(manifest.id()) + "/bundle-health", new ManifestHealthRequest(manifest), Duration.ofSeconds(30), RuntimeHealth.class);
+    }
     @Override public InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
             String configurationJson, String requestJson, Duration deadline) {
         return invoke(pluginId, 1, extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);
@@ -125,6 +128,7 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
         private RotationRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
     }
     private record HealthRequest(String healthPath) { }
+    private record ManifestHealthRequest(PluginManifest manifest) { }
     private record InvocationRequest(String pluginId, int credentialGeneration, String extensionPoint, String operation,
             String idempotencyKey, String configurationJson, String requestJson, long deadlineMillis) { }
 }

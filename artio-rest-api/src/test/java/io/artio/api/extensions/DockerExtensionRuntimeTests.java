@@ -125,8 +125,13 @@ class DockerExtensionRuntimeTests {
                     new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
 
             runtime.enable(manifest, 1);
+            var health = runtime.health(manifest);
 
-            assertThat(healthCalls).containsExactly("main", "trace", "metrics");
+            assertThat(healthCalls).containsExactly("main", "trace", "metrics", "main", "metrics", "trace");
+            assertThat(health.healthy()).isTrue();
+            assertThat(health.status()).isEqualTo("HEALTHY");
+            assertThat(health.services()).containsEntry("main", "HTTP_204")
+                    .containsEntry("metrics", "HTTP_204").containsEntry("trace", "HTTP_204");
         } finally {
             server.stop(0);
         }

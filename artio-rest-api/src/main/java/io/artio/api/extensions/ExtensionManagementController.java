@@ -313,7 +313,7 @@ public class ExtensionManagementController {
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ExtensionRuntimePort.RuntimeHealth health(@PathVariable String pluginId) {
         PluginRow row = findPlugin(pluginId);
-        return runtime().health(pluginId, row.manifest().healthPath());
+        return runtime().health(row.manifest());
     }
 
     @PostMapping("/{pluginId}/invoke")

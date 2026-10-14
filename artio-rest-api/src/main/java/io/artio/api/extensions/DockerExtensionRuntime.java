@@ -264,6 +264,18 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     @Override
+    public ExtensionRuntimePort.RuntimeHealth health(PluginManifest manifest) {
+        var serviceStatuses = new java.util.LinkedHashMap<String, String>();
+        boolean healthy = true;
+        for (RuntimeService service : services(manifest)) {
+            var result = serviceHealth(manifest.id(), service.id(), service.healthPath());
+            serviceStatuses.put(service.id(), result.status());
+            healthy &= result.healthy();
+        }
+        return new ExtensionRuntimePort.RuntimeHealth(healthy, healthy ? "HEALTHY" : "DEGRADED", serviceStatuses);
+    }
+
+    @Override
     public ExtensionRuntimePort.InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                                    String configurationJson, String requestJson, Duration deadline) {
         return invoke(pluginId, 1, extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);

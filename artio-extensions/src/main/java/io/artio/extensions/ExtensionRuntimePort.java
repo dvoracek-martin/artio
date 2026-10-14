@@ -28,6 +28,7 @@ public interface ExtensionRuntimePort {
         rotateCredentials(manifest, credentialGeneration, restartIfEnabled);
     }
     RuntimeHealth health(String pluginId, String healthPath);
+    default RuntimeHealth health(PluginManifest manifest) { return health(manifest.id(), manifest.healthPath()); }
     InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                             String configurationJson, String requestJson, Duration deadline);
     default InvocationResult invoke(String pluginId, int credentialGeneration, String extensionPoint, String operation,
@@ -58,7 +59,10 @@ public interface ExtensionRuntimePort {
             throw new IllegalArgumentException("Extension deadline must be between 100 ms and 30 s");
     }
 
-    record RuntimeHealth(boolean healthy, String status) { }
+    record RuntimeHealth(boolean healthy, String status, Map<String, String> services) {
+        public RuntimeHealth { services = services == null ? Map.of() : Map.copyOf(services); }
+        public RuntimeHealth(boolean healthy, String status) { this(healthy, status, Map.of()); }
+    }
     record InvocationResult(int statusCode, String responseJson) { }
     class ExtensionUnavailableException extends RuntimeException { public ExtensionUnavailableException(String message) { super(message); } }
     class ExtensionTimeoutException extends RuntimeException { public ExtensionTimeoutException(String message) { super(message); } }
