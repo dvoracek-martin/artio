@@ -93,6 +93,7 @@ class CatalogApiIntegrationTests {
 
     private String adminToken;
     private UUID adminUserId;
+    private String adminTotpSecret;
 
     @DynamicPropertySource
     static void postgresProperties(DynamicPropertyRegistry registry) {
@@ -146,8 +147,10 @@ class CatalogApiIntegrationTests {
                         + "VALUES (?,?,?,?,?,'ADMIN',now())",
                 userId, "admin-" + userId + "@example.test", new BCryptPasswordEncoder().encode("admin-password-123"),
                 "Test", "Administrator");
+        adminTotpSecret=io.artio.api.security.Totp.newSecret();
+        jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret,verified,verified_at) VALUES (?,?,TRUE,now())",userId,encryption.encrypt(adminTotpSecret));
         var login = http.postForObject("/api/auth/login",
-                Map.of("email", "admin-" + userId + "@example.test", "password", "admin-password-123"), LoginResponse.class);
+                Map.of("email", "admin-" + userId + "@example.test", "password", "admin-password-123","mfaCode",io.artio.api.TestTotp.code(adminTotpSecret,java.time.Instant.now())), LoginResponse.class);
         assertThat(login).isNotNull();
         assertThat(login.accessToken()).isNotBlank();
         adminToken = login.accessToken();
@@ -488,7 +491,9 @@ class CatalogApiIntegrationTests {
         String ownerEmail = "owner-" + ownerId + "@example.test";
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) VALUES (?,?,?,?,?,'SUPERADMIN',now())",
                 ownerId, ownerEmail, new BCryptPasswordEncoder().encode("owner-password-123"), "System", "Owner");
-        LoginResponse ownerLogin = http.postForObject("/api/auth/login", Map.of("email", ownerEmail, "password", "owner-password-123"), LoginResponse.class);
+        String ownerSecret=io.artio.api.security.Totp.newSecret();
+        jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret,verified,verified_at) VALUES (?,?,TRUE,now())",ownerId,encryption.encrypt(ownerSecret));
+        LoginResponse ownerLogin = http.postForObject("/api/auth/login", Map.of("email", ownerEmail, "password", "owner-password-123","mfaCode",io.artio.api.TestTotp.code(ownerSecret,java.time.Instant.now())), LoginResponse.class);
         assertThat(ownerLogin).isNotNull();
         adminToken = ownerLogin.accessToken();
 
@@ -526,14 +531,14 @@ class CatalogApiIntegrationTests {
 
         jdbc.update("UPDATE users SET role='SUPERADMIN' WHERE id=?", adminUserId);
         var ownerLogin = http.postForObject("/api/auth/login",
-                Map.of("email", "admin-" + adminUserId + "@example.test", "password", "admin-password-123"), LoginResponse.class);
+                Map.of("email", "admin-" + adminUserId + "@example.test", "password", "admin-password-123","mfaCode",io.artio.api.TestTotp.code(adminTotpSecret,java.time.Instant.now())), LoginResponse.class);
         assertThat(ownerLogin).isNotNull();
         adminToken = ownerLogin.accessToken();
 
         var previousEncryption = new io.artio.api.security.EncryptionService(PREVIOUS_TEST_ENCRYPTION_KEY);
         String oldMfaCiphertext = previousEncryption.encrypt("mfa-secret-material");
         String oldPluginCiphertext = previousEncryption.encrypt("provider-secret-material");
-        jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret) VALUES (?,?)", adminUserId, oldMfaCiphertext);
+        jdbc.update("UPDATE mfa_methods SET encrypted_secret=? WHERE user_id=?", oldMfaCiphertext, adminUserId);
         jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,encrypted_secrets) "
                         + "VALUES ('test.key-rotation','{}'::jsonb,'ghcr.io/artio/test@sha256:'||repeat('a',64),'VALIDATED',?::jsonb)",
                 mapper.writeValueAsString(Map.of("apiKey", oldPluginCiphertext)));
@@ -1660,7 +1665,7 @@ class CatalogApiIntegrationTests {
         assertThat(contract.at("/paths/~1api~1v1~1products/get").isMissingNode()).isFalse();
     }
 
-    private record LoginResponse(String accessToken, String tokenType, long expiresIn, UUID userId, String email, String role) { }
+    private record LoginResponse(String accessToken, String tokenType, long expiresIn, UUID userId, String email, String role,boolean mfaEnrollmentRequired) { }
 
     @TestConfiguration
     static class LocalCacheConfiguration {

@@ -32,9 +32,12 @@ public class MfaController {
     @PostMapping("/enrollment") @Transactional
     public Enrollment enroll(JwtAuthenticationToken auth) {
         UUID userId = userId(auth);
-        if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM mfa_methods WHERE user_id=?)", Boolean.class, userId))) throw new ResponseStatusException(HttpStatus.CONFLICT,"An MFA method is already enrolled");
+        jdbc.query("SELECT id FROM users WHERE id=? FOR UPDATE",(rs,n)->rs.getObject(1,UUID.class),userId);
+        var existing=jdbc.query("SELECT verified FROM mfa_methods WHERE user_id=? FOR UPDATE",(rs,n)->rs.getBoolean(1),userId);
+        if (!existing.isEmpty()&&existing.getFirst()) throw new ResponseStatusException(HttpStatus.CONFLICT,"An MFA method is already enrolled");
         String secret = Totp.newSecret();
-        jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret) VALUES (?,?)", userId, encryption.encrypt(secret));
+        if(existing.isEmpty())jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret) VALUES (?,?)", userId, encryption.encrypt(secret));
+        else jdbc.update("UPDATE mfa_methods SET encrypted_secret=?,verified=FALSE,verified_at=NULL,backup_code_hashes='[]'::jsonb WHERE user_id=?",encryption.encrypt(secret),userId);
         String email = auth.getToken().getClaimAsString("email");
         String uri = "otpauth://totp/Artio:" + java.net.URLEncoder.encode(email, java.nio.charset.StandardCharsets.UTF_8) + "?secret=" + Totp.base32(secret) + "&issuer=Artio&algorithm=SHA1&digits=6&period=30";
         return new Enrollment(Totp.base32(secret), uri, "TOTP", 30);
@@ -55,6 +58,8 @@ public class MfaController {
     @DeleteMapping @Transactional
     public void disable(@RequestBody CodeRequest request, JwtAuthenticationToken auth) {
         UUID userId=userId(auth); String secret=loadSecret(userId);
+        String role=jdbc.queryForObject("SELECT role FROM users WHERE id=?",String.class,userId);
+        if(java.util.List.of("ADMIN","SUPERADMIN").contains(role))throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Privileged accounts must keep multi-factor authentication enabled");
         if (!Totp.verify(secret,request.code(),Instant.now())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A valid TOTP code is required to disable MFA");
         jdbc.update("DELETE FROM mfa_methods WHERE user_id=?",userId);
     }

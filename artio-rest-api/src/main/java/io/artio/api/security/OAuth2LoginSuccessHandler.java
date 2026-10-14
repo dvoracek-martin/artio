@@ -41,6 +41,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             catch(IllegalArgumentException invalid){throw new AuthenticationServiceException("A verified email address is required for OIDC login",invalid);}
             UUID userId=transactions.execute(status->resolveOrProvision(provider,subject,email,oidc));
             UserIdentity user=jdbc.queryForObject("SELECT id,email,role FROM users WHERE id=? AND active",(rs,n)->new UserIdentity(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3)),userId);
+            if(java.util.List.of("ADMIN","SUPERADMIN").contains(user.role()))throw new AuthenticationServiceException("Privileged accounts must use Artio password and authenticator sign-in");
             Instant now=Instant.now();jdbc.update("UPDATE users SET last_login=? WHERE id=?",java.sql.Timestamp.from(now),user.id());
             String token=encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(),JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email",user.email()).claim("role",user.role()).build())).getTokenValue();
             response.sendRedirect(storefrontUrl.replaceAll("/$","")+"/shop#access_token="+URLEncoder.encode(token,StandardCharsets.UTF_8));

@@ -97,7 +97,8 @@ public class SecurityConfiguration {
                     ApiErrorWriter.write(objectMapper, request, response, org.springframework.http.HttpStatus.FORBIDDEN,
                             "Access is denied")))
             .addFilterBefore(installationSetupGateFilter, BearerTokenAuthenticationFilter.class)
-            .addFilterBefore(apiVersioningFilter, BearerTokenAuthenticationFilter.class);
+            .addFilterBefore(apiVersioningFilter, BearerTokenAuthenticationFilter.class)
+            .addFilterAfter(new PrivilegedMfaEnrollmentFilter(objectMapper), BearerTokenAuthenticationFilter.class);
         if(oauth2Enabled)http.oauth2Login(oauth->oauth.successHandler(oauth2SuccessHandler));
         return http.build();
     }
@@ -127,4 +128,5 @@ public class SecurityConfiguration {
     InstallationSetupGateFilter installationSetupGateFilter(JdbcTemplate jdbc, ObjectMapper mapper) {
         return new InstallationSetupGateFilter(jdbc, mapper);
     }
+
 }

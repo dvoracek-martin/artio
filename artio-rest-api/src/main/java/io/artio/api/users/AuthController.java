@@ -58,7 +58,9 @@ public class AuthController {
         if (users.isEmpty() || !users.getFirst().active() || !passwords.matches(request.password(), users.getFirst().passwordHash())) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
         UserRow user = users.getFirst();
         var mfa = jdbc.query("SELECT encrypted_secret,verified,backup_code_hashes::text FROM mfa_methods WHERE user_id=? FOR UPDATE", (rs,n) -> new MfaRow(rs.getString(1),rs.getBoolean(2),rs.getString(3)),user.id());
-        if (!mfa.isEmpty() && mfa.getFirst().verified()) {
+        boolean privileged=List.of("ADMIN","SUPERADMIN").contains(user.role());
+        boolean mfaVerified=!mfa.isEmpty()&&mfa.getFirst().verified();
+        if (mfaVerified) {
             boolean valid = Totp.verify(encryption.decrypt(mfa.getFirst().secret()),request.mfaCode(),Instant.now());
             if (!valid && request.mfaCode()!=null) {
                 try {
@@ -69,16 +71,17 @@ public class AuthController {
             }
             if (!valid) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"MFA_REQUIRED: submit a valid authenticator code or one-time backup code");
         }
+        boolean mfaEnrollmentRequired=privileged&&!mfaVerified;
         Instant now = Instant.now();
         jdbc.update("UPDATE users SET last_login=? WHERE id=?", java.sql.Timestamp.from(now), user.id());
-        var claims = JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email", user.email()).claim("role", user.role()).build();
+        var claims = JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email", user.email()).claim("role", user.role()).claim("mfaSetupOnly",mfaEnrollmentRequired).build();
         String token = jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
-        return new LoginResponse(token, "Bearer", 3600, user.id(), user.email(), user.role());
+        return new LoginResponse(token, "Bearer", 3600, user.id(), user.email(), user.role(),mfaEnrollmentRequired);
     }
 
     public record RegisterRequest(String email, String password, String firstName, String lastName) { }
     public record LoginRequest(String email, String password, String mfaCode) { }
-    public record LoginResponse(String accessToken, String tokenType, long expiresIn, UUID userId, String email, String role) { }
+    public record LoginResponse(String accessToken, String tokenType, long expiresIn, UUID userId, String email, String role,boolean mfaEnrollmentRequired) { }
     private record UserRow(UUID id, String email, String passwordHash, String role, boolean active) { }
     private record MfaRow(String secret, boolean verified, String backupCodes) { }
 }
