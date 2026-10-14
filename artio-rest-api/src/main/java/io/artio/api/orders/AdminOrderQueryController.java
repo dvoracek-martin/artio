@@ -39,7 +39,7 @@ public class AdminOrderQueryController {
         if (page < 0 || page > 100_000 || size < 1 || size > MAX_PAGE_SIZE)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Page must be non-negative and size must be 1–100");
         String normalizedStatus = status == null || status.isBlank() ? null : status.trim().toUpperCase(java.util.Locale.ROOT);
-        if (normalizedStatus != null && !List.of("PENDING", "CONFIRMED", "PAID", "SHIPPED", "DELIVERED", "CANCELLED", "RETURNED").contains(normalizedStatus))
+        if (normalizedStatus != null && !List.of("PENDING", "CONFIRMED", "PAID", "PARTIALLY_SHIPPED", "SHIPPED", "DELIVERED", "CANCELLED", "RETURNED").contains(normalizedStatus))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported order status filter");
         String search = q == null || q.isBlank() ? null : q.trim();
         if (search != null && search.length() > 200) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Search query is too long");
@@ -95,9 +95,9 @@ public class AdminOrderQueryController {
                         rs.getString("market"), rs.getString("tax_jurisdiction"), taxSnapshot(rs.getString("tax_snapshot")), null, null), id);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
         OrderDetail order = rows.getFirst();
-        List<OrderLine> lines = jdbc.query("SELECT id,variant_id,bundle_id,quantity,unit_price,currency FROM order_items WHERE order_id=? ORDER BY id",
+        List<OrderLine> lines = jdbc.query("SELECT oi.id,oi.variant_id,oi.bundle_id,oi.quantity,oi.unit_price,oi.currency,COALESCE((SELECT sum(si.quantity) FROM order_shipment_items si JOIN order_shipments s ON s.id=si.shipment_id WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0) AS shipped_quantity FROM order_items oi WHERE oi.order_id=? ORDER BY oi.id",
                 (rs, row) -> new OrderLine(rs.getObject("id", UUID.class), rs.getObject("variant_id", UUID.class),
-                        rs.getObject("bundle_id", UUID.class), rs.getInt("quantity"), rs.getBigDecimal("unit_price"), rs.getString("currency").trim()), id);
+                        rs.getObject("bundle_id", UUID.class), rs.getBigDecimal("quantity"), rs.getBigDecimal("shipped_quantity"), rs.getBigDecimal("unit_price"), rs.getString("currency").trim()), id);
         List<PaymentSummary> payments = jdbc.query("SELECT id,method,status,amount,refunded_amount,currency,provider_reference,created_at,updated_at FROM payments WHERE order_id=? ORDER BY created_at",
                 (rs, row) -> new PaymentSummary(rs.getObject("id", UUID.class), rs.getString("method"), rs.getString("status"),
                         rs.getBigDecimal("amount"), rs.getBigDecimal("refunded_amount"), rs.getString("currency").trim(), rs.getString("provider_reference"),
@@ -148,7 +148,7 @@ public class AdminOrderQueryController {
                     trackingNumber,shipmentReference,shippingMethodId,shippingLabelAvailable,shippingCountry,market,taxJurisdiction,taxSnapshot,lines,payments);
         }
     }
-    public record OrderLine(UUID id, UUID variantId, UUID bundleId, int quantity, java.math.BigDecimal unitPrice, String currency) { }
+    public record OrderLine(UUID id, UUID variantId, UUID bundleId, java.math.BigDecimal quantity, java.math.BigDecimal shippedQuantity, java.math.BigDecimal unitPrice, String currency) { }
     public record PaymentSummary(UUID id, String method, String status, java.math.BigDecimal amount, java.math.BigDecimal refundedAmount, String currency,
             String providerReference, Instant createdAt, Instant updatedAt) { }
 }

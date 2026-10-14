@@ -169,7 +169,10 @@ CREATE TABLE inventory_reservation (
     warehouse_id UUID NOT NULL REFERENCES inventory_warehouse(id),
     sellable_id UUID NOT NULL,
     quantity NUMERIC(19, 4) NOT NULL CHECK (quantity > 0),
+    allocated_quantity NUMERIC(19, 4) NOT NULL DEFAULT 0 CHECK (allocated_quantity >= 0 AND allocated_quantity <= quantity),
+    released_quantity NUMERIC(19, 4) NOT NULL DEFAULT 0 CHECK (released_quantity >= 0 AND released_quantity <= quantity),
     state VARCHAR(16) NOT NULL CHECK (state IN ('RESERVED', 'ALLOCATED', 'RELEASED')),
+    CHECK (allocated_quantity + released_quantity <= quantity),
     UNIQUE (order_id, warehouse_id, sellable_id)
 );
 CREATE INDEX inventory_reservation_order_idx ON inventory_reservation(order_id);
@@ -228,6 +231,21 @@ CREATE TABLE carts (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(
 CREATE TABLE cart_items (cart_id UUID NOT NULL REFERENCES carts(id) ON DELETE CASCADE, variant_id UUID NOT NULL, quantity INTEGER NOT NULL CHECK (quantity > 0), unit_price NUMERIC(19,4) NOT NULL CHECK (unit_price >= 0), currency CHAR(3) NOT NULL, PRIMARY KEY (cart_id, variant_id));
 CREATE TABLE orders (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), status VARCHAR(32) NOT NULL, subtotal NUMERIC(19,4) NOT NULL, tax NUMERIC(19,4) NOT NULL, shipping NUMERIC(19,4) NOT NULL, total NUMERIC(19,4) NOT NULL, currency CHAR(3) NOT NULL, shipping_address TEXT NOT NULL, billing_address TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, shipping_method_id VARCHAR(120), shipping_parcel_weight_kg NUMERIC(12,3), shipment_reference VARCHAR(255), shipping_label_url TEXT);
 CREATE TABLE order_items (id UUID PRIMARY KEY, order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE, variant_id UUID NOT NULL, quantity INTEGER NOT NULL CHECK (quantity > 0), unit_price NUMERIC(19,4) NOT NULL, currency CHAR(3) NOT NULL);
+CREATE TABLE order_shipments (
+    id UUID PRIMARY KEY,
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    tracking_number VARCHAR(255) NOT NULL,
+    shipment_reference VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (order_id, tracking_number)
+);
+CREATE INDEX order_shipments_order_idx ON order_shipments(order_id, created_at, id);
+CREATE TABLE order_shipment_items (
+    shipment_id UUID NOT NULL REFERENCES order_shipments(id) ON DELETE CASCADE,
+    order_item_id UUID NOT NULL REFERENCES order_items(id),
+    quantity NUMERIC(19,4) NOT NULL CHECK (quantity > 0),
+    PRIMARY KEY (shipment_id, order_item_id)
+);
 CREATE TABLE order_returns (
   id UUID PRIMARY KEY,
   order_id UUID NOT NULL REFERENCES orders(id),

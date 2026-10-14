@@ -170,6 +170,32 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void partialShipmentsTrackLineQuantitiesAndAllocateOnlyWhatActuallyShips() {
+        UUID orderId=UUID.randomUUID(),sellableId=UUID.randomUUID(),orderItemId=UUID.randomUUID();
+        var warehouse=inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "SHIP-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(java.util.Locale.ROOT),"Shipment test","CH-ZH"));
+        inventory.receive(warehouse.id(),sellableId,new BigDecimal("2"));
+        inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(orderId,warehouse.id(),sellableId,new BigDecimal("2")));
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) VALUES (?,?,'PAID',20,0,0,20,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",orderId,adminUserId,"partial-ship-"+orderId);
+        jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,2,10,'CHF',NULL)",orderItemId,orderId,sellableId);
+
+        var first=adminExchange("/api/v1/admin/orders/"+orderId+"/shipments",HttpMethod.POST,
+                Map.of("trackingNumber","TRACK-"+orderId,"items",List.of(Map.of("orderItemId",orderItemId,"quantity",1))),Map.class);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("PARTIALLY_SHIPPED");
+        assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement().satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("1");assertThat(stock.reserved()).isEqualByComparingTo("1");});
+
+        var duplicate=adminExchange("/api/v1/admin/orders/"+orderId+"/shipments",HttpMethod.POST,
+                Map.of("trackingNumber","TRACK-"+orderId,"items",List.of(Map.of("orderItemId",orderItemId,"quantity",1))),Map.class);
+        assertThat(duplicate.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        var second=adminExchange("/api/v1/admin/orders/"+orderId+"/shipments",HttpMethod.POST,
+                Map.of("trackingNumber","TRACK-SECOND-"+orderId,"items",List.of(Map.of("orderItemId",orderItemId,"quantity",1))),Map.class);
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("SHIPPED");
+        assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement().satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("0");assertThat(stock.reserved()).isEqualByComparingTo("0");});
+    }
+
+    @Test
     void duplicatesProductAsUnpublishedDraftWithFreshIdentityAndSku(){
         var source=adminExchange("/api/v1/products",HttpMethod.POST,
                 new io.artio.api.catalog.ProductRequest("Desk lamp","Brass lamp","LAMP-ORIGINAL"),

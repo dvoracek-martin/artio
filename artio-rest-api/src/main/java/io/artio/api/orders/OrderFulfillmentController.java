@@ -6,6 +6,8 @@ import io.artio.extensions.commerce.ShippingProvider;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
+import java.util.HashSet;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
@@ -28,7 +30,7 @@ public class OrderFulfillmentController {
 
     @PostMapping("/{id}/ship") @Transactional
     public FulfillmentView ship(@PathVariable UUID id,@RequestBody ShipRequest request){
-        String status=status(id);
+        String status=jdbc.query("SELECT status FROM orders WHERE id=? FOR UPDATE",(rs,n)->rs.getString(1),id).stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found"));
         if(!"PAID".equals(status)&&!"CONFIRMED".equals(status))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only paid or confirmed orders can be shipped");
         ShippingProvider provider=shippingProvider.getIfAvailable();
         String trackingNumber=request.trackingNumber();String shipmentReference=null;String labelUrl=null;
@@ -45,6 +47,9 @@ public class OrderFulfillmentController {
             }
         }
         if(trackingNumber==null||trackingNumber.isBlank())throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Shipping provider did not return a tracking number");
+        UUID shipmentId=UUID.randomUUID();
+        jdbc.update("INSERT INTO order_shipments(id,order_id,tracking_number,shipment_reference) VALUES (?,?,?,?)",shipmentId,id,trackingNumber,shipmentReference);
+        jdbc.update("INSERT INTO order_shipment_items(shipment_id,order_item_id,quantity) SELECT ?,id,quantity FROM order_items WHERE order_id=?",shipmentId,id);
         for(var reservation:inventory.reservationsByOrder(id))if(reservation.state()==io.artio.inventory.ReservationState.RESERVED)inventory.allocate(reservation.id());
         jdbc.update("UPDATE orders SET status='SHIPPED',tracking_number=?,shipment_reference=?,shipping_label_url=? WHERE id=?",trackingNumber,shipmentReference,labelUrl,id);
         UUID userId=jdbc.queryForObject("SELECT user_id FROM orders WHERE id=?",UUID.class,id);
@@ -52,6 +57,43 @@ public class OrderFulfillmentController {
         jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,'Order shipped',?,false,?,?) ON CONFLICT (dedupe_key) DO NOTHING",UUID.randomUUID(),userId,"ORDER_SHIPPED","Your order "+id+" is on the way. Tracking: "+trackingNumber,"order-shipped:"+id,java.sql.Timestamp.from(Instant.now()));
         orderUpdates.publish(id);
         return new FulfillmentView(id,"SHIPPED",trackingNumber,shipmentReference,labelUrl);
+    }
+
+    @PostMapping("/{id}/shipments") @Transactional
+    public ShipmentView createPartialShipment(@PathVariable UUID id,@RequestBody CreateShipmentRequest request){
+        String status=jdbc.query("SELECT status FROM orders WHERE id=? FOR UPDATE",(rs,n)->rs.getString(1),id).stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found"));
+        if(!List.of("PAID","CONFIRMED","PARTIALLY_SHIPPED").contains(status))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only paid or confirmed orders can be fulfilled");
+        if(request==null||request.trackingNumber()==null||request.trackingNumber().isBlank()||request.trackingNumber().length()>255||request.shipmentReference()!=null&&request.shipmentReference().length()>255||request.items()==null||request.items().isEmpty()||request.items().size()>100)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A tracking number and 1–100 shipment lines are required");
+        UUID shipmentId=UUID.randomUUID();HashSet<UUID> unique=new HashSet<>();
+        try{jdbc.update("INSERT INTO order_shipments(id,order_id,tracking_number,shipment_reference) VALUES (?,?,?,?)",shipmentId,id,request.trackingNumber().trim(),request.shipmentReference());}
+        catch(org.springframework.dao.DuplicateKeyException duplicate){throw new ResponseStatusException(HttpStatus.CONFLICT,"This tracking number is already assigned to the order");}
+        for(var item:request.items()){
+            if(item==null||item.orderItemId()==null||item.quantity()==null||item.quantity().signum()<=0||item.quantity().precision()>15||item.quantity().stripTrailingZeros().scale()>4||!unique.add(item.orderItemId()))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Shipment lines must have unique order items and valid positive quantities");
+            var line=jdbc.query("SELECT variant_id,quantity,bundle_id FROM order_items WHERE id=? AND order_id=?",(rs,n)->new ShipmentOrderLine(rs.getObject("variant_id",UUID.class),rs.getBigDecimal("quantity"),rs.getObject("bundle_id",UUID.class)),item.orderItemId(),id).stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.BAD_REQUEST,"Shipment line does not belong to this order"));
+            java.math.BigDecimal shipped=jdbc.queryForObject("SELECT COALESCE(sum(si.quantity),0) FROM order_shipment_items si JOIN order_shipments s ON s.id=si.shipment_id WHERE s.order_id=? AND si.order_item_id=?",java.math.BigDecimal.class,id,item.orderItemId());
+            if(item.quantity().compareTo(line.quantity().subtract(shipped))>0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Shipment quantity exceeds the unfulfilled quantity");
+            jdbc.update("INSERT INTO order_shipment_items(shipment_id,order_item_id,quantity) VALUES (?,?,?)",shipmentId,item.orderItemId(),item.quantity());
+            inventory.allocate(id,line.variantId(),item.quantity());
+        }
+        boolean complete=Boolean.TRUE.equals(jdbc.queryForObject("SELECT NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id=? AND oi.quantity > COALESCE((SELECT sum(si.quantity) FROM order_shipment_items si JOIN order_shipments s ON s.id=si.shipment_id WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0))",Boolean.class,id));
+        String nextStatus=complete?"SHIPPED":"PARTIALLY_SHIPPED";
+        if(complete)for(var reservation:inventory.reservationsByOrder(id))if(reservation.state()==io.artio.inventory.ReservationState.RESERVED)inventory.allocate(reservation.id());
+        jdbc.update("UPDATE orders SET status=?,tracking_number=?,shipment_reference=? WHERE id=?",nextStatus,request.trackingNumber().trim(),request.shipmentReference(),id);
+        OrderTimelineEvents.record(jdbc,id,null,"ORDER_SHIPMENT_CREATED","Shipment created. Tracking: "+request.trackingNumber().trim(),true);
+        if(complete)OrderTimelineEvents.record(jdbc,id,null,"ORDER_SHIPPED","All order items have shipped",true);
+        orderUpdates.publish(id);
+        return new ShipmentView(shipmentId,id,nextStatus,request.trackingNumber().trim(),request.shipmentReference(),request.items(),complete);
+    }
+
+    @GetMapping("/{id}/shipments")
+    public List<ShipmentView> shipments(@PathVariable UUID id){
+        if(jdbc.query("SELECT 1 FROM orders WHERE id=?",(rs,n)->rs.getInt(1),id).isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");
+        return jdbc.query("SELECT id,order_id,tracking_number,shipment_reference,created_at FROM order_shipments WHERE order_id=? ORDER BY created_at,id",(rs,n)->{
+            UUID shipmentId=rs.getObject("id",UUID.class);List<ShipmentItemRequest> items=jdbc.query("SELECT order_item_id,quantity FROM order_shipment_items WHERE shipment_id=? ORDER BY order_item_id",(item,row)->new ShipmentItemRequest(item.getObject("order_item_id",UUID.class),item.getBigDecimal("quantity")),shipmentId);
+            String orderStatus=status(id);
+            return new ShipmentView(shipmentId,rs.getObject("order_id",UUID.class),orderStatus,rs.getString("tracking_number"),rs.getString("shipment_reference"),items,"SHIPPED".equals(orderStatus));
+        },id);
     }
 
     @PostMapping("/{id}/deliver")
@@ -111,6 +153,10 @@ public class OrderFulfillmentController {
     }
     private String status(UUID id){var statuses=jdbc.query("SELECT status FROM orders WHERE id=?",(rs,n)->rs.getString(1),id);if(statuses.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");return statuses.getFirst();}
     public record ShipRequest(String trackingNumber){} public record FulfillmentView(UUID orderId,String status,String trackingNumber,String shipmentReference,String labelUrl){}
+    public record CreateShipmentRequest(String trackingNumber,String shipmentReference,List<ShipmentItemRequest> items){}
+    public record ShipmentItemRequest(UUID orderItemId,java.math.BigDecimal quantity){}
+    public record ShipmentView(UUID id,UUID orderId,String orderStatus,String trackingNumber,String shipmentReference,List<ShipmentItemRequest> items,boolean orderFulfilled){}
+    private record ShipmentOrderLine(UUID variantId,java.math.BigDecimal quantity,UUID bundleId){}
     public record TrackingView(UUID orderId,String trackingReference,String status,String lastLocation,Instant occurredAt,Instant checkedAt){}
     private record TrackingOrder(String status,String trackingNumber){}
     private record ShippingOrder(String address,String country,String methodId,BigDecimal weightKg,BigDecimal declaredValue,String currency){}

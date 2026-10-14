@@ -114,7 +114,7 @@ The storefront includes responsive catalog browsing, search, bundle configuratio
 
 Backoffice catalog administration includes paginated search, metadata, translations, SEO, CSV exchange and product media upload/replacement/order/removal. Product images are validated and stored on a persistent Docker volume; multi-host deployments require a shared media-storage adapter. See [product media API v1](docs/catalog/product-media-v1.md).
 
-Backoffice order search, detail, fulfillment, timeline, internal notes and CSV export use secured staff APIs. ADMIN/SUPERADMIN can issue idempotent partial or full payment refunds from order detail; customer return requests, staff review, receipt and optional warehouse restocking keep merchandise and financial history separate. See [admin order management](docs/orders/admin-order-management-v1.md), [payment refunds](docs/payments/refunds-v1.md) and [order returns, timeline and notes](docs/orders/returns-v1.md).
+Backoffice order search, detail, multi-shipment fulfillment, timeline, internal notes and CSV export use secured staff APIs. ADMIN/SUPERADMIN can issue idempotent partial or full payment refunds from order detail; customer return requests, staff review, receipt and optional warehouse restocking keep merchandise and financial history separate. See [admin order management](docs/orders/admin-order-management-v1.md), [order fulfillment](docs/orders/fulfillment-v1.md), [payment refunds](docs/payments/refunds-v1.md) and [order returns, timeline and notes](docs/orders/returns-v1.md).
 
 Loyalty points accrue after confirmed payment, reverse proportionally with refunds and support idempotent redemption and audited staff adjustments. See [loyalty v1](docs/loyalty/loyalty-v1.md).
 

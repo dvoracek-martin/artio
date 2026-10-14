@@ -39,6 +39,18 @@ class InventoryTests {
         assertThat(reservation.getState()).isEqualTo(ReservationState.RELEASED);
         assertThatThrownBy(reservation::allocate).isInstanceOf(IllegalStateException.class);
     }
+    @Test void reservationCanBeAllocatedInPartsAndThenReleaseItsRemainingQuantity() {
+        var reservation=Reservation.reserve(new ReservationId(UUID.randomUUID()),UUID.randomUUID(),new WarehouseId(UUID.randomUUID()),UUID.randomUUID(),new Quantity(new BigDecimal("5")));
+        reservation.allocate(new BigDecimal("2"));
+        assertThat(reservation.getState()).isEqualTo(ReservationState.RESERVED);
+        assertThat(reservation.getAllocatedQuantity()).isEqualByComparingTo("2");
+        assertThat(reservation.remainingQuantity()).isEqualByComparingTo("3");
+        reservation.release();
+        assertThat(reservation.getState()).isEqualTo(ReservationState.ALLOCATED);
+        assertThat(reservation.getReleasedQuantity()).isEqualByComparingTo("3");
+        assertThat(reservation.remainingQuantity()).isEqualByComparingTo("0");
+        assertThatThrownBy(reservation::allocate).isInstanceOf(IllegalStateException.class);
+    }
     @Test void warehouseRequiresValidCodeAndNonBlankLocation() {
         assertThatThrownBy(()->Warehouse.create(new WarehouseId(UUID.randomUUID()),"nyc","Main","US"))
                 .isInstanceOf(IllegalArgumentException.class);
