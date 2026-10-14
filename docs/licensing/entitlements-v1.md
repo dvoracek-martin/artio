@@ -22,6 +22,8 @@ Normal requests evaluate a previously verified local document. There is no synch
 
 The JSON envelope has exactly `keyId`, `payload`, and `signature`. `payload` and `signature` are unpadded canonical base64url strings. The signature is Ed25519 over the decoded payload bytes, not a reserialized JSON representation. `keyId` selects a configured trusted Ed25519 X.509 public key. Maximum envelope size is 64 KiB; decoded payload is at most 16 KiB. Duplicate/unknown fields and unknown features are rejected.
 
+The envelope and decoded payload must both be UTF-8. UTF-16/32 auto-detection and malformed UTF-8 are rejected so accepted bytes survive durable TEXT storage unchanged.
+
 The signed payload has exactly these fields:
 
 ```json
@@ -43,7 +45,9 @@ The policy is active at `notBefore <= now < expiresAt`, then grace at `expiresAt
 
 ## Refresh and failure policy
 
-The runtime integration must persist the last verified document atomically in a dedicated writable license volume, separate from read-only installation secrets. Optional refresh uses a configured HTTPS endpoint, bounded response size/deadline, no redirects, and a controlled schedule (six hours by default). Refresh is disabled when no endpoint is configured. An optional refresh credential is read from a restricted file and never returned to the browser or included in audit/logs.
+V31 persists the last verified document and installation UUID atomically in the singleton `artio_license_state` PostgreSQL row, with audit in the same transaction. Verified memory state changes only after the outermost transaction commits. Each process reloads database state at most once per minute, so cross-process replacement/revocation propagation is bounded to one minute; signed expiry is evaluated on every check. Database backup/restore preserves both the entitlement and installation binding. See [ADR-0003](../adr/0003-postgres-entitlement-state.md).
+
+Optional refresh uses a configured HTTPS GET endpoint, a 64 KiB response cap, a five-second deadline including body delivery, no redirects, and a controlled schedule (six hours by default; configurable between 60 and 86400 seconds). The first scheduled attempt occurs after one minute. Only the web API role runs this dedicated scheduler; it does not enable unrelated API workers. Refresh is disabled when no endpoint is configured. An optional refresh credential is read from a restricted file (maximum 4 KiB) and never returned to the browser or included in audit/logs. Endpoint provisioning associates the installation with an issuer-side credential/URI; the runtime does not automatically send customer or installation data to an unconfigured service.
 
 A refresh network/TLS/HTTP/parsing/signature failure retains the last verified document and its original deadlines. A newly verified, currently applicable signed document replaces it; this includes signed removal of feature grants. Future-dated replacements must not prematurely erase a currently applicable document. Expiry ends only new Enterprise activity listed above. Core commerce and fulfillment of existing obligations remain operational.
 
@@ -51,8 +55,28 @@ Within the local last-known-good state, replacement `issuedAt` must increase. Re
 
 Owner status exposes the installation identity, edition/state, feature availability, validity/grace deadlines and safe refresh state. It does not expose the signed envelope, issuer/license/customer identifiers, refresh token, public-key configuration or private data. Manual install/refresh is restricted to SUPERADMIN and audited without license contents.
 
+## Operator configuration and API
+
+Community starts with no issuer trust file, signed document or refresh endpoint. The database generates its identity automatically. A missing/invalid trust file leaves Community functional and reports a safe configuration state; it never enables Enterprise.
+
+`ARTIO_LICENSE_PUBLIC_KEYS_FILE` points to a read-only JSON object mapping up to eight key IDs to standard-base64 X.509 Ed25519 **public** keys. Duplicate IDs, private keys, other algorithms, unknown key-ID characters, malformed JSON and files larger than 16 KiB are rejected. Obtain this trust file through the issuer's approved distribution channel; do not generate a customer signing key or add a private key to this deployment. Compose passes this path to API/event/notification processes. A path inside `/run/artio-secrets/` uses the existing restricted persistent secret volume and is backed up with it. Restart those processes when changing trust anchors.
+
+`ARTIO_LICENSE_REFRESH_URL` optionally configures the HTTPS issuer endpoint. `ARTIO_LICENSE_REFRESH_CREDENTIAL_FILE` optionally names a protected bearer credential file, usually in the same secret volume. The token is never an environment-variable value. `ARTIO_LICENSE_REFRESH_INTERVAL_SECONDS` defaults to `21600`. These refresh settings apply to the API process only; workers evaluate the shared local state.
+
+All following canonical routes require an authenticated SUPERADMIN (the `/api/...` compatibility alias remains available):
+
+| Method and route | Behavior |
+|---|---|
+| `GET /api/v1/admin/system/license` | Safe status and persistent installation ID to provide to the issuer |
+| `POST /api/v1/admin/system/license` | Raw signed JSON envelope, maximum 64 KiB for fixed/chunked uploads; validate and atomically install with audit |
+| `POST /api/v1/admin/system/license/refresh` | Explicit controlled refresh; returns safe status and audits the owner request even if refresh is unconfigured |
+
+The status has `installationId`, `edition`, `state`, available `features`, `expiresAt`, `graceUntil`, `verificationStatus`, `refreshConfigured`, `refreshStatus`, `lastRefreshAttemptAt`, `lastRefreshSuccessAt` and `refreshInProgress`. An empty or expired grant exposes an empty feature set. Refresh states include `NOT_CONFIGURED`, `NEVER`, `IN_PROGRESS`, `SUCCESS`, `UNAVAILABLE`, `INVALID_RESPONSE` and `INVALID_CONFIGURATION`; no issuer response body/error message is exposed. Invalid uploads return 400 and preserve the current document; oversized uploads return 413. Unauthorized callers return 401/403 before upload parsing.
+
 ## Implementation evidence
 
-`SignedEntitlementVerifier` and `EntitlementPolicy` implement local Ed25519 verification and validity/replacement policy. Nine tests verify exact active/grace/expired boundaries, explicit features, installation matching, tampering/unknown issuer rejection, strict schema/duplicate handling, time/size/encoding limits, Community defaults, last-known-good behavior, restart expiry, signed feature removal and stale/future replacement rejection. Ephemeral issuer private keys exist only in tests.
+`SignedEntitlementVerifier` and `EntitlementPolicy` implement local Ed25519 verification and validity/replacement policy. Ten tests verify strict UTF-8 persistence compatibility, exact active/grace/expired boundaries, explicit features, installation matching, tampering/unknown issuer rejection, strict schema/duplicate handling, time/size/encoding limits, Community defaults, last-known-good behavior, restart expiry, signed feature removal and stale/future replacement rejection. Ephemeral issuer private keys exist only in tests.
 
-Remaining completion gates: runtime storage/HTTPS refresh tests, server boundary tests, payment/loyalty expiry obligation tests, subscription cancellation/reactivation tests, currency-separated reporting tests, and Backoffice edition/status behavior. Do not infer that the entire licensing phase is complete from verifier-only coverage.
+Runtime integration is implemented with PostgreSQL persistence, local cache, owner-only API, bounded HTTPS refresh and a dedicated scheduler. PostgreSQL/real-TLS integration tests cover restart, expiry, successful refresh with a file credential, safe responses, tampering/malformed/oversized/redirect/slow/TLS failure, transactional rollback and stale replacement across processes. Real API tests cover role authorization and fixed/chunked upload limits; migration and backup tests verify persistent identity. Consult the task ledger for the latest executed gates.
+
+Remaining completion gates: use-case feature boundaries, payment/loyalty expiry obligation tests, subscription cancellation/reactivation tests, currency-separated reporting tests, and Backoffice edition/status behavior. The runtime foundation alone does not finish the licensing phase.

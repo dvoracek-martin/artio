@@ -14,6 +14,12 @@ public final class EntitlementPolicy {
     }
 
     public synchronized VerifiedEntitlement accept(byte[] signedDocument, Instant now) {
+        VerifiedEntitlement next = validateReplacement(signedDocument, now);
+        current.set(next);
+        return next;
+    }
+
+    public synchronized VerifiedEntitlement validateReplacement(byte[] signedDocument, Instant now) {
         VerifiedEntitlement next = verifier.verify(signedDocument, now);
         if (next.stateAt(now) == VerifiedEntitlement.State.NOT_YET_VALID)
             throw new IllegalArgumentException("Entitlement is not yet applicable");
@@ -21,7 +27,6 @@ public final class EntitlementPolicy {
         if (previous != null && (next.issuedAt().isBefore(previous.issuedAt())
                 || (next.issuedAt().equals(previous.issuedAt()) && !next.equals(previous))))
             throw new IllegalArgumentException("Entitlement replacement is older or conflicts with the current grant");
-        current.set(next);
         return next;
     }
 

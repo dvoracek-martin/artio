@@ -1,0 +1,13 @@
+# ADR-0003: Persist installation identity and signed entitlements in PostgreSQL
+
+Status: accepted, 2026-10-15.
+
+The master directive makes PostgreSQL the installation's source of truth and requires local signed entitlement evaluation, controlled HTTPS refresh and an explicit outage/grace policy. The owner assigned loyalty, subscriptions and advanced reporting to Enterprise. Initial contract drafting suggested a dedicated writable license volume. No such volume had been implemented.
+
+Use the singleton `artio_license_state` row introduced by V31 instead. Its installation UUID is generated once and survives process restart, migration rerun and database backup/restore. Store the signed document, a monotonic revision and safe refresh metadata in this row. Public issuer keys and an optional refresh credential stay in read-only configuration/secret files. Issuer private keys never ship in Core.
+
+Replacement locks the row, verifies the signed installation binding and replacement order, writes the document and an audit event in one transaction, and publishes the verified in-memory state only after the outermost transaction commits. Cache publication ignores older revisions. Normal requests use the local verified cache and signed absolute deadlines. Each process reloads local database state at most once per minute; this bounds cross-process grant/revocation propagation. No request-path call reaches the issuer. A database reload failure retains the existing memory grant without extending its deadlines.
+
+Only the web API role runs the dedicated refresh scheduler, initially after one minute and then every six hours by default. It does not enable the unrelated scheduled worker infrastructure. The issuer URI must be HTTPS without user info or a fragment; redirects are disabled. Both the response body (64 KiB) and complete fetch deadline (five seconds, including slow body delivery) are bounded. A failed/untrusted/malformed/oversized response cannot replace the persisted document. Refresh failure keeps the last verified grant until its signed expiry/grace deadline.
+
+Consequences: no additional writable volume or cross-process file lock is needed, and the existing database backup includes license state and installation identity. Availability of normal commerce still depends on PostgreSQL as before. Public-key trust rotation requires a process restart. Signed grant changes propagate to other running processes within at most one minute; expiry is evaluated on every local check. This does not implement a licensing issuer, subscription billing or an external anti-rollback ledger.

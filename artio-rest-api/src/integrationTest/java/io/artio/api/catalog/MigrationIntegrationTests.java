@@ -48,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(5);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("30");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(6);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("31");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('inventory_low_stock_policy')")) {
             assertThat(result.next()).isTrue();
@@ -173,5 +173,25 @@ class MigrationIntegrationTests {
         return Flyway.configure()
                 .dataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration");
+    }
+
+    @Test
+    void upgradesV30ToPersistentLicenseIdentityWithoutChangingExistingCatalogData() {
+        try (var database = new PostgreSQLContainer<>("postgres:16-alpine")) {
+            database.start();
+            Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword())
+                    .locations("classpath:db/migration").target("30").load().migrate();
+            var jdbc = new JdbcTemplate(new DriverManagerDataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword()));
+            var product = java.util.UUID.randomUUID();
+            jdbc.update("INSERT INTO catalog_product(id,name,sku,active,created_at,updated_at) VALUES (?,'Upgrade fixture','UPGRADE-FIXTURE',true,now(),now())", product);
+            var upgrade = Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword())
+                    .locations("classpath:db/migration").load();
+            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(1);
+            var identity = jdbc.queryForObject("SELECT installation_id FROM artio_license_state", java.util.UUID.class);
+            assertThat(identity).isNotNull();
+            assertThat(jdbc.queryForObject("SELECT name FROM catalog_product WHERE id=?", String.class, product)).isEqualTo("Upgrade fixture");
+            assertThat(upgrade.migrate().migrationsExecuted).isZero();
+            assertThat(jdbc.queryForObject("SELECT installation_id FROM artio_license_state", java.util.UUID.class)).isEqualTo(identity);
+        }
     }
 }

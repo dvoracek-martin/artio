@@ -73,11 +73,13 @@ class BackupRecoveryIntegrationTests {
                 var encryption = new EncryptionService(AES_KEY);
                 var mapper = new ObjectMapper();
                 Path dump = temporary.resolve("artio-postgres.dump");
+                UUID installationIdentity;
                 try (var source = postgres(volumes.get("source-secrets"))) {
                     source.start();
                     Flyway.configure().dataSource(source.getJdbcUrl(), source.getUsername(), source.getPassword())
                             .locations("classpath:db/migration").load().migrate();
                     var jdbc = jdbc(source);
+                    installationIdentity = jdbc.queryForObject("SELECT installation_id FROM artio_license_state", UUID.class);
                     jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) VALUES (?,?,'fixture-hash','Recovery','Fixture','SUPERADMIN',now())",
                             user, "recovery-" + identity + "@example.test");
                     jdbc.update("INSERT INTO mfa_methods(user_id,encrypted_secret,verified) VALUES (?,?,true)", user, encryption.encrypt("JBSWY3DPEHPK3PXP"));
@@ -108,6 +110,7 @@ class BackupRecoveryIntegrationTests {
                     exec(restored, "pg_restore", "-U", restored.getUsername(), "-d", restored.getDatabaseName(),
                             "--exit-on-error", "--no-owner", "--no-privileges", "/tmp/artio-postgres.dump");
                     var jdbc = jdbc(restored);
+                    assertThat(jdbc.queryForObject("SELECT installation_id FROM artio_license_state", UUID.class)).isEqualTo(installationIdentity);
                     assertThat(Flyway.configure().dataSource(restored.getJdbcUrl(), restored.getUsername(), restored.getPassword())
                             .locations("classpath:db/migration").load().validateWithResult().validationSuccessful).isTrue();
                     String mfa = jdbc.queryForObject("SELECT encrypted_secret FROM mfa_methods WHERE user_id=?", String.class, user);

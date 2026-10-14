@@ -88,6 +88,11 @@ artio:
     extension-auth-key: ${ARTIO_EXTENSION_AUTH_KEY:${artio.security.encryption-key}}
     allowed-origins: ${ARTIO_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4201}
     oauth2-enabled: ${ARTIO_OAUTH2_ENABLED:false}
+  licensing:
+    public-keys-file: ${ARTIO_LICENSE_PUBLIC_KEYS_FILE:}
+    refresh-url: ${ARTIO_LICENSE_REFRESH_URL:}
+    refresh-credential-file: ${ARTIO_LICENSE_REFRESH_CREDENTIAL_FILE:}
+    refresh-interval-seconds: ${ARTIO_LICENSE_REFRESH_INTERVAL_SECONDS:21600}
   search:
     enabled: ${ARTIO_SEARCH_ENABLED:false}
     provider: ${ARTIO_SEARCH_PROVIDER:opensearch}

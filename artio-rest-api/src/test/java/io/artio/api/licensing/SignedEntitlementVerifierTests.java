@@ -123,6 +123,15 @@ class SignedEntitlementVerifierTests {
     }
 
     @Test
+    void rejectsNonUtf8EnvelopesAndPayloadsThatWouldChangeWhenPersistedAsText() throws Exception {
+        String envelope = new String(sign(claims()), StandardCharsets.UTF_8);
+        invalid(envelope.getBytes(StandardCharsets.UTF_16LE));
+        invalid(envelope.getBytes(StandardCharsets.UTF_16));
+        invalid(signPayload(mapper.writeValueAsString(claims()).getBytes(StandardCharsets.UTF_16LE), issuer));
+        invalid(new byte[] {(byte) 0xc3, (byte) 0x28});
+    }
+
+    @Test
     void communityIsDefaultAndFailedRefreshPreservesLastGoodOnlyUntilSignedDeadline() throws Exception {
         var policy = new EntitlementPolicy(verifier);
         assertThat(policy.current()).isEmpty();

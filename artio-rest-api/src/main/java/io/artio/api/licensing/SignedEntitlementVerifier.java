@@ -75,7 +75,13 @@ public final class SignedEntitlementVerifier {
     }
 
     private JsonNode parse(byte[] bytes) throws Exception {
-        try (var parser = mapper.createParser(bytes)) {
+        // Persisted envelopes are UTF-8 TEXT. Reject auto-detected UTF-16/32 and malformed UTF-8 rather than
+        // accepting bytes that would change when decoded for durable storage.
+        String json = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        try (var parser = mapper.createParser(json)) {
             JsonNode value = mapper.readTree(parser);
             if (parser.nextToken() != null) throw invalid();
             return value;

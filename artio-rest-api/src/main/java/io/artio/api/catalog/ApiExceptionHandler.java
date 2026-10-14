@@ -21,6 +21,14 @@ import org.slf4j.LoggerFactory;
 public class ApiExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
+    @ExceptionHandler(io.artio.api.licensing.FeatureNotLicensedException.class)
+    ResponseEntity<ApiError> notLicensed(io.artio.api.licensing.FeatureNotLicensedException exception, HttpServletRequest request) {
+        Object originalPath = request.getAttribute(ApiVersioningFilter.ORIGINAL_REQUEST_PATH_ATTRIBUTE);
+        String path = originalPath instanceof String value ? value : request.getRequestURI();
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiError(java.time.Instant.now(), 403,
+                "Forbidden", "FEATURE_NOT_LICENSED", exception.getMessage(), path));
+    }
+
     @ExceptionHandler(CatalogNotFoundException.class)
     ResponseEntity<ApiError> notFound(CatalogNotFoundException exception, HttpServletRequest request) {
         return error(HttpStatus.NOT_FOUND, exception.getMessage(), request);

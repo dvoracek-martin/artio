@@ -2,6 +2,8 @@
 
 Artio stores commerce records in PostgreSQL, installation credentials in the `artio-installation-secrets` named volume, and product image blobs in the `artio-catalog-media` named volume. A complete recovery set must contain the database dump and both volumes. The secrets volume contains the database password, JWT signing secret, active AES-GCM encryption key, stable extension-authentication key and first-run setup token. A database dump without the matching keys cannot decrypt saved plugin secrets or preserve plugin credentials; a dump without the media volume leaves product image records with missing files.
 
+V31 also stores the persistent installation UUID and signed license document in PostgreSQL. Restoring that database preserves the license's installation binding; do not generate a new identity on recovery. If configured, keep the issuer public-key trust file and optional refresh credential in the backed-up restricted secret volume or restore their externally managed files separately. Issuer private keys are never part of an Artio recovery set. The isolated recovery test verifies the installation UUID survives restoration.
+
 Run commands from the repository root with the normal Compose project name (`artio`). Keep the database dump and both volume archives in encrypted, access-controlled storage outside the machine running Artio. Do not commit any backup artifact.
 
 ## Create a backup
