@@ -4,6 +4,8 @@ This is the canonical phase/task ledger. Detailed baseline is in [REPOSITORY_AUD
 
 ## Current state
 
+- **Returns from partial shipments (2026-10-14):** Customers may request returns while an order is `PARTIALLY_SHIPPED`, but only up to the quantity present in its shipment records. Existing pending/approved/completed return quantities reduce that cap; unshipped quantity cannot be returned. Fully shipped orders continue to cap returns at purchased quantity. API contract updated in `docs/orders/returns-v1.md`; `git diff --check` exited 0. Tests were not run; Docker-backed behavior remains unverified.
+
 - **Return restock audit attribution (2026-10-14):** Stock receipts created by staff return intake now include the return UUID as the movement reason and the authenticated staff user as actor, using the inventory application's audited receipt operation. `git diff --check` exited 0. Tests/build were not run; Docker-backed persistence acceptance remains unavailable.
 
 - **Backoffice return receiving usability (2026-10-14):** Order detail now loads active warehouses from the inventory API and provides an explicit warehouse selector for restocking. Staff can separately receive without restocking; dismissing a confirmation dialog no longer silently selects that outcome. The return API remains unchanged and financial refund remains a distinct explicit operation. `git diff --check` exited 0. Frontend build was not run; live database workflow remains Docker-gated.

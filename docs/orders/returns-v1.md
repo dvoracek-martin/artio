@@ -4,7 +4,7 @@ Artio separates merchandise returns from payment refunds. A return request track
 
 ## Customer routes
 
-`POST /api/v1/orders/{orderId}/returns` creates a return request for an authenticated order owner. It requires an `Idempotency-Key` (1–128 characters) and a body with a nonblank `reason`, optional `customerNote`, and 1–50 `{ "orderItemId": "…", "quantity": 1 }` lines. The order must be shipped, delivered, or already partially returned. The server checks order ownership and verifies each line belongs to the order. Quantities already requested, approved, or completed are reserved against the original purchased quantity. Repeating a key with identical lines returns the existing request; reusing it with a different order or line set returns `409`.
+`POST /api/v1/orders/{orderId}/returns` creates a return request for an authenticated order owner. It requires an `Idempotency-Key` (1–128 characters) and a body with a nonblank `reason`, optional `customerNote`, and 1–50 `{ "orderItemId": "…", "quantity": 1 }` lines. The order must have shipped items (`PARTIALLY_SHIPPED`, `SHIPPED`, `DELIVERED`, or `RETURNED`). The server checks order ownership and verifies each line belongs to the order. For a partially shipped order, returnable quantity is capped at the quantity recorded in shipment items; for fully shipped orders it is capped at the purchased quantity. Quantities already requested, approved, or completed are reserved against that shipped quantity. Repeating a key with identical lines returns the existing request; reusing it with a different order or line set returns `409`.
 
 `GET /api/v1/orders/{orderId}/returns` lists return requests only for the authenticated order owner.
 

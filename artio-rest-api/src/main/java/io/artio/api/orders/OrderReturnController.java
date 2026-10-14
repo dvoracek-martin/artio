@@ -42,8 +42,8 @@ public class OrderReturnController {
         String orderStatus = jdbc.query("SELECT status FROM orders WHERE id=? AND user_id=? FOR UPDATE",
                 (rs, row) -> rs.getString(1), orderId, customerId).stream().findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
-        if (!List.of("SHIPPED", "DELIVERED", "RETURNED").contains(orderStatus))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only shipped orders can be returned");
+        if (!List.of("PARTIALLY_SHIPPED", "SHIPPED", "DELIVERED", "RETURNED").contains(orderStatus))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only shipped order items can be returned");
 
         var prior = jdbc.query("SELECT id,order_id,status,reason,customer_note,staff_note,created_at,reviewed_at,completed_at "
                         + "FROM order_returns WHERE customer_id=? AND idempotency_key=?",
@@ -62,11 +62,16 @@ public class OrderReturnController {
             Integer ordered = jdbc.query("SELECT quantity FROM order_items WHERE id=? AND order_id=? FOR UPDATE",
                     (rs, row) -> rs.getInt(1), line.orderItemId(), orderId).stream().findFirst()
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Return line does not belong to this order"));
+            Integer shipped = "PARTIALLY_SHIPPED".equals(orderStatus)
+                    ? jdbc.queryForObject("SELECT COALESCE(sum(si.quantity),0)::integer FROM order_shipment_items si "
+                            + "JOIN order_shipments s ON s.id=si.shipment_id WHERE s.order_id=? AND si.order_item_id=?",
+                            Integer.class, orderId, line.orderItemId())
+                    : ordered;
             Integer reserved = jdbc.queryForObject("SELECT COALESCE(sum(ri.quantity),0)::integer FROM order_return_items ri "
                     + "JOIN order_returns r ON r.id=ri.return_id WHERE ri.order_item_id=? AND r.status IN ('REQUESTED','APPROVED','COMPLETED')",
                     Integer.class, line.orderItemId());
-            if (line.quantity() > ordered - reserved)
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Requested return quantity exceeds the unreturned order quantity");
+            if (line.quantity() > shipped - reserved)
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Requested return quantity exceeds the shipped, unreturned quantity");
         }
         UUID returnId = UUID.randomUUID();
         jdbc.update("INSERT INTO order_returns(id,order_id,customer_id,status,reason,customer_note,idempotency_key) VALUES (?,?,?,'REQUESTED',?,?,?)",
