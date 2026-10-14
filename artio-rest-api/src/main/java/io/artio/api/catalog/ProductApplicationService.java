@@ -15,8 +15,10 @@ import io.artio.catalog.ports.AttributeDefinitionRepository;
 import io.artio.catalog.CategoryId;
 import io.artio.catalog.BrandId;
 import io.artio.catalog.AttributeDefinitionId;
+import io.artio.api.catalog.media.ProductMediaService;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.cache.annotation.Cacheable;
@@ -32,17 +34,22 @@ public class ProductApplicationService {
     private final CategoryRepository categories;
     private final AttributeDefinitionRepository attributeDefinitions;
     private final CatalogSearchIndexLock searchIndexLock;
+    private final JdbcTemplate jdbc;
+    private final ProductMediaService media;
 
     public ProductApplicationService(ProductRepository products, ObjectProvider<ProductSearch> search,
                                      BrandRepository brands, CategoryRepository categories,
                                      AttributeDefinitionRepository attributeDefinitions,
-                                     CatalogSearchIndexLock searchIndexLock) {
+                                     CatalogSearchIndexLock searchIndexLock, JdbcTemplate jdbc,
+                                     ProductMediaService media) {
         this.products = products;
         this.search = search;
         this.brands = brands;
         this.categories = categories;
         this.attributeDefinitions = attributeDefinitions;
         this.searchIndexLock = searchIndexLock;
+        this.jdbc = jdbc;
+        this.media = media;
     }
 
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
@@ -72,6 +79,17 @@ public class ProductApplicationService {
             copy.setAttribute(definition,value);
         });
         products.save(copy);
+        List<TranslationCopy> translations = jdbc.query("SELECT locale,name,description FROM catalog_product_translations WHERE product_id=? ORDER BY locale",
+                (rs, row) -> new TranslationCopy(rs.getString("locale"), rs.getString("name"), rs.getString("description")), sourceId);
+        ProductSearch productSearch = search.getIfAvailable();
+        for (TranslationCopy translation : translations) {
+            jdbc.update("INSERT INTO catalog_product_translations(product_id,locale,name,description,seo_slug,seo_title,seo_description) "
+                            + "VALUES (?,?,?,?,NULL,NULL,NULL)",
+                    copy.getId().value(), translation.locale(), translation.name(), translation.description());
+            if (productSearch != null) productSearch.indexLocalized(copy.getId().value(), copy.getSku().value(), false,
+                    new LocaleCode(translation.locale()), translation.name(), translation.description());
+        }
+        media.copyToProduct(sourceId, copy.getId().value());
         index(copy);
         return ProductResponse.from(copy);
     }
@@ -239,4 +257,6 @@ public class ProductApplicationService {
         ProductSearch productSearch = search.getIfAvailable();
         if (productSearch != null) productSearch.index(product);
     }
+
+    private record TranslationCopy(String locale, String name, String description) { }
 }

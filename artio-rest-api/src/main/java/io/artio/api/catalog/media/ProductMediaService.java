@@ -58,6 +58,35 @@ public class ProductMediaService {
         return findOne(productId, id);
     }
 
+    /** Copy sanitized image blobs and metadata to a new draft product within the caller's transaction. */
+    public List<MediaView> copyToProduct(UUID sourceProductId, UUID targetProductId) {
+        java.util.stream.Stream.of(sourceProductId, targetProductId)
+                .sorted(java.util.Comparator.comparing(UUID::toString)).forEach(this::lockProduct);
+        List<MediaCopyRow> source = jdbc.query("SELECT storage_key,content_type,alt_text,position FROM catalog_product_media "
+                        + "WHERE product_id=? ORDER BY position,created_at,id",
+                (rs, row) -> new MediaCopyRow(rs.getString("storage_key"), rs.getString("content_type"),
+                        rs.getString("alt_text"), rs.getInt("position")), sourceProductId);
+        if (source.size() > MAX_MEDIA_PER_PRODUCT) throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "The source product exceeds the image limit and cannot be duplicated");
+        for (MediaCopyRow item : source) {
+            SanitizedImage image = sanitize(storage.read(item.storageKey()));
+            String extension = image.contentType().equals("image/jpeg") ? ".jpg" : ".png";
+            UUID mediaId = UUID.randomUUID();
+            String key = mediaId + extension;
+            storage.store(key, image.content());
+            cleanupIfRolledBack(key);
+            try {
+                jdbc.update("INSERT INTO catalog_product_media(id,product_id,storage_key,content_type,width,height,alt_text,position) "
+                                + "VALUES (?,?,?,?,?,?,?,?)",
+                        mediaId, targetProductId, key, image.contentType(), image.width(), image.height(), item.altText(), item.position());
+            } catch (RuntimeException failure) {
+                try { storage.delete(key); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+                throw failure;
+            }
+        }
+        return findByProduct(targetProductId);
+    }
+
     public MediaView replace(UUID productId, UUID mediaId, byte[] uploaded, String altText) {
         lockProduct(productId);
         if (uploaded == null || uploaded.length == 0) throw new IllegalArgumentException("Choose an image file");
@@ -206,6 +235,7 @@ public class ProductMediaService {
     }
 
     private record MediaRow(String storageKey, String contentType) { }
+    private record MediaCopyRow(String storageKey, String contentType, String altText, int position) { }
     record SanitizedImage(String contentType, int width, int height, byte[] content) { }
     public record MediaContent(String contentType, byte[] bytes) { }
     public record MediaView(UUID id, UUID productId, String contentType, int width, int height,
