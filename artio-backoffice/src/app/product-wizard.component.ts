@@ -30,6 +30,8 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   images: ImageDraft[] = [];
   draft = { name: '', sku: '', description: '', variantName: 'Standard', variantSku: '', brandId: '', categoryIds: [] as string[], attributes: {} as Record<string, string> };
   publish = false;
+  categoryName = '';
+  creatingCategory = false;
 
   ngOnInit(): void { this.loadOptions(); }
   ngOnDestroy(): void { this.images.forEach(image => URL.revokeObjectURL(image.url)); }
@@ -57,6 +59,18 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   }
   toggleCategory(id: string): void {
     this.draft.categoryIds = this.draft.categoryIds.includes(id) ? this.draft.categoryIds.filter(x => x !== id) : [...this.draft.categoryIds, id];
+  }
+  async createCategory(): Promise<void> {
+    if (!this.categoryName.trim() || this.creatingCategory) return;
+    this.creatingCategory = true;
+    this.error = '';
+    try {
+      const category = await firstValueFrom(this.http.post<Category>('/api/v1/categories', { name: this.categoryName.trim(), parentId: null, active: true }));
+      this.categories = [...this.categories, category];
+      this.draft.categoryIds.push(category.id);
+      this.categoryName = '';
+    } catch (e) { this.error = this.message(e, 'Could not create the category.'); }
+    finally { this.creatingCategory = false; }
   }
   validate(step: number): boolean {
     this.error = '';

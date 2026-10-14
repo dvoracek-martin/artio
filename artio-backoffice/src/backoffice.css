@@ -59,6 +59,16 @@ td:last-child { min-width: 230px; max-width: 330px; }
 .notice { padding: 14px 18px; background: #142a37; border: 1px solid #285367; color: #b7e1ed; border-radius: 10px; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
 .notice.error { background: #321f30; border-color: #6e3d53; color: #ffb2c1; }
 .danger { color: #f9a5b4; }
+.product-monogram { float: left; display: grid; place-items: center; width: 38px; height: 38px; margin: 2px 14px 8px 0; border-radius: 10px; border: 1px solid #4b4e7d; background: linear-gradient(145deg,#25375a,#30264f); color: #bdb7ff; font-size: 17px; }
+.product-actions summary { display: flex; align-items: center; justify-content: space-between; gap: 28px; list-style: none; border: 1px solid #394a68; background: #19273d; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; }
+.product-actions summary::-webkit-details-marker { display: none; }
+.product-actions summary:hover { border-color: #7b79bd; }
+.product-actions > div { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 8px; padding: 8px; background: #0c182a; border: 1px solid var(--line); border-radius: 9px; }
+.product-actions .link-button { text-align: left; font-size: 11px; }
+.new-category { border: 1px solid var(--line); border-radius: 9px; padding: 14px; font-size: 12px; }
+.new-category summary { color: #b8b5ff; cursor: pointer; }
+.new-category > div { display: flex; gap: 12px; align-items: end; margin-top: 14px; flex-wrap: wrap; }
+.new-category label { display: grid; gap: 8px; flex: 1; }
 .create-form { gap: 12px; padding: 20px; background: #0f1b2d; border-radius: 12px; }
 .content input, .content select, .content textarea { background: #0b1628; border-color: #34435c; font-size: 13px; padding: 11px 13px; }
 .content input[type=checkbox] { min-width: 0; width: 17px; height: 17px; accent-color: var(--indigo); flex-shrink: 0; }

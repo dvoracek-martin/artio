@@ -59,7 +59,7 @@ class ProductDraftIntegrationTests {
                 "Standard", request.variantSku(), null, Set.of(categoryId), Map.of());
         assertThat(http.exchange("/api/v1/products/drafts", HttpMethod.POST, new HttpEntity<>(failure,headers), String.class)
                 .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM catalog_products WHERE sku=?", Integer.class, failingSku)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM catalog_product WHERE sku=?", Integer.class, failingSku)).isZero();
 
         var missingCategory = new ProductDraftController.DraftRequest("No category", "", "NOCAT-"+suffix,
                 "Standard", "NOCAT-"+suffix+"-STD", null, Set.of(), Map.of());

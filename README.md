@@ -110,9 +110,11 @@ Administrators can store DE/IT/FR/EN bundle names and option-group labels with `
 
 ## Storefront, backoffice and operations
 
+The shared visual language is documented in [Artio visual identity](docs/BRAND_IDENTITY.md): Sora typography, dark navy surfaces and cyan–indigo–violet accents. Backoffice product creation has a [dedicated four-step wizard](docs/catalog/backoffice-product-wizard.md) at `/products/new`, including category assignment, a first variant, image previews and a final review. Product drafts and their initial variant/classification are created atomically. Image storage supports the default persistent volume or an optional [S3-compatible private bucket](docs/catalog/product-media-v1.md#optional-s3-compatible-storage).
+
 The storefront includes responsive catalog browsing, search, bundle configuration, account registration/login, cart, optional plugin-backed checkout, order history and order-status views. The Backoffice includes catalog, bundle, pricing, inventory, order/return/refund, customer, gift-card, regional settings, plugin lifecycle and operational delivery workflows. Both are strict-mode Angular applications with responsive layouts and dark-mode support.
 
-Backoffice catalog administration includes paginated search, metadata, translations, SEO, CSV exchange and product media upload/replacement/order/removal. Product images are validated and stored on a persistent Docker volume; multi-host deployments require a shared media-storage adapter. See [product media API v1](docs/catalog/product-media-v1.md).
+Backoffice catalog administration includes paginated search, metadata, translations, SEO, CSV exchange and product media upload/replacement/order/removal. Product images are validated and stored on a persistent Docker volume by default; multi-host deployments can use the configurable S3-compatible media adapter. See [product media API v1](docs/catalog/product-media-v1.md).
 
 Backoffice order search, detail, multi-shipment fulfillment, timeline, internal notes and CSV export use secured staff APIs. ADMIN/SUPERADMIN can issue idempotent partial or full payment refunds from order detail; customer return requests, staff review, receipt and optional warehouse restocking keep merchandise and financial history separate. See [admin order management](docs/orders/admin-order-management-v1.md), [order fulfillment](docs/orders/fulfillment-v1.md), [payment refunds](docs/payments/refunds-v1.md) and [order returns, timeline and notes](docs/orders/returns-v1.md).
 

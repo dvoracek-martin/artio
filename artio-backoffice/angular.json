@@ -61,7 +61,11 @@
               "buildTarget": "backoffice:build:development"
             }
           },
-          "defaultConfiguration": "development"
+          "defaultConfiguration": "development",
+          "options": {
+            "port": 4201,
+            "proxyConfig": "proxy.conf.cjs"
+          }
         }
       }
     }
