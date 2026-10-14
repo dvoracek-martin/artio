@@ -15,7 +15,7 @@ Each product can hold up to 100 images; writes lock the parent product row so si
 
 Image bytes are stored before a metadata insert and cleaned up if that transaction rolls back. Replacement writes a new object then switches metadata transactionally; the old object is removed after commit. A failed post-commit file cleanup is logged and can leave an orphan file, but never a database reference to a missing image. The local storage adapter prevents path traversal and writes through an atomic temporary file.
 
-Backoffice Products has a per-product media manager for upload, replacement, alt text, order and deletion. Public product media URLs do not contain secrets. Do not store private customer documents as catalog media.
+Backoffice Products has a per-product media manager for upload, replacement, alt text, order and deletion. Storefront product cards show the first ordered public image and its alt text; products without images use the initials illustration. Public product media URLs do not contain secrets. Do not store private customer documents as catalog media.
 
 ## Verification and limits
 
