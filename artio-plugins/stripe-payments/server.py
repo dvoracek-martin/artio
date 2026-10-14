@@ -113,6 +113,14 @@ def operation(configuration, name, payload, envelope):
             "line_items[0][price_data][product_data][name]": "Artio order " + str(payload.get("orderId", ""))[:8],
             "line_items[0][quantity]": "1",
         }
+        allowed_methods = configuration.get("allowedPaymentMethods")
+        if allowed_methods is not None:
+            supported_methods = {"card", "twint", "paypal", "link", "klarna", "sepa_debit"}
+            if (not isinstance(allowed_methods, list) or not allowed_methods or len(allowed_methods) > 20
+                    or any(not isinstance(method, str) or method not in supported_methods for method in allowed_methods)
+                    or len(set(allowed_methods)) != len(allowed_methods)):
+                raise ProviderError(400, "Invalid allowed payment method configuration")
+            form["allowed_payment_method_types[]"] = allowed_methods
         expires = metadata.get("expiresAt")
         if isinstance(expires, str):
             try:

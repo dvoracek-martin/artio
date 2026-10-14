@@ -18,7 +18,7 @@ class RegionalDistributionCatalogTests {
         assertThat(switzerland.availableLanguages()).containsExactly("de", "fr", "it", "en");
         assertThat(switzerland.timezone()).isEqualTo("Europe/Zurich");
         assertThat(switzerland.pluginRecommendations()).extracting(RegionalDistribution.PluginRecommendation::pluginId)
-                .containsExactly("payments.stripe", "shipping.swiss-post");
+                .containsExactly("payments.stripe", "payments.twint", "shipping.swiss-post");
         assertThat(switzerland.pluginRecommendations()).allMatch(RegionalDistribution.PluginRecommendation::optional);
         assertThat(catalog.findAll()).containsExactly(switzerland);
     }

@@ -1,0 +1,23 @@
+{
+  "manifestVersion": "1",
+  "id": "payments.twint",
+  "name": "TWINT Payments via Stripe",
+  "vendor": "TWINT / Stripe",
+  "version": "1.0.0",
+  "description": "Swiss TWINT checkout through a merchant-authorized Stripe payment service provider using the shared Stripe payment extension image.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/stripe-payments@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": ["payment.process"],
+  "configuration": {
+    "stripeSecretKey": {"type": "secret", "required": true, "secret": true, "label": "Stripe secret key", "description": "Stripe account key with TWINT enabled for your merchant account.", "format": null, "options": [], "minimumLength": 16, "maximumLength": 512, "minimum": null, "maximum": null},
+    "webhookSecret": {"type": "secret", "required": true, "secret": true, "label": "Stripe webhook signing secret", "description": "Signing secret for checkout.session events sent to Artio's provider webhook endpoint.", "format": null, "options": [], "minimumLength": 16, "maximumLength": 512, "minimum": null, "maximum": null},
+    "testMode": {"type": "boolean", "required": false, "secret": false, "label": "Use Stripe test mode", "description": "Defaults to test mode; live mode must be enabled explicitly.", "format": null, "options": [], "minimumLength": null, "maximumLength": null, "minimum": null, "maximum": null},
+    "allowedPaymentMethods": {"type": "json", "required": true, "secret": false, "label": "Allowed payment method filter", "description": "Set exactly [\"twint\"] to restrict this provider instance to dynamically eligible TWINT checkout.", "format": null, "options": [], "minimumLength": null, "maximumLength": null, "minimum": null, "maximum": null}
+  },
+  "extensionPoints": ["payment.provider.v1"],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {"scope": "COUNTRY_SPECIFIC", "countries": ["CH"]}
+}

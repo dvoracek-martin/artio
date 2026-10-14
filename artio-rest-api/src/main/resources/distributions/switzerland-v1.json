@@ -15,6 +15,11 @@
       "optional": true
     },
     {
+      "pluginId": "payments.twint",
+      "reason": "Optional TWINT checkout through an activated PSP account. Add a published, digest-pinned provider manifest before enabling.",
+      "optional": true
+    },
+    {
       "pluginId": "shipping.swiss-post",
       "reason": "Optional Swiss carrier integration. Add a published, digest-pinned provider manifest before enabling.",
       "optional": true

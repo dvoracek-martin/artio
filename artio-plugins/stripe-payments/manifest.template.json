@@ -49,6 +49,19 @@
       "maximumLength": null,
       "minimum": null,
       "maximum": null
+    },
+    "allowedPaymentMethods": {
+      "type": "json",
+      "required": false,
+      "secret": false,
+      "label": "Allowed payment method filter",
+      "description": "Optional Stripe dynamic-method allowlist, for example [\"twint\"]. Leave empty to use Stripe account settings.",
+      "format": null,
+      "options": [],
+      "minimumLength": null,
+      "maximumLength": null,
+      "minimum": null,
+      "maximum": null
     }
   },
   "extensionPoints": ["payment.provider.v1"],

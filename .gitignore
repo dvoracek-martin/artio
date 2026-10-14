@@ -16,3 +16,5 @@ Thumbs.db
 *.local
 secrets/
 **/.angular/cache/
+__pycache__/
+*.py[cod]

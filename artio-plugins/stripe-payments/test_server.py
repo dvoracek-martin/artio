@@ -32,6 +32,21 @@ class StripeExtensionTests(unittest.TestCase):
         with self.assertRaises(server.ProviderError):
             server.minor_units("12.501", "CHF")
 
+    def test_dynamic_payment_method_filter_can_select_twint_only(self):
+        response = {"id": "cs_test_twint", "url": "https://checkout.stripe.test/twint"}
+        with patch.object(server, "stripe_request", return_value=response) as request:
+            server.operation({"stripeSecretKey": "sk_test_secret", "allowedPaymentMethods": ["twint"]}, "createCheckout", {
+                "orderId": "order-ch", "amount": "12.50", "currency": "CHF",
+                "successUrl": "https://shop.test/success", "cancelUrl": "https://shop.test/cancel", "metadata": {},
+            }, {"idempotencyKey": "stable-twint-order"})
+        form = request.call_args.args[3]
+        self.assertEqual(["twint"], form["allowed_payment_method_types[]"])
+        with self.assertRaises(server.ProviderError):
+            server.operation({"stripeSecretKey": "sk_test_secret", "allowedPaymentMethods": ["unknown"]}, "createCheckout", {
+                "orderId": "order-ch", "amount": "12.50", "currency": "CHF",
+                "successUrl": "https://shop.test/success", "cancelUrl": "https://shop.test/cancel", "metadata": {},
+            }, {"idempotencyKey": "stable-twint-order"})
+
     def test_webhook_signature_checks_tolerance_and_event_payload(self):
         secret = "whsec_test"
         timestamp = str(int(time.time()))
