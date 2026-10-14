@@ -276,10 +276,10 @@ class CatalogApiIntegrationTests {
         UUID id = product.getBody().id();
 
         adminExchange("/api/products/{id}/translations/{locale}", HttpMethod.PUT,
-                new ProductTranslationApplicationService.TranslationRequest("Kaffee", null),
+                new ProductTranslationApplicationService.TranslationRequest("Kaffee", null, "kaffee", "Kaffee kaufen", "Frisch gerösteter Kaffee."),
                 ProductTranslationApplicationService.TranslationView.class, id, "de");
         adminExchange("/api/products/{id}/translations/{locale}", HttpMethod.PUT,
-                new ProductTranslationApplicationService.TranslationRequest("Coffee", "Roasted beans"),
+                new ProductTranslationApplicationService.TranslationRequest("Coffee", "Roasted beans", "coffee", "Buy coffee", "Freshly roasted coffee."),
                 ProductTranslationApplicationService.TranslationView.class, id, "en");
 
         var localized = http.getForEntity("/api/v1/products/{id}/localized?locale=de",
@@ -288,11 +288,23 @@ class CatalogApiIntegrationTests {
         assertThat(localized.getBody()).isNotNull();
         assertThat(localized.getBody().name()).isEqualTo("Kaffee");
         assertThat(localized.getBody().description()).isEqualTo("Roasted beans");
+        assertThat(localized.getBody().seoSlug()).isEqualTo("kaffee");
+        assertThat(localized.getBody().seoTitle()).isEqualTo("Kaffee kaufen");
         assertThat(localized.getBody().sku()).isEqualTo("COF-100");
+
+        var fallback = http.getForEntity("/api/v1/products/{id}/localized?locale=fr",
+                ProductTranslationApplicationService.LocalizedProductView.class, id);
+        assertThat(fallback.getBody()).isNotNull();
+        assertThat(fallback.getBody().requestedLocale()).isEqualTo("en");
+        assertThat(fallback.getBody().seoSlug()).isEqualTo("coffee");
 
         var translations = http.getForEntity("/api/products/{id}/translations",
                 ProductTranslationApplicationService.TranslationView[].class, id);
         assertThat(translations.getBody()).hasSize(2);
+        assertThat(translations.getBody()).anySatisfy(translation -> {
+            assertThat(translation.locale()).isEqualTo("de");
+            assertThat(translation.seoSlug()).isEqualTo("kaffee");
+        });
         var canonical = http.getForEntity("/api/products/{id}", ProductResponse.class, id);
         assertThat(canonical.getBody()).isNotNull();
         assertThat(canonical.getBody().name()).isEqualTo("Coffee");

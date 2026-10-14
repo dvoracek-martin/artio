@@ -502,11 +502,17 @@ CREATE TABLE catalog_product_translations (
     locale VARCHAR(2) NOT NULL CHECK (locale IN ('de','it','fr','en')),
     name VARCHAR(500) NOT NULL,
     description VARCHAR(5000),
+    seo_slug VARCHAR(160),
+    seo_title VARCHAR(180),
+    seo_description VARCHAR(320),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (seo_slug IS NULL OR seo_slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
     PRIMARY KEY (product_id, locale)
 );
 
 CREATE INDEX catalog_product_translations_locale_idx ON catalog_product_translations(locale, product_id);
+CREATE UNIQUE INDEX catalog_product_translations_seo_slug_idx ON catalog_product_translations(locale, seo_slug)
+    WHERE seo_slug IS NOT NULL;
 
 
 -- ===== Legacy V12__inventory_reservation_expiry =====

@@ -30,16 +30,24 @@ public class ProductTranslationApplicationService {
     public TranslationView upsert(UUID productId, String locale, TranslationRequest request) {
         searchIndexLock.lockCatalogWrite();
         products.findById(productId);
+        if (request == null) throw new IllegalArgumentException("Translation content is required");
         var content = new LocalizedProductContent(new LocaleCode(locale), request.name(), request.description());
+        var seo = request.seoSlug() == null || request.seoSlug().isBlank() ? null
+                : new io.artio.catalog.ProductSeoMetadata(request.seoSlug(), request.seoTitle(), request.seoDescription());
+        if (seo == null && (hasText(request.seoTitle()) || hasText(request.seoDescription())))
+            throw new IllegalArgumentException("A localized SEO title or description requires a canonical slug");
         jdbc.update("""
-                INSERT INTO catalog_product_translations(product_id,locale,name,description,updated_at)
-                VALUES (?,?,?,?,now())
-                ON CONFLICT(product_id,locale) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,updated_at=now()
-                """, productId, content.locale().value(), content.name(), content.description());
+                INSERT INTO catalog_product_translations(product_id,locale,name,description,seo_slug,seo_title,seo_description,updated_at)
+                VALUES (?,?,?,?,?,?,?,now())
+                ON CONFLICT(product_id,locale) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,
+                    seo_slug=EXCLUDED.seo_slug,seo_title=EXCLUDED.seo_title,seo_description=EXCLUDED.seo_description,updated_at=now()
+                """, productId, content.locale().value(), content.name(), content.description(),
+                seo == null ? null : seo.slug(), seo == null ? null : seo.title(), seo == null ? null : seo.description());
         var product = products.findById(productId);
         var index = search.getIfAvailable();
         if (index != null) index.indexLocalized(productId, product.sku(), product.active(), content.locale(), content.name(), content.description());
-        return new TranslationView(productId, content.locale().value(), content.name(), content.description());
+        return new TranslationView(productId, content.locale().value(), content.name(), content.description(),
+                seo == null ? null : seo.slug(), seo == null ? null : seo.title(), seo == null ? null : seo.description());
     }
 
     @Transactional(readOnly = true)
@@ -53,17 +61,31 @@ public class ProductTranslationApplicationService {
                     translations.put(code, new LocalizedProductContent(code, rs.getString("name"), rs.getString("description")));
                 }, productId);
         var resolved = LocalizedProductContent.resolve(requested.value(), translations, product.name(), product.description());
-        return new LocalizedProductView(product.id(), product.sku(), product.active(), resolved.requestedLocale().value(), resolved.name(), resolved.description());
+        var seoRows = jdbc.query("SELECT locale,seo_slug,seo_title,seo_description FROM catalog_product_translations WHERE product_id=? AND seo_slug IS NOT NULL",
+                (rs, row) -> new LocalizedSeo(rs.getString("locale"), rs.getString("seo_slug"), rs.getString("seo_title"), rs.getString("seo_description")), productId);
+        var localizedSeo = seoRows.stream().filter(value -> value.locale().equals(requested.value())).findFirst()
+                .or(() -> seoRows.stream().filter(value -> value.locale().equals("en")).findFirst()).orElse(null);
+        return new LocalizedProductView(product.id(), product.sku(), product.active(), resolved.requestedLocale().value(), resolved.name(), resolved.description(),
+                localizedSeo == null ? product.seoSlug() : localizedSeo.slug(),
+                localizedSeo == null ? product.seoTitle() : localizedSeo.title(),
+                localizedSeo == null ? product.seoDescription() : localizedSeo.description());
     }
 
     @Transactional(readOnly = true)
     public List<TranslationView> findAll(UUID productId) {
         products.findById(productId);
-        return jdbc.query("SELECT locale,name,description FROM catalog_product_translations WHERE product_id=? ORDER BY locale",
-                (rs, row) -> new TranslationView(productId, rs.getString("locale"), rs.getString("name"), rs.getString("description")), productId);
+        return jdbc.query("SELECT locale,name,description,seo_slug,seo_title,seo_description FROM catalog_product_translations WHERE product_id=? ORDER BY locale",
+                (rs, row) -> new TranslationView(productId, rs.getString("locale"), rs.getString("name"), rs.getString("description"),
+                        rs.getString("seo_slug"), rs.getString("seo_title"), rs.getString("seo_description")), productId);
     }
 
-    public record TranslationRequest(String name, String description) { }
-    public record TranslationView(UUID productId, String locale, String name, String description) { }
-    public record LocalizedProductView(UUID id, String sku, boolean active, String requestedLocale, String name, String description) { }
+    private record LocalizedSeo(String locale, String slug, String title, String description) { }
+    private static boolean hasText(String value) { return value != null && !value.isBlank(); }
+    public record TranslationRequest(String name, String description, String seoSlug, String seoTitle, String seoDescription) {
+        public TranslationRequest(String name, String description) { this(name, description, null, null, null); }
+    }
+    public record TranslationView(UUID productId, String locale, String name, String description,
+                                  String seoSlug, String seoTitle, String seoDescription) { }
+    public record LocalizedProductView(UUID id, String sku, boolean active, String requestedLocale, String name,
+                                       String description, String seoSlug, String seoTitle, String seoDescription) { }
 }
