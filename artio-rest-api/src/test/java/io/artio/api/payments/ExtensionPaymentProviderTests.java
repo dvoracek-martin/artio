@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.extensions.ManagedExtensionInvoker;
+import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.commerce.PaymentProvider.CheckoutRequest;
 import java.math.BigDecimal;
 import java.util.Map;
@@ -32,6 +33,32 @@ class ExtensionPaymentProviderTests {
         assertThat(result.providerReference()).isEqualTo("session-123");
         assertThat(result.checkoutUrl()).isEqualTo("https://pay.test/session-123");
         verify(invoker).invoke("payments.example", "payment.provider.v1", "createCheckout", stableRuntimeKey, request);
+    }
+
+    @Test
+    void translatesOnlyProviderStatusesThatGuaranteeNoCheckoutWasCreated() {
+        var request = new CheckoutRequest("order-123", "artio-order-order-123", new BigDecimal("12.50"), "CHF",
+                "https://shop.test/success", "https://shop.test/cancel", Map.of());
+        when(invoker.invoke(eq("payments.example"), eq("payment.provider.v1"), eq("createCheckout"),
+                org.mockito.ArgumentMatchers.anyString(), eq(request)))
+                .thenThrow(new ExtensionRuntimePort.ExtensionCallException(422));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> provider.createCheckout(request))
+                .isInstanceOf(io.artio.extensions.commerce.PaymentProvider.CheckoutRejectedException.class)
+                .hasMessage("Payment provider definitively rejected checkout");
+    }
+
+    @Test
+    void preservesRateLimitAsAmbiguousRetryableFailure() {
+        var request = new CheckoutRequest("order-123", "artio-order-order-123", new BigDecimal("12.50"), "CHF",
+                "https://shop.test/success", "https://shop.test/cancel", Map.of());
+        when(invoker.invoke(eq("payments.example"), eq("payment.provider.v1"), eq("createCheckout"),
+                org.mockito.ArgumentMatchers.anyString(), eq(request)))
+                .thenThrow(new ExtensionRuntimePort.ExtensionCallException(429));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> provider.createCheckout(request))
+                .isInstanceOf(ExtensionRuntimePort.ExtensionCallException.class)
+                .extracting("statusCode").isEqualTo(429);
     }
 
     @Test

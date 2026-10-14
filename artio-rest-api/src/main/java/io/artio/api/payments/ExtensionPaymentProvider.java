@@ -48,7 +48,14 @@ public class ExtensionPaymentProvider implements PaymentProvider {
     }
 
     @Override public CheckoutResult createCheckout(CheckoutRequest request) {
-        return read(invoke("createCheckout", request, request.idempotencyKey()), CheckoutResult.class);
+        try {
+            return read(invoke("createCheckout", request, request.idempotencyKey()), CheckoutResult.class);
+        } catch (ExtensionRuntimePort.ExtensionCallException failure) {
+            // Only explicit provider validation/authentication failures guarantee that no session was created.
+            if (switch (failure.statusCode()) { case 400, 401, 403, 404, 422 -> true; default -> false; })
+                throw new CheckoutRejectedException("PROVIDER_REJECTED_" + failure.statusCode());
+            throw failure;
+        }
     }
 
     @Override public PaymentResult capture(String providerReference, String idempotencyKey) {

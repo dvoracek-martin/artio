@@ -45,4 +45,15 @@ public interface PaymentProvider {
         }
     }
     enum PaymentState { PENDING, AUTHORIZED, CAPTURED, CANCELLED, REFUNDED, FAILED, EXPIRED }
+
+    /** A checkout rejection that the provider contract guarantees created no remote session or charge. */
+    final class CheckoutRejectedException extends RuntimeException {
+        private final String code;
+        public CheckoutRejectedException(String code) {
+            super("Payment provider definitively rejected checkout");
+            if (code == null || !code.matches("[A-Z0-9_]{1,64}")) throw new IllegalArgumentException("Invalid provider rejection code");
+            this.code = code;
+        }
+        public String code() { return code; }
+    }
 }

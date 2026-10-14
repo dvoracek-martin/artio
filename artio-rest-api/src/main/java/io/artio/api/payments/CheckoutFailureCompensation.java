@@ -2,6 +2,7 @@ package io.artio.api.payments;
 
 import io.artio.api.inventory.InventoryApplicationService;
 import io.artio.api.orders.OrderUpdatePublisher;
+import io.artio.api.orders.OrderTimelineEvents;
 import io.artio.inventory.ReservationState;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,19 +27,27 @@ public class CheckoutFailureCompensation {
 
     @Transactional
     public void cancelRejectedCheckout(UUID orderId) {
-        var statuses = jdbc.query("SELECT status FROM orders WHERE id=? FOR UPDATE",
-                (rs, row) -> rs.getString(1), orderId);
-        if (statuses.isEmpty() || !"PENDING".equals(statuses.getFirst())) return;
+        var orders = jdbc.query("SELECT status,user_id FROM orders WHERE id=? FOR UPDATE",
+                (rs, row) -> new OrderState(rs.getString("status"), rs.getObject("user_id", UUID.class)), orderId);
+        if (orders.isEmpty() || !"PENDING".equals(orders.getFirst().status())) return;
+        UUID userId = orders.getFirst().userId();
         if (jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'", orderId) == 0) return;
 
         jdbc.update("UPDATE payments SET status='FAILED',updated_at=now() WHERE order_id=? AND status='PENDING'", orderId);
         for (var reservation : inventory.reservationsByOrder(orderId)) {
             if (reservation.state() == ReservationState.RESERVED) inventory.release(reservation.id());
         }
+        OrderTimelineEvents.record(jdbc, orderId, userId, "ORDER_CANCELLED",
+                "Order cancelled because payment provider rejected checkout", true);
+        jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) " +
+                        "VALUES (?,?,?,'Order cancelled',?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
+                UUID.randomUUID(), userId, "ORDER_CANCELLED", "Order " + orderId + " was cancelled.", "order-cancelled:" + orderId);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() { orderUpdates.publish(orderId); }
             });
         }
     }
+
+    record OrderState(String status, UUID userId) { }
 }

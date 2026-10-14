@@ -33,14 +33,15 @@ public class PaymentController {
     private final InventoryApplicationService inventory;
     private final OrderUpdatePublisher orderUpdates;
     private final ObjectProvider<PaymentProvider> provider;
+    private final CheckoutFailureCompensation checkoutFailureCompensation;
     private final String extensionProviderId;
     private final String storefrontUrl;
 
     public PaymentController(JdbcTemplate jdbc, InventoryApplicationService inventory, OrderUpdatePublisher orderUpdates,
-            ObjectProvider<PaymentProvider> provider,
+            ObjectProvider<PaymentProvider> provider, CheckoutFailureCompensation checkoutFailureCompensation,
             @Value("${artio.payments.extension-plugin-id:}") String extensionProviderId,
             @Value("${artio.storefront-url:http://localhost:4200}") String storefrontUrl) {
-        this.jdbc=jdbc; this.inventory=inventory; this.orderUpdates=orderUpdates; this.provider=provider; this.extensionProviderId=extensionProviderId; this.storefrontUrl=storefrontUrl;
+        this.jdbc=jdbc; this.inventory=inventory; this.orderUpdates=orderUpdates; this.provider=provider; this.checkoutFailureCompensation=checkoutFailureCompensation; this.extensionProviderId=extensionProviderId; this.storefrontUrl=storefrontUrl;
     }
 
     @PostMapping("/orders/{orderId}/checkout-session")
@@ -71,6 +72,10 @@ public class PaymentController {
             result = extension.createCheckout(new PaymentProvider.CheckoutRequest(orderId.toString(), idempotencyKey,
                     order.total(), order.currency(), storefrontUrl + "/checkout?success=true&orderId=" + orderId + "&session_id={CHECKOUT_SESSION_ID}",
                     storefrontUrl + "/orders", Map.of("orderId", orderId.toString(), "expiresAt", expiresAt.toString())));
+        } catch (PaymentProvider.CheckoutRejectedException rejected) {
+            checkoutFailureCompensation.cancelRejectedCheckout(orderId);
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Payment provider rejected checkout; order and stock reservation were cancelled");
         } catch (RuntimeException failure) {
             // Provider timeouts may be ambiguous; preserve the reservation and retry with the same key.
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider could not create a checkout session");
