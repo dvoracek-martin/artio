@@ -50,8 +50,8 @@ public class ProductPostgresRepository implements ProductRepository {
     @Transactional
     public void save(Product product) {
         jdbc.update("""
-                INSERT INTO catalog_product (id, name, description, sku, active, created_at, updated_at, brand_id, seo_slug, seo_title, seo_description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO catalog_product (id, name, description, sku, active, created_at, updated_at, brand_id, seo_slug, seo_title, seo_description, archived_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     description = EXCLUDED.description,
@@ -61,14 +61,16 @@ public class ProductPostgresRepository implements ProductRepository {
                     brand_id = EXCLUDED.brand_id,
                     seo_slug = EXCLUDED.seo_slug,
                     seo_title = EXCLUDED.seo_title,
-                    seo_description = EXCLUDED.seo_description
+                    seo_description = EXCLUDED.seo_description,
+                    archived_at = EXCLUDED.archived_at
                 """,
                 product.getId().value(), product.getName().value(), product.getDescription().value(),
                 product.getSku().value(), product.isActive(), Timestamp.from(product.getCreatedAt()),
                 Timestamp.from(product.getUpdatedAt()), product.getBrandId() == null ? null : product.getBrandId().value(),
                 product.getSeoMetadata() == null ? null : product.getSeoMetadata().slug(),
                 product.getSeoMetadata() == null ? null : product.getSeoMetadata().title(),
-                product.getSeoMetadata() == null ? null : product.getSeoMetadata().description());
+                product.getSeoMetadata() == null ? null : product.getSeoMetadata().description(),
+                product.getArchivedAt() == null ? null : Timestamp.from(product.getArchivedAt()));
         UUID productId = product.getId().value();
         jdbc.update("DELETE FROM catalog_product_category WHERE product_id = ?", productId);
         product.getCategoryIds().forEach(categoryId -> jdbc.update(
@@ -89,8 +91,9 @@ public class ProductPostgresRepository implements ProductRepository {
         }, id);
         var seo = jdbc.query("SELECT seo_slug,seo_title,seo_description FROM catalog_product WHERE id=? AND seo_slug IS NOT NULL",
                 rs -> rs.next() ? new io.artio.catalog.ProductSeoMetadata(rs.getString(1), rs.getString(2), rs.getString(3)) : null, id);
+        var archivedAt = jdbc.query("SELECT archived_at FROM catalog_product WHERE id=?", rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null, id);
         return Product.reconstitute(stored.getId(), stored.getName(), stored.getDescription(), stored.getSku(),
                 stored.isActive(), stored.getCreatedAt(), stored.getUpdatedAt(),
-                brand == null ? null : new io.artio.catalog.BrandId(brand), categoryIds, attributes, seo);
+                brand == null ? null : new io.artio.catalog.BrandId(brand), categoryIds, attributes, seo, archivedAt);
     }
 }

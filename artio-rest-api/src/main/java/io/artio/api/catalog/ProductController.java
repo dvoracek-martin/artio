@@ -62,6 +62,12 @@ public class ProductController {
         return products.setActive(id, request.active());
     }
 
+    @PutMapping("/{id}/archive")
+    public ProductResponse archive(@PathVariable UUID id) { return products.archive(id); }
+
+    @PutMapping("/{id}/restore")
+    public ProductResponse restore(@PathVariable UUID id) { return products.restore(id); }
+
     @PutMapping("/{id}/catalog-metadata")
     public ProductResponse updateCatalogMetadata(@PathVariable UUID id,
             @RequestBody ProductApplicationService.CatalogMetadataRequest request) {

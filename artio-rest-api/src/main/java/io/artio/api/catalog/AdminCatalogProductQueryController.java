@@ -29,9 +29,9 @@ public class AdminCatalogProductQueryController {
         String search = q == null || q.isBlank() ? null : q.trim();
         if (search != null && search.length() > 200)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Search query is too long");
-        String active = switch (state.trim().toUpperCase(java.util.Locale.ROOT)) {
-            case "ALL" -> null; case "ACTIVE" -> "TRUE"; case "INACTIVE" -> "FALSE";
-            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "State must be ALL, ACTIVE or INACTIVE");
+        String normalizedState = switch (state.trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "ALL", "ACTIVE", "INACTIVE", "ARCHIVED" -> state.trim().toUpperCase(java.util.Locale.ROOT);
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "State must be ALL, ACTIVE, INACTIVE or ARCHIVED");
         };
         String sortColumn = switch (sort) {
             case "name" -> "p.name"; case "sku" -> "p.sku"; case "createdAt" -> "p.created_at"; case "updatedAt" -> "p.updated_at";
@@ -43,7 +43,11 @@ public class AdminCatalogProductQueryController {
         };
         StringBuilder where = new StringBuilder(" WHERE 1=1");
         List<Object> args = new ArrayList<>();
-        if (active != null) where.append(" AND p.active=").append(active);
+        if (normalizedState.equals("ARCHIVED")) where.append(" AND p.archived_at IS NOT NULL");
+        else {
+            where.append(" AND p.archived_at IS NULL");
+            if (!normalizedState.equals("ALL")) where.append(" AND p.active=").append(normalizedState.equals("ACTIVE") ? "TRUE" : "FALSE");
+        }
         if (search != null) {
             where.append(" AND (p.name ILIKE ? ESCAPE '!' OR p.sku ILIKE ? ESCAPE '!' OR CAST(p.id AS text) ILIKE ? ESCAPE '!')");
             String pattern = "%" + search.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
@@ -53,15 +57,16 @@ public class AdminCatalogProductQueryController {
         if (categoryId != null) { where.append(" AND EXISTS (SELECT 1 FROM catalog_product_category pc WHERE pc.product_id=p.id AND pc.category_id=?)"); args.add(categoryId); }
         long total = jdbc.queryForObject("SELECT count(*) FROM catalog_product p" + where, Long.class, args.toArray());
         List<Object> pageArgs = new ArrayList<>(args); pageArgs.add(size); pageArgs.add((long) page * size);
-        List<ProductSummary> items = jdbc.query("SELECT p.id,p.name,p.description,p.sku,p.active,p.created_at,p.updated_at,p.brand_id,p.seo_slug,p.seo_title,p.seo_description " +
+        List<ProductSummary> items = jdbc.query("SELECT p.id,p.name,p.description,p.sku,p.active,p.created_at,p.updated_at,p.brand_id,p.seo_slug,p.seo_title,p.seo_description,p.archived_at " +
                         "FROM catalog_product p" + where + " ORDER BY " + sortColumn + " " + order + ",p.id ASC LIMIT ? OFFSET ?",
                 (rs, row) -> new ProductSummary(rs.getObject("id", UUID.class), rs.getString("name"), rs.getString("description"), rs.getString("sku"),
                         rs.getBoolean("active"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                        rs.getObject("brand_id", UUID.class), rs.getString("seo_slug"), rs.getString("seo_title"), rs.getString("seo_description")), pageArgs.toArray());
+                        rs.getObject("brand_id", UUID.class), rs.getString("seo_slug"), rs.getString("seo_title"), rs.getString("seo_description"),
+                        rs.getTimestamp("archived_at") != null), pageArgs.toArray());
         return new ProductPage(items, total, page, size);
     }
 
     public record ProductSummary(UUID id, String name, String description, String sku, boolean active, Instant createdAt, Instant updatedAt,
-            UUID brandId, String seoSlug, String seoTitle, String seoDescription) { }
+            UUID brandId, String seoSlug, String seoTitle, String seoDescription, boolean archived) { }
     public record ProductPage(List<ProductSummary> items, long total, int page, int size) { }
 }

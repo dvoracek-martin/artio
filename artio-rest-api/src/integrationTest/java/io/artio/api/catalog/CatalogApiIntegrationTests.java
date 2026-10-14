@@ -647,6 +647,27 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void productArchiveRetainsRecordAndRestoresAsDraft() {
+        var product=adminExchange("/api/v1/products",HttpMethod.POST,
+                new ProductRequest("Archive lamp","Kept for order history","ARCH-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(java.util.Locale.ROOT)),ProductResponse.class);
+        var variant=adminExchange("/api/v1/products/{id}/variants",HttpMethod.POST,
+                new VariantRequest("Desk size","ARCH-V-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(java.util.Locale.ROOT)),VariantResponse.class,product.getBody().id());
+        var archived=adminExchange("/api/v1/products/{id}/archive",HttpMethod.PUT,null,ProductResponse.class,product.getBody().id());
+        assertThat(archived.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(archived.getBody().archived()).isTrue();
+        assertThat(archived.getBody().active()).isFalse();
+        var retained=http.getForEntity("/api/v1/products/{id}",ProductResponse.class,product.getBody().id());
+        assertThat(retained.getBody()).isNotNull();
+        assertThat(retained.getBody().sku()).isEqualTo(product.getBody().sku());
+        var blockedVariantActivation=adminExchange("/api/v1/variants/{id}/active",HttpMethod.PUT,new SetActiveRequest(true),ApiError.class,variant.getBody().id());
+        assertThat(blockedVariantActivation.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        var restored=adminExchange("/api/v1/products/{id}/restore",HttpMethod.PUT,null,ProductResponse.class,product.getBody().id());
+        assertThat(restored.getBody()).isNotNull();
+        assertThat(restored.getBody().archived()).isFalse();
+        assertThat(restored.getBody().active()).isFalse();
+    }
+
+    @Test
     void rejectedCheckoutCompensationCancelsOrderAndReleasesStockAtomically() {
         UUID orderId = UUID.randomUUID();
         UUID sellableId = UUID.randomUUID();

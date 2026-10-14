@@ -9,7 +9,8 @@ import java.util.Map;
 public record ProductResponse(UUID id, String name, String description, String sku,
                               boolean active, Instant createdAt, Instant updatedAt,
                               UUID brandId, Set<UUID> categoryIds, Map<String, String> attributes,
-                              String seoSlug, String seoTitle, String seoDescription) implements java.io.Serializable {
+                              String seoSlug, String seoTitle, String seoDescription, boolean archived,
+                              Instant archivedAt) implements java.io.Serializable {
     public static ProductResponse from(Product product) {
         return new ProductResponse(product.getId().value(), product.getName().value(),
                 product.getDescription().value(), product.getSku().value(), product.isActive(),
@@ -18,6 +19,7 @@ public record ProductResponse(UUID id, String name, String description, String s
                 product.getCategoryIds().stream().map(id -> id.value()).collect(java.util.stream.Collectors.toUnmodifiableSet()),
                 product.getAttributes(), product.getSeoMetadata() == null ? null : product.getSeoMetadata().slug(),
                 product.getSeoMetadata() == null ? null : product.getSeoMetadata().title(),
-                product.getSeoMetadata() == null ? null : product.getSeoMetadata().description());
+                product.getSeoMetadata() == null ? null : product.getSeoMetadata().description(),
+                product.isArchived(), product.getArchivedAt());
     }
 }

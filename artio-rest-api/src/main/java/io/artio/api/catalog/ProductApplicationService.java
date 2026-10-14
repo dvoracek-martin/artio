@@ -127,6 +127,26 @@ public class ProductApplicationService {
     }
 
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
+    public ProductResponse archive(UUID id) {
+        searchIndexLock.lockCatalogWrite();
+        var product=findProduct(id);
+        product.archive();
+        products.save(product);
+        index(product);
+        return ProductResponse.from(product);
+    }
+
+    @CacheEvict(cacheNames = "catalog-products", allEntries = true)
+    public ProductResponse restore(UUID id) {
+        searchIndexLock.lockCatalogWrite();
+        var product=findProduct(id);
+        product.restoreFromArchive();
+        products.save(product);
+        index(product);
+        return ProductResponse.from(product);
+    }
+
+    @CacheEvict(cacheNames = "catalog-products", allEntries = true)
     public ProductResponse updateCatalogMetadata(UUID id, CatalogMetadataRequest request) {
         searchIndexLock.lockCatalogWrite();
         var product = findProduct(id);

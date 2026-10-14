@@ -25,9 +25,8 @@ public class VariantApplicationService {
 
     public VariantResponse create(UUID productId, VariantRequest request) {
         var parentId = new ProductId(productId);
-        if (products.findById(parentId).isEmpty()) {
-            throw new CatalogNotFoundException("Product not found: " + productId);
-        }
+        var parent=products.findById(parentId).orElseThrow(() -> new CatalogNotFoundException("Product not found: " + productId));
+        if(parent.isArchived())throw new IllegalStateException("Archived product cannot receive new variants");
         var variant = Variant.create(new VariantId(UUID.randomUUID()), parentId,
                 new VariantName(request.name()), new Sku(request.sku()));
         variants.save(variant);
@@ -51,6 +50,8 @@ public class VariantApplicationService {
     public VariantResponse setActive(UUID id, boolean active) {
         var variant = findVariant(id);
         if (active != variant.isActive()) {
+            if(active&&products.findById(variant.getProductId()).map(io.artio.catalog.Product::isArchived).orElse(false))
+                throw new IllegalStateException("Archived product variants cannot be activated");
             if (active) variant.activate();
             else variant.deactivate();
             variants.save(variant);

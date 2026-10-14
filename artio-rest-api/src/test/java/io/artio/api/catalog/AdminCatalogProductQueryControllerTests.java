@@ -18,7 +18,7 @@ class AdminCatalogProductQueryControllerTests {
     }
 
     @Test void acceptsOnlyKnownStateSortAndDirectionValues() {
-        assertThatThrownBy(() -> controller.list(0, 25, null, "ARCHIVED", null, null, "name", "asc"))
+        assertThatThrownBy(() -> controller.list(0, 25, null, "REMOVED", null, null, "name", "asc"))
                 .isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> controller.list(0, 25, null, "ALL", null, null, "description", "asc"))
                 .isInstanceOf(ResponseStatusException.class);

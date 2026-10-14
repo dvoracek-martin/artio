@@ -26,6 +26,20 @@ class ProductTests {
         assertThat(product.getDomainEvents()).last().isEqualTo(new ProductSeoMetadataUpdated(product.getId(), null, metadata));
     }
 
+    @Test void archivingPreservesProductIdentityAndRestoreReturnsItAsInactiveDraft() {
+        var product=product();
+        product.archive();
+        assertThat(product.isArchived()).isTrue();
+        assertThat(product.isActive()).isFalse();
+        assertThat(product.getArchivedAt()).isNotNull();
+        assertThatThrownBy(product::activate).isInstanceOf(IllegalStateException.class);
+        product.restoreFromArchive();
+        assertThat(product.isArchived()).isFalse();
+        assertThat(product.getArchivedAt()).isNull();
+        assertThat(product.isActive()).isFalse();
+        assertThat(product.getSku().value()).isEqualTo("LAP-001");
+    }
+
     @Test
     void createsAnActiveProductAndRecordsCreationEvent() {
         var id = new ProductId(UUID.randomUUID());

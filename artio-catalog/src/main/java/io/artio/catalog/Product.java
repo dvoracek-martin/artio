@@ -20,6 +20,7 @@ public final class Product extends Aggregate<ProductId> {
     private final Set<CategoryId> categoryIds = new LinkedHashSet<>();
     private final Map<String, String> attributes = new LinkedHashMap<>();
     private ProductSeoMetadata seoMetadata;
+    private Instant archivedAt;
 
     private Product(ProductId id, ProductName name, ProductDescription description, Sku sku,
                     boolean active, Instant createdAt, Instant updatedAt) {
@@ -52,6 +53,15 @@ public final class Product extends Aggregate<ProductId> {
         product.brandId = brandId;
         product.categoryIds.addAll(categoryIds);
         product.attributes.putAll(attributes);
+        return product;
+    }
+
+    public static Product reconstitute(ProductId id, ProductName name, ProductDescription description, Sku sku,
+                                       boolean active, Instant createdAt, Instant updatedAt, BrandId brandId,
+                                       Set<CategoryId> categoryIds, Map<String, String> attributes, ProductSeoMetadata seoMetadata,
+                                       Instant archivedAt) {
+        var product = reconstitute(id, name, description, sku, active, createdAt, updatedAt, brandId, categoryIds, attributes, seoMetadata);
+        product.archivedAt = archivedAt;
         return product;
     }
 
@@ -101,6 +111,7 @@ public final class Product extends Aggregate<ProductId> {
     }
 
     public void activate() {
+        if (isArchived()) throw new IllegalStateException("Archived product must be restored before activation");
         if (active) throw new IllegalStateException("Already active");
         active = true;
         updatedAt = Instant.now();
@@ -112,6 +123,22 @@ public final class Product extends Aggregate<ProductId> {
         active = false;
         updatedAt = Instant.now();
         recordEvent(new ProductDeactivated(getId()));
+    }
+
+    public void archive() {
+        if (isArchived()) throw new IllegalStateException("Already archived");
+        active = false;
+        archivedAt = Instant.now();
+        updatedAt = archivedAt;
+        recordEvent(new ProductArchived(getId(), archivedAt));
+    }
+
+    public void restoreFromArchive() {
+        if (!isArchived()) throw new IllegalStateException("Product is not archived");
+        archivedAt = null;
+        active = false;
+        updatedAt = Instant.now();
+        recordEvent(new ProductRestored(getId()));
     }
 
     public void rename(ProductName newName) {
@@ -142,4 +169,6 @@ public final class Product extends Aggregate<ProductId> {
     public Set<CategoryId> getCategoryIds() { return Set.copyOf(categoryIds); }
     public Map<String, String> getAttributes() { return Map.copyOf(attributes); }
     public ProductSeoMetadata getSeoMetadata() { return seoMetadata; }
+    public Instant getArchivedAt() { return archivedAt; }
+    public boolean isArchived() { return archivedAt != null; }
 }

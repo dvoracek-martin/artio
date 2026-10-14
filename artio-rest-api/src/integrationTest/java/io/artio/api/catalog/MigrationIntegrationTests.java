@@ -48,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(4);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("29");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(5);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("30");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT to_regclass('inventory_low_stock_policy')")) {
             assertThat(result.next()).isTrue();
@@ -60,6 +60,11 @@ class MigrationIntegrationTests {
             var columns = new java.util.ArrayList<String>();
             while (result.next()) columns.add(result.getString(1));
             assertThat(columns).containsExactlyInAnyOrder("seo_slug", "seo_title", "seo_description");
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT column_name FROM information_schema.columns WHERE table_name='catalog_product' AND column_name='archived_at'")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("archived_at");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='event_outbox' AND column_name='dead_at'")) {
