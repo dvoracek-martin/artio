@@ -97,6 +97,15 @@ class PluginManifestValidatorTests {
                         "bundle additional private ports must be unique and differ from the health port",
                         "bundle additional private port must be between 1 and 65535");
 
+        var oversized = new PluginManifest.BundleService("large-index", manifest.image(), 9200, "/_cluster/health",
+                Map.of(), List.of(), List.of(), List.of(), 2049);
+        var oversizedManifest = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), List.of(), List.of(), Map.of(), List.of(), manifest.healthPath(), manifest.diagnosticsPath(),
+                manifest.geographicAvailability(), List.of(oversized));
+        assertThat(validator.validate(oversizedManifest, "0.1.0", Set.of()))
+                .contains("bundle service memoryLimitMb must be between 128 and 2048");
+
         var cycle = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
                 manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
                 manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(),

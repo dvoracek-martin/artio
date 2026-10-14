@@ -102,7 +102,7 @@ public record PluginManifest(
     /** Optional private, non-invokable sidecar belonging to this plugin installation. */
     public record BundleService(String id, String image, int port, String healthPath,
                                 Map<String, String> configurationBindings, List<String> dependsOn,
-                                List<String> persistentPaths, List<Integer> internalPorts) {
+                                List<String> persistentPaths, List<Integer> internalPorts, Integer memoryLimitMb) {
         public BundleService {
             configurationBindings = immutableNullableMap(configurationBindings);
             dependsOn = immutableNullableList(dependsOn);
@@ -113,21 +113,27 @@ public record PluginManifest(
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings, List<String> dependsOn,
                              List<String> persistentPaths) {
-            this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths, List.of());
+            this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths, List.of(), null);
+        }
+
+        public BundleService(String id, String image, int port, String healthPath,
+                             Map<String, String> configurationBindings, List<String> dependsOn,
+                             List<String> persistentPaths, List<Integer> internalPorts) {
+            this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths, internalPorts, null);
         }
 
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings) {
-            this(id, image, port, healthPath, configurationBindings, List.of(), List.of());
+            this(id, image, port, healthPath, configurationBindings, List.of(), List.of(), List.of(), null);
         }
 
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings, List<String> dependsOn) {
-            this(id, image, port, healthPath, configurationBindings, dependsOn, List.of());
+            this(id, image, port, healthPath, configurationBindings, dependsOn, List.of(), List.of(), null);
         }
 
         public BundleService(String id, String image, int port, String healthPath) {
-            this(id, image, port, healthPath, Map.of(), List.of());
+            this(id, image, port, healthPath, Map.of(), List.of(), List.of(), List.of(), null);
         }
     }
 

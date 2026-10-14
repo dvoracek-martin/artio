@@ -123,7 +123,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         } catch (NotFoundException ignored) {
             // Create only containers owned by this runtime; no mounts, published ports or caller-supplied options.
         }
-        HostConfig host = restrictedHostConfig(network);
+        HostConfig host = restrictedHostConfig(network, service.memoryBytes());
         if (!service.persistentPaths().isEmpty()) host.withBinds(persistentBinds(manifest.id(), service));
         if (hostLoopbackTestAccess && service.primary()) {
             var bindings = new com.github.dockerjava.api.model.Ports();
@@ -191,7 +191,12 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     static HostConfig restrictedHostConfig(String network) {
-        return HostConfig.newHostConfig().withNetworkMode(network).withMemory(268_435_456L)
+        return restrictedHostConfig(network, 268_435_456L);
+    }
+
+    static HostConfig restrictedHostConfig(String network, long memoryBytes) {
+        if (memoryBytes < 134_217_728L || memoryBytes > 2_147_483_648L) throw new IllegalArgumentException("Plugin memory limit is outside supported bounds");
+        return HostConfig.newHostConfig().withNetworkMode(network).withMemory(memoryBytes)
                 .withNanoCPUs(1_000_000_000L).withPidsLimit(128L).withReadonlyRootfs(true)
                 .withCapDrop(Capability.ALL).withSecurityOpts(java.util.List.of("no-new-privileges:true"))
                 .withTmpFs(Map.of("/tmp", "rw,noexec,nosuid,size=16m"));
@@ -568,9 +573,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private java.util.List<RuntimeService> services(PluginManifest manifest) {
         var result = new java.util.ArrayList<RuntimeService>();
         result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true,
-                manifest.configurationBindings(), manifest.persistentPaths(), List.of(), 0));
+                manifest.configurationBindings(), manifest.persistentPaths(), List.of(), 0, 268_435_456L));
         for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(),
-                service.healthPath(), false, service.configurationBindings(), service.persistentPaths(), service.internalPorts(), 0));
+                service.healthPath(), false, service.configurationBindings(), service.persistentPaths(), service.internalPorts(), 0,
+                (service.memoryLimitMb() == null ? 256L : service.memoryLimitMb().longValue()) * 1_048_576L));
         return java.util.List.copyOf(result);
     }
 
@@ -588,7 +594,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         for (int index = 0; index < ordered.size(); index++) {
             RuntimeService service = ordered.get(index);
             indexed.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(),
-                    service.primary(), service.configurationBindings(), service.persistentPaths(), service.internalPorts(), index));
+                    service.primary(), service.configurationBindings(), service.persistentPaths(), service.internalPorts(), index,
+                    service.memoryBytes()));
         }
         return java.util.List.copyOf(indexed);
     }
@@ -622,7 +629,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     private record RuntimeService(String id, String image, int port, String healthPath, boolean primary,
                                   Map<String, String> configurationBindings, java.util.List<String> persistentPaths,
-                                  java.util.List<Integer> internalPorts, int startupOrder) { }
+                                  java.util.List<Integer> internalPorts, int startupOrder, long memoryBytes) { }
 
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");

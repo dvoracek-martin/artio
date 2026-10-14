@@ -75,6 +75,9 @@ class DockerExtensionRuntimeTests {
         assertThat(host.getCapDrop()).containsExactly(com.github.dockerjava.api.model.Capability.ALL);
         assertThat(host.getSecurityOpts()).contains("no-new-privileges:true");
         assertThat(host.getTmpFs()).containsEntry("/tmp", "rw,noexec,nosuid,size=16m");
+        var largerSidecar = DockerExtensionRuntime.restrictedHostConfig("artio-extensions", 805_306_368L);
+        assertThat(largerSidecar.getMemory()).isEqualTo(805_306_368L);
+        assertThatIllegalArgumentException().isThrownBy(() -> DockerExtensionRuntime.restrictedHostConfig("artio-extensions", 3_000_000_000L));
     }
 
     @Test

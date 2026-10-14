@@ -78,6 +78,9 @@ public final class PluginManifestValidator {
             }
             validateImage(service.image(), "bundle service image", errors);
             if (service.port() < 1 || service.port() > 65535) errors.add("bundle service port must be between 1 and 65535");
+            if (service.memoryLimitMb() != null && (service.memoryLimitMb() < 128 || service.memoryLimitMb() > 2048)) {
+                errors.add("bundle service memoryLimitMb must be between 128 and 2048");
+            }
             validatePath(service.healthPath(), "bundle service healthPath", errors);
             validateConfigurationBindings(service.configurationBindings(), manifest.configuration(),
                     "bundle service " + service.id(), errors);

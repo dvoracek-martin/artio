@@ -1,0 +1,9 @@
+# Artio OpenSearch catalog search plugin
+
+This source package implements `catalog.search.v1` and is intended to be installed through the Artio Plugin Manager. The main image exposes the authenticated Artio invocation API; a private OpenSearch sidecar stores product documents. The sidecar has no host-published port, uses a plugin-owned persistent volume, and starts only after its health endpoint is ready. Artio currently places extensions on a shared internal network, so this unauthenticated private sidecar relies on the existing trusted-extension boundary; install only trusted plugins until per-plugin network isolation is available.
+
+The plugin supports base and translated product documents, active-product filtering, locale → English → base fallback, removal by product ID, and generation-based rebuilds. A rebuild writes into a new index and atomically switches the `artio-products` alias after replay succeeds. Core still hydrates current product content from PostgreSQL and treats it as authoritative.
+
+Build both images with `./build-images.ps1`. The manifest is intentionally an unpublished template with digest placeholders; it cannot be registered or installed until both images are published and their exact registry digests are verified. The OpenSearch base image is digest pinned, but no Artio plugin release digest is claimed. The internal sidecar disables its built-in security plugin because the Docker extension network is private and the runtime publishes no sidecar host port; deployments should not attach untrusted containers to that network.
+
+After publishing, register the filled manifest, configure the Core with `ARTIO_SEARCH_PROVIDER=extension` and `ARTIO_SEARCH_EXTENSION_PLUGIN_ID=catalog.opensearch`, then install, enable, and rebuild the index from Backoffice Operations. Core contains no OpenSearch SDK or provider client in this mode.

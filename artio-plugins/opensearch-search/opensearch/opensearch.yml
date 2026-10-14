@@ -1,0 +1,8 @@
+cluster.name: artio-plugin-search
+discovery.type: single-node
+network.host: 0.0.0.0
+http.port: 9200
+plugins.security.disabled: true
+bootstrap.memory_lock: false
+path.data: /usr/share/opensearch/data
+path.logs: /tmp/opensearch-logs

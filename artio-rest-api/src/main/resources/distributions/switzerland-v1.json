@@ -32,6 +32,14 @@
       "extensionPoints": ["shipping.provider.v1"],
       "reason": "Optional Swiss carrier integration. Add a published, digest-pinned provider manifest before enabling.",
       "optional": true
+    },
+    {
+      "pluginId": "catalog.opensearch",
+      "name": "OpenSearch product search",
+      "description": "Optional full-text search using a plugin-managed private OpenSearch service.",
+      "extensionPoints": ["catalog.search.v1"],
+      "reason": "Optional catalog search. The plugin release is not available until its images are published and digest-pinned.",
+      "optional": true
     }
   ]
 }
