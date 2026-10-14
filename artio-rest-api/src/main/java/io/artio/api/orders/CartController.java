@@ -14,6 +14,7 @@ import io.artio.kernel.Money;
 import io.artio.kernel.Quantity;
 import io.artio.orders.Order;
 import io.artio.orders.OrderLineItem;
+import io.artio.extensions.commerce.PaymentProvider;
 import java.math.BigDecimal;
 import java.util.Currency;
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.UUID;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,7 +38,8 @@ public class CartController {
     private final ObjectMapper mapper;
     private final BigDecimal shippingCost;
     private final String stripeKey;
-    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey; }
+    private final ObjectProvider<PaymentProvider> paymentProvider;
+    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey,ObjectProvider<PaymentProvider> paymentProvider) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey;this.paymentProvider=paymentProvider; }
 
     @GetMapping
     public CartView get(JwtAuthenticationToken auth) {
@@ -93,7 +96,7 @@ public class CartController {
         UUID userId = userId(auth);
         if(idempotencyKey==null||!idempotencyKey.matches("[A-Za-z0-9._:-]{8,128}"))throw new IllegalArgumentException("Idempotency-Key must contain 8 to 128 safe characters");
         OrderView prior=findByIdempotencyKey(userId,idempotencyKey);if(prior!=null)return org.springframework.http.ResponseEntity.ok(prior);
-        if(stripeKey.isBlank())throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
+        if(stripeKey.isBlank()&&paymentProvider.getIfAvailable()==null)throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
         UUID cartId = jdbc.query("SELECT id FROM carts WHERE user_id=? AND expires_at>now()", rs -> rs.next() ? UUID.fromString(rs.getString(1)) : null, userId);
         if (cartId == null) throw new IllegalArgumentException("Cart is empty");
         List<CartRow> items = jdbc.query("SELECT id,variant_id,quantity,unit_price,currency,bundle_ref,bundle_id FROM cart_items WHERE cart_id=?", (rs,n) -> new CartRow(rs.getObject("id",UUID.class),rs.getObject("variant_id",UUID.class),rs.getBigDecimal("quantity"),rs.getBigDecimal("unit_price"),rs.getString("currency").trim(),rs.getObject("bundle_ref",UUID.class),rs.getObject("bundle_id",UUID.class)), cartId);
