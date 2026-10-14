@@ -80,6 +80,8 @@ artio:
   notifications:
     email:
       enabled: ${ARTIO_EMAIL_ENABLED:false}
+      provider: ${ARTIO_EMAIL_PROVIDER:smtp}
+      extension-plugin-id: ${ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID:}
       poll-interval-ms: ${ARTIO_EMAIL_POLL_INTERVAL_MS:30000}
   security:
     jwt-secret: ${ARTIO_JWT_SECRET}

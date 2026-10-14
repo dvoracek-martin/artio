@@ -4,12 +4,14 @@ import io.artio.extensions.commerce.NotificationTransport;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
 /** SMTP adapter for the provider-neutral notification delivery port. */
 @Component
+@ConditionalOnProperty(name = "artio.notifications.email.provider", havingValue = "smtp", matchIfMissing = true)
 public class SmtpNotificationTransport implements NotificationTransport {
     private final JavaMailSender sender;
     private final String from;

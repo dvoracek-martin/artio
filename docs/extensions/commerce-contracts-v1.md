@@ -14,11 +14,11 @@ The Core retains inventory reservation and compensation guarantees. A provider r
 
 ## Notification transport
 
-`NotificationTransport` sends an already persisted message and returns an accepted/rejected result. The Core owns the transactional delivery outbox, retry schedule, dead-letter state and redaction. Missing or disabled notification providers leave messages queued and do not prevent checkout or order creation.
+`NotificationTransport` sends an already persisted message and returns an accepted/rejected result. The Core owns the transactional delivery outbox, retry schedule, dead-letter state and redaction. SMTP remains the default transport. An installation can select an enabled Docker plugin by setting `ARTIO_EMAIL_PROVIDER=extension` and `ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID`; the plugin declares `notification.channel.v1` and `notifications.send`, then implements the bounded `deliver` operation with the stable delivery ID as its idempotency key. Missing or disabled notification providers leave messages queued and do not prevent checkout or order creation.
 
 ## Search provider
 
-`ProductSearchProvider` indexes and removes catalog documents and returns product identifiers for a query. The Core remains authoritative for catalog data and applies normal visibility and availability checks when loading results. If no provider is enabled or healthy, catalog browsing remains available and search degrades to the Core's bounded catalog query.
+`ProductSearchProvider` indexes and removes catalog documents and returns product identifiers for a query. The Core remains authoritative for catalog data and hydrates current product and locale data from PostgreSQL. Configure an enabled Docker provider with `ARTIO_SEARCH_PROVIDER=extension` and `ARTIO_SEARCH_EXTENSION_PLUGIN_ID`; the plugin declares `catalog.search.v1` and `catalog.read`. It implements `index`, `remove`, `search`, and the generation rebuild operations. Catalog browsing remains independent; search requires an enabled search provider.
 
 ## Event transport
 
@@ -28,4 +28,4 @@ The Core retains inventory reservation and compensation guarantees. A provider r
 
 Plugin manifests name the supported `extensionPoints` and permissions. Core invokes plugins over the authenticated Docker runtime API with bounded request/response sizes and timeouts. Each point maps to one request and response schema. Provider credentials are passed only through encrypted plugin configuration and are never part of requests, logs, or returned configuration. Plugins cannot connect to the Core database. See [plugin manifest v1](plugin-manifest-v1.md) for image pinning, geographic availability, and configuration rules.
 
-The interfaces establish the neutral contract shape. They do not claim that Stripe, Swiss Post, SMTP, OpenSearch, or Kafka have already been fully extracted into plugin images; those are separate implementation and acceptance tasks in the Phase 2 ledger.
+These contracts do not claim that the reference Stripe, Swiss Post, notification, search, or Kafka plugin images have been built and published. Current SMTP/OpenSearch adapters remain selectable native implementations; publishing reference plugins and completing Docker-backed end-to-end workflows remain in the Phase 2 ledger.
