@@ -75,6 +75,7 @@ public class OrderReturnController {
                 "INSERT INTO order_return_items(id,return_id,order_item_id,quantity) VALUES (?,?,?,?)",
                 UUID.randomUUID(), returnId, line.orderItemId(), line.quantity());
         event(returnId, customerId, "REQUESTED", request.customerNote());
+        OrderTimelineEvents.record(jdbc,orderId,customerId,"RETURN_REQUESTED","Return requested: "+request.reason().trim(),true);
         return new ReturnView(returnId, orderId, "REQUESTED", request.reason().trim(), request.customerNote(), null,
                 Instant.now(), null, null, loadLines(returnId));
     }
@@ -108,6 +109,7 @@ public class OrderReturnController {
         String next = request.approve() ? "APPROVED" : "REJECTED";
         jdbc.update("UPDATE order_returns SET status=?,staff_note=?,reviewed_at=now() WHERE id=?", next, request.note(), returnId);
         event(returnId, userId(auth), next, request.note());
+        OrderTimelineEvents.record(jdbc,orderId,userId(auth),"RETURN_"+next,"Return request "+next.toLowerCase(java.util.Locale.ROOT),false);
         return current.with(next, request.note(), Instant.now(), null, loadLines(returnId));
     }
 
@@ -132,6 +134,7 @@ public class OrderReturnController {
         }
         jdbc.update("UPDATE order_returns SET status='COMPLETED',staff_note=?,completed_at=now() WHERE id=?", request.note(), returnId);
         event(returnId, userId(auth), "COMPLETED", request.note());
+        OrderTimelineEvents.record(jdbc,orderId,userId(auth),"RETURN_COMPLETED",request.restock()?"Return received and restocked":"Return received without restocking",false);
         if (allOrderLinesReturned(orderId)) jdbc.update("UPDATE orders SET status='RETURNED' WHERE id=? AND status IN ('SHIPPED','DELIVERED')", orderId);
         return current.with("COMPLETED", request.note(), current.reviewedAt(), Instant.now(), loadLines(returnId));
     }

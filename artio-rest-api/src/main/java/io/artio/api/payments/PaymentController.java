@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.inventory.InventoryApplicationService;
 import io.artio.api.orders.OrderUpdatePublisher;
+import io.artio.api.orders.OrderTimelineEvents;
 import io.artio.extensions.commerce.PaymentProvider;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -303,8 +304,8 @@ public class PaymentController {
         if (role == null || !Set.of("ADMIN", "SUPERADMIN").contains(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Idempotency-Key header is required");
-        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method FROM payments WHERE id=? FOR UPDATE",
-                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6)),paymentId);
+        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method,order_id FROM payments WHERE id=? FOR UPDATE",
+                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6),rs.getObject(7,UUID.class)),paymentId);
         if (payments.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
         RefundRow payment = payments.getFirst();
         var priorRows = jdbc.query("SELECT id,amount,status,provider_reference FROM payment_refunds WHERE payment_id=? AND idempotency_key=?",
@@ -369,6 +370,8 @@ public class PaymentController {
         String paymentStatus = totalRefunded.compareTo(payment.amount()) == 0 ? "REFUNDED" : "PARTIALLY_REFUNDED";
         jdbc.update("UPDATE payments SET refunded_amount=?,status=?,updated_at=now() WHERE id=?",totalRefunded,paymentStatus,paymentId);
         jdbc.update("UPDATE payment_refunds SET status='COMPLETED',provider_reference=?,updated_at=now() WHERE id=?",providerReference,refundId);
+        OrderTimelineEvents.record(jdbc,payment.orderId(),UUID.fromString(auth.getToken().getSubject()),"PAYMENT_REFUNDED",
+                "Refund processed: "+refundAmount.toPlainString()+" "+payment.currency(),true);
         return ResponseEntity.ok(new RefundView(refundId,paymentId,refundAmount,payment.currency(),totalRefunded,
                 payment.amount().subtract(totalRefunded),providerReference,"COMPLETED"));
     }
@@ -383,7 +386,7 @@ public class PaymentController {
         }catch(Exception e){return false;}
     }
     public record CheckoutSession(String sessionId,String checkoutUrl){}
-    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method){}
+    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method,UUID orderId){}
     private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference){}
     public record RefundCommand(BigDecimal amount){}
     public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,

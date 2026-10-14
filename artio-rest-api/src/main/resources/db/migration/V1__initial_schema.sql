@@ -225,6 +225,16 @@ CREATE TABLE order_return_events (
   note VARCHAR(2000),
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE order_timeline_events (
+  id UUID PRIMARY KEY,
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  actor_id UUID REFERENCES users(id),
+  event_type VARCHAR(40) NOT NULL,
+  message VARCHAR(2000) NOT NULL,
+  customer_visible BOOLEAN NOT NULL DEFAULT FALSE,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_order_timeline_order ON order_timeline_events(order_id, occurred_at, id);
 CREATE INDEX idx_orders_user ON orders(user_id);
 CREATE INDEX idx_orders_created ON orders(created_at DESC);
 CREATE INDEX idx_carts_user ON carts(user_id);

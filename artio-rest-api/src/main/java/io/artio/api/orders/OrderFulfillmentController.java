@@ -48,6 +48,7 @@ public class OrderFulfillmentController {
         for(var reservation:inventory.reservationsByOrder(id))if(reservation.state()==io.artio.inventory.ReservationState.RESERVED)inventory.allocate(reservation.id());
         jdbc.update("UPDATE orders SET status='SHIPPED',tracking_number=?,shipment_reference=?,shipping_label_url=? WHERE id=?",trackingNumber,shipmentReference,labelUrl,id);
         UUID userId=jdbc.queryForObject("SELECT user_id FROM orders WHERE id=?",UUID.class,id);
+        OrderTimelineEvents.record(jdbc,id,null,"ORDER_SHIPPED","Order shipped. Tracking: "+trackingNumber,true);
         jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,'Order shipped',?,false,?,?) ON CONFLICT (dedupe_key) DO NOTHING",UUID.randomUUID(),userId,"ORDER_SHIPPED","Your order "+id+" is on the way. Tracking: "+trackingNumber,"order-shipped:"+id,java.sql.Timestamp.from(Instant.now()));
         orderUpdates.publish(id);
         return new FulfillmentView(id,"SHIPPED",trackingNumber,shipmentReference,labelUrl);
@@ -57,6 +58,7 @@ public class OrderFulfillmentController {
     public FulfillmentView deliver(@PathVariable UUID id){
         if(!"SHIPPED".equals(status(id)))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only shipped orders can be delivered");
         jdbc.update("UPDATE orders SET status='DELIVERED' WHERE id=?",id);
+        OrderTimelineEvents.record(jdbc,id,null,"ORDER_DELIVERED","Order delivered",true);
         orderUpdates.publish(id);
         return new FulfillmentView(id,"DELIVERED",jdbc.queryForObject("SELECT tracking_number FROM orders WHERE id=?",String.class,id),null,null);
     }
