@@ -1,6 +1,6 @@
 # Privileged account MFA v1
 
-`ADMIN` and `SUPERADMIN` accounts must enroll and verify TOTP before accessing any protected Artio API. Customer accounts are not required to enroll.
+By default, `ADMIN` and `SUPERADMIN` accounts must enroll and verify TOTP before accessing any protected Artio API. Customer accounts are not required to enroll. The `dev` Spring profile explicitly disables the enrollment requirement for local development only; the default and `production` profiles keep it enabled. Never run the predictable local demo account outside a local development environment.
 
 ## First sign-in
 
@@ -11,7 +11,7 @@
 3. Save the returned one-time backup codes. They are stored as password hashes and cannot be retrieved again.
 4. Sign in again with the password and a current TOTP or unused backup code. The response then has `mfaEnrollmentRequired: false` and grants the normal role token.
 
-The Backoffice guides this flow and displays the enrollment URI/manual secret and one-time backup codes only in the active page. It does not store the authenticator secret or backup codes in browser storage.
+The Backoffice guides this flow with a locally generated QR code and a copyable manual setup key, then displays one-time backup codes only in the active page. It does not store the authenticator secret or backup codes in browser storage. The QR code is generated in the browser; the setup URI and secret are not sent to a third-party QR service.
 
 ## Lifecycle and recovery
 

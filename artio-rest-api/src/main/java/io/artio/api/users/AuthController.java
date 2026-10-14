@@ -15,6 +15,8 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -32,8 +34,15 @@ public class AuthController {
     private final JwtEncoder jwtEncoder;
     private final ObjectMapper mapper;
     private final EncryptionService encryption;
+    private final boolean privilegedMfaRequired;
     private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder();
-    public AuthController(JdbcTemplate jdbc, JwtEncoder jwtEncoder, ObjectMapper mapper, EncryptionService encryption) { this.jdbc = jdbc; this.jwtEncoder = jwtEncoder; this.mapper=mapper; this.encryption=encryption; }
+    public AuthController(JdbcTemplate jdbc, JwtEncoder jwtEncoder, ObjectMapper mapper, EncryptionService encryption,
+            @Value("${artio.security.mfa-required-for-privileged-users:true}") boolean privilegedMfaRequired,
+            Environment environment) {
+        this.jdbc = jdbc; this.jwtEncoder = jwtEncoder; this.mapper=mapper; this.encryption=encryption;
+        this.privilegedMfaRequired = privilegedMfaRequired
+                || java.util.Arrays.asList(environment.getActiveProfiles()).contains("production");
+    }
 
     @PostMapping("/register") @ResponseStatus(HttpStatus.CREATED)
     public Map<String, Object> register(@RequestBody RegisterRequest request) {
@@ -73,7 +82,7 @@ public class AuthController {
             }
             if (!valid) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"MFA_REQUIRED: submit a valid authenticator code or one-time backup code");
         }
-        boolean mfaEnrollmentRequired=privileged&&!mfaVerified;
+        boolean mfaEnrollmentRequired=privileged&&privilegedMfaRequired&&!mfaVerified;
         Instant now = Instant.now();
         jdbc.update("UPDATE users SET last_login=? WHERE id=?", java.sql.Timestamp.from(now), user.id());
         var claims = JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email", user.email()).claim("role", user.role()).claim("mfaSetupOnly",mfaEnrollmentRequired).build();

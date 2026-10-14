@@ -8,6 +8,7 @@ artio:
   security:
     jwt-secret: ${ARTIO_JWT_SECRET:artio-dev-jwt-secret-only-do-not-use-in-production-2026}
     encryption-key: ${ARTIO_ENCRYPTION_KEY:artio-dev-encryption-key-only-do-not-use-in-prod-2026}
+    mfa-required-for-privileged-users: false
   cache:
     redis:
       enabled: false
