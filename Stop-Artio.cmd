@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-docker compose down
+docker compose --profile storefront down
 if errorlevel 1 (
     echo Artio could not be stopped. Review the Docker Compose output above.
     pause
