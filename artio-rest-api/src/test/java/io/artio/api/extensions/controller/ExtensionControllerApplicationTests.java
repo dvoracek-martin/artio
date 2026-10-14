@@ -9,6 +9,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 
 @SpringBootTest(classes = ExtensionControllerApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -32,6 +35,11 @@ class ExtensionControllerApplicationTests {
         var bundleHealth = http.postForEntity("/internal/v1/extensions/test-plugin/bundle-health",
                 new ManifestHealthRequest(null), String.class);
         assertThat(bundleHealth.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        var headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/x-protobuf"));
+        var telemetry = http.postForEntity("/internal/v1/telemetry/observability.artio/metrics",
+                new HttpEntity<>(new byte[] {1}, headers), String.class);
+        assertThat(telemetry.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test

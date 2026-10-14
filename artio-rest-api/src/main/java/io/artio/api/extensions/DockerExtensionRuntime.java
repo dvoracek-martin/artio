@@ -6,6 +6,9 @@ import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.AccessMode;
+import com.github.dockerjava.api.model.Bind;
+import com.github.dockerjava.api.model.Volume;
 import io.artio.api.security.ExtensionCredentialService;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.ExtensionRuntimePort;
@@ -16,6 +19,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -94,7 +98,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         try {
             for (RuntimeService service : servicesInStartupOrder(manifest)) {
                 startService(manifest, service, credentialGeneration, configuration);
-                awaitReady(manifest.id(), service.id(), service.healthPath());
+                awaitReady(manifest.id(), service.id(), service.port(), service.healthPath());
             }
         } catch (RuntimeException failure) {
             disable(manifest.id());
@@ -120,15 +124,22 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             // Create only containers owned by this runtime; no mounts, published ports or caller-supplied options.
         }
         HostConfig host = restrictedHostConfig(network);
+        if (!service.persistentPaths().isEmpty()) host.withBinds(persistentBinds(manifest.id(), service));
         if (hostLoopbackTestAccess && service.primary()) {
             var bindings = new com.github.dockerjava.api.model.Ports();
             bindings.bind(ExposedPort.tcp(service.port()), com.github.dockerjava.api.model.Ports.Binding.bindIp("127.0.0.1"));
             host.withPortBindings(bindings);
         }
         var create = docker.createContainerCmd(service.image()).withName(name).withHostConfig(host)
-                .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(service.port()))
+                .withUser("10001:10001")
                 .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.extension.service", service.id(),
-                        "io.artio.extension.startup-order", Integer.toString(service.startupOrder()), "io.artio.managed", "true"));
+                        "io.artio.extension.startup-order", Integer.toString(service.startupOrder()),
+                        "io.artio.extension.ports", service.internalPorts().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")),
+                        "io.artio.managed", "true"));
+        var exposedPorts = new java.util.ArrayList<ExposedPort>();
+        exposedPorts.add(ExposedPort.tcp(service.port()));
+        service.internalPorts().forEach(additional -> exposedPorts.add(ExposedPort.tcp(additional)));
+        create.withExposedPorts(exposedPorts);
         create.withEnv(environment);
         create.exec();
         docker.startContainerCmd(name).exec();
@@ -186,6 +197,26 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
                 .withTmpFs(Map.of("/tmp", "rw,noexec,nosuid,size=16m"));
     }
 
+    private java.util.List<Bind> persistentBinds(String pluginId, RuntimeService service) {
+        return service.persistentPaths().stream().map(path -> {
+            String name = volumeName(pluginId, service.id(), path);
+            var labels = Map.of("io.artio.extension", pluginId, "io.artio.extension.service", service.id(), "io.artio.managed", "true");
+            var created = docker.createVolumeCmd().withName(name).withLabels(labels).exec();
+            if (!labels.equals(created.getLabels())) throw new IllegalStateException("Refusing to mount an unmanaged extension volume");
+            return new Bind(name, new Volume(path), AccessMode.rw);
+        }).toList();
+    }
+
+    static String volumeName(String pluginId, String serviceId, String path) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(path.getBytes(StandardCharsets.UTF_8));
+            String suffix = java.util.HexFormat.of().formatHex(digest).substring(0, 16);
+            String identity = containerName(pluginId).substring("artio-ext-".length());
+            if (serviceId == null || !serviceId.matches("[a-z][a-z0-9-]{0,30}")) throw new IllegalArgumentException("Invalid plugin service id");
+            return "artio-vol-" + identity + "-" + serviceId + "-" + suffix;
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
     public void disable(String pluginId) {
         var containers = new java.util.ArrayList<>(managedContainers(pluginId));
         containers.sort(java.util.Comparator.comparingInt(DockerExtensionRuntime::startupOrder).reversed());
@@ -203,9 +234,20 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
                 throw new IllegalStateException("Disable the extension before uninstalling it");
             }
         }
+        var volumeResponse = docker.listVolumesCmd().exec();
+        var listedVolumes = volumeResponse == null || volumeResponse.getVolumes() == null ? List.<com.github.dockerjava.api.command.InspectVolumeResponse>of() : volumeResponse.getVolumes();
+        var volumes = listedVolumes.stream()
+                .filter(volume -> volume.getLabels() != null && pluginId.equals(volume.getLabels().get("io.artio.extension")))
+                .toList();
+        for (var volume : volumes) {
+            if (!"true".equals(volume.getLabels().get("io.artio.managed"))) {
+                throw new IllegalStateException("Refusing to remove an unmanaged extension volume");
+            }
+        }
         for (InspectContainerResponse current : containers) {
             docker.removeContainerCmd(current.getId()).withForce(false).exec();
         }
+        for (var volume : volumes) docker.removeVolumeCmd(volume.getName()).exec();
     }
 
     @Override
@@ -268,11 +310,54 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         var serviceStatuses = new java.util.LinkedHashMap<String, String>();
         boolean healthy = true;
         for (RuntimeService service : services(manifest)) {
-            var result = serviceHealth(manifest.id(), service.id(), service.healthPath());
+            var result = serviceHealth(manifest.id(), service.id(), service.port(), service.healthPath());
             serviceStatuses.put(service.id(), result.status());
             healthy &= result.healthy();
         }
         return new ExtensionRuntimePort.RuntimeHealth(healthy, healthy ? "HEALTHY" : "DEGRADED", serviceStatuses);
+    }
+
+    @Override
+    public ExtensionRuntimePort.TelemetryResponse forwardOtlp(String pluginId, String signal, byte[] payload) {
+        if (!"observability.artio".equals(pluginId) || !java.util.Set.of("metrics", "traces").contains(signal)) {
+            throw new IllegalArgumentException("Unsupported OTLP destination");
+        }
+        if (payload == null || payload.length == 0 || payload.length > 4_194_304) {
+            throw new IllegalArgumentException("OTLP payload must be between 1 byte and 4 MiB");
+        }
+        try {
+            InspectContainerResponse container = docker.inspectContainerCmd(serviceName(pluginId, "collector")).exec();
+            requireManaged(container, pluginId);
+            var labels = container.getConfig().getLabels();
+            if (!"collector".equals(labels.get("io.artio.extension.service"))
+                    || !java.util.Arrays.asList(labels.getOrDefault("io.artio.extension.ports", "").split(",")).contains("4318")) {
+                throw new IllegalStateException("The managed OTLP collector does not expose the required private receiver port");
+            }
+            if (!Boolean.TRUE.equals(container.getState().getRunning())) {
+                return new ExtensionRuntimePort.TelemetryResponse(503, "application/json", new byte[0]);
+            }
+            URI target = endpoint(container, "/v1/" + signal, 4318);
+            if (target == null) return new ExtensionRuntimePort.TelemetryResponse(503, "application/json", new byte[0]);
+            HttpRequest request = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/x-protobuf")
+                    .header("Accept", "application/x-protobuf, application/json")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(payload)).build();
+            HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] body;
+            try (InputStream input = response.body()) { body = input.readNBytes(65_537); }
+            if (body.length > 65_536) return new ExtensionRuntimePort.TelemetryResponse(502, "application/json", new byte[0]);
+            return new ExtensionRuntimePort.TelemetryResponse(response.statusCode(),
+                    response.headers().firstValue("Content-Type").orElse("application/x-protobuf"), body);
+        } catch (NotFoundException missing) {
+            return new ExtensionRuntimePort.TelemetryResponse(503, "application/json", new byte[0]);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new ExtensionRuntimePort.TelemetryResponse(503, "application/json", new byte[0]);
+        } catch (java.net.http.HttpTimeoutException timeout) {
+            return new ExtensionRuntimePort.TelemetryResponse(503, "application/json", new byte[0]);
+        } catch (java.io.IOException failure) {
+            return new ExtensionRuntimePort.TelemetryResponse(503, "application/json", new byte[0]);
+        }
     }
 
     @Override
@@ -367,10 +452,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
     }
 
-    private void awaitReady(String pluginId, String serviceId, String healthPath) {
+    private void awaitReady(String pluginId, String serviceId, int port, String healthPath) {
         long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         do {
-            if (serviceHealth(pluginId, serviceId, healthPath).healthy()) return;
+            if (serviceHealth(pluginId, serviceId, port, healthPath).healthy()) return;
             try {
                 Thread.sleep(300);
             } catch (InterruptedException interrupted) {
@@ -383,15 +468,17 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         throw new ExtensionRuntimePort.ExtensionUnavailableException("Extension did not become healthy within 30 seconds");
     }
 
-    private ExtensionRuntimePort.RuntimeHealth serviceHealth(String pluginId, String serviceId, String healthPath) {
+    private ExtensionRuntimePort.RuntimeHealth serviceHealth(String pluginId, String serviceId, int port, String healthPath) {
         try {
             String name = serviceId.equals("main") ? containerName(pluginId) : serviceName(pluginId, serviceId);
             InspectContainerResponse container = docker.inspectContainerCmd(name).exec();
             requireManaged(container, pluginId);
             if (!Boolean.TRUE.equals(container.getState().getRunning())) return new ExtensionRuntimePort.RuntimeHealth(false, "STOPPED");
             var exposed = container.getConfig() == null ? null : container.getConfig().getExposedPorts();
-            if (exposed == null || exposed.length != 1) return new ExtensionRuntimePort.RuntimeHealth(false, "NO_EXPOSED_PORT");
-            URI address = endpoint(container, safeHealthPath(healthPath), exposed[0].getPort());
+            if (exposed == null || java.util.Arrays.stream(exposed).noneMatch(value -> value.getPort() == port)) {
+                return new ExtensionRuntimePort.RuntimeHealth(false, "NO_EXPOSED_PORT");
+            }
+            URI address = endpoint(container, safeHealthPath(healthPath), port);
             if (address == null) return new ExtensionRuntimePort.RuntimeHealth(false, "NO_NETWORK_ADDRESS");
             var response = http.send(HttpRequest.newBuilder(address).timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.discarding());
             return new ExtensionRuntimePort.RuntimeHealth(response.statusCode() >= 200 && response.statusCode() < 300, "HTTP_" + response.statusCode());
@@ -436,8 +523,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     private java.util.List<RuntimeService> services(PluginManifest manifest) {
         var result = new java.util.ArrayList<RuntimeService>();
-        result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true, manifest.configurationBindings(), 0));
-        for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(), false, service.configurationBindings(), 0));
+        result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true,
+                manifest.configurationBindings(), List.of(), List.of(), 0));
+        for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(),
+                service.healthPath(), false, service.configurationBindings(), service.persistentPaths(), service.internalPorts(), 0));
         return java.util.List.copyOf(result);
     }
 
@@ -455,7 +544,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         for (int index = 0; index < ordered.size(); index++) {
             RuntimeService service = ordered.get(index);
             indexed.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(),
-                    service.primary(), service.configurationBindings(), index));
+                    service.primary(), service.configurationBindings(), service.persistentPaths(), service.internalPorts(), index));
         }
         return java.util.List.copyOf(indexed);
     }
@@ -488,7 +577,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     private record RuntimeService(String id, String image, int port, String healthPath, boolean primary,
-                                  Map<String, String> configurationBindings, int startupOrder) { }
+                                  Map<String, String> configurationBindings, java.util.List<String> persistentPaths,
+                                  java.util.List<Integer> internalPorts, int startupOrder) { }
 
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");

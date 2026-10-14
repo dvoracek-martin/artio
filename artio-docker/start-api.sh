@@ -19,6 +19,7 @@ done
 
 export ARTIO_EXTENSION_AUTH_KEY="$(cat "$secret_dir/extension-auth-key")"
 export ARTIO_EXTENSION_CONTROLLER_TOKEN="$(cat "$secret_dir/extension-controller-token")"
+export ARTIO_OTLP_GATEWAY_AUTHORIZATION="Bearer $ARTIO_EXTENSION_CONTROLLER_TOKEN"
 if [ "$runtime_role" = "extension-controller" ]; then
     exec java -jar /app/extension-controller.jar
 fi

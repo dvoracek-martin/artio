@@ -129,9 +129,9 @@ services:
       ARTIO_STRIPE_WEBHOOK_SECRET: ${ARTIO_STRIPE_WEBHOOK_SECRET:-}
       ARTIO_STOREFRONT_URL: http://localhost:4200
       MANAGEMENT_TRACING_ENABLED: ${ARTIO_TRACING_ENABLED:-false}
-      ARTIO_OTLP_TRACING_ENDPOINT: ${ARTIO_OTLP_TRACING_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      ARTIO_OTLP_TRACING_ENDPOINT: ${ARTIO_OTLP_TRACING_ENDPOINT:-http://extension-controller:8090/internal/v1/telemetry/observability.artio/traces}
       ARTIO_METRICS_OTLP_ENABLED: ${ARTIO_METRICS_OTLP_ENABLED:-false}
-      ARTIO_OTLP_METRICS_ENDPOINT: ${ARTIO_OTLP_METRICS_ENDPOINT:-http://otel-collector:4318/v1/metrics}
+      ARTIO_OTLP_METRICS_ENDPOINT: ${ARTIO_OTLP_METRICS_ENDPOINT:-http://extension-controller:8090/internal/v1/telemetry/observability.artio/metrics}
       ARTIO_SMTP_HOST: ${ARTIO_SMTP_HOST:-localhost}
       ARTIO_SMTP_PORT: ${ARTIO_SMTP_PORT:-1025}
       ARTIO_SMTP_USERNAME: ${ARTIO_SMTP_USERNAME:-}

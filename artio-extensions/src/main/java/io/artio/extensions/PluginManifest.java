@@ -35,12 +35,20 @@ public record PluginManifest(
         Objects.requireNonNull(minimumCoreVersion, "Minimum Core version is required");
         Objects.requireNonNull(maximumCoreVersion, "Maximum Core version is required");
         Objects.requireNonNull(image, "Image identity is required");
-        dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
-        permissions = permissions == null ? List.of() : List.copyOf(permissions);
-        configuration = configuration == null ? Map.of() : Map.copyOf(configuration);
-        extensionPoints = extensionPoints == null ? List.of() : List.copyOf(extensionPoints);
-        services = services == null ? List.of() : List.copyOf(services);
-        configurationBindings = configurationBindings == null ? Map.of() : Map.copyOf(configurationBindings);
+        dependencies = immutableNullableList(dependencies);
+        permissions = immutableNullableList(permissions);
+        configuration = immutableNullableMap(configuration);
+        extensionPoints = immutableNullableList(extensionPoints);
+        services = immutableNullableList(services);
+        configurationBindings = immutableNullableMap(configurationBindings);
+    }
+
+    private static <T> List<T> immutableNullableList(List<T> values) {
+        return values == null ? List.of() : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(values));
+    }
+
+    private static <K, V> Map<K, V> immutableNullableMap(Map<K, V> values) {
+        return values == null ? Map.of() : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(values));
     }
 
     /** Source-compatible constructor for bundles declared before configuration-to-environment bindings. */
@@ -79,15 +87,29 @@ public record PluginManifest(
 
     /** Optional private, non-invokable sidecar belonging to this plugin installation. */
     public record BundleService(String id, String image, int port, String healthPath,
-                                Map<String, String> configurationBindings, List<String> dependsOn) {
+                                Map<String, String> configurationBindings, List<String> dependsOn,
+                                List<String> persistentPaths, List<Integer> internalPorts) {
         public BundleService {
-            configurationBindings = configurationBindings == null ? Map.of() : Map.copyOf(configurationBindings);
-            dependsOn = dependsOn == null ? List.of() : List.copyOf(dependsOn);
+            configurationBindings = immutableNullableMap(configurationBindings);
+            dependsOn = immutableNullableList(dependsOn);
+            persistentPaths = immutableNullableList(persistentPaths);
+            internalPorts = immutableNullableList(internalPorts);
+        }
+
+        public BundleService(String id, String image, int port, String healthPath,
+                             Map<String, String> configurationBindings, List<String> dependsOn,
+                             List<String> persistentPaths) {
+            this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths, List.of());
         }
 
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings) {
-            this(id, image, port, healthPath, configurationBindings, List.of());
+            this(id, image, port, healthPath, configurationBindings, List.of(), List.of());
+        }
+
+        public BundleService(String id, String image, int port, String healthPath,
+                             Map<String, String> configurationBindings, List<String> dependsOn) {
+            this(id, image, port, healthPath, configurationBindings, dependsOn, List.of());
         }
 
         public BundleService(String id, String image, int port, String healthPath) {
@@ -98,7 +120,7 @@ public record PluginManifest(
     /** Discovery hint only. It never restricts a merchant from enabling another supported market. */
     public record GeographicAvailability(String scope, List<String> countries) {
         public GeographicAvailability {
-            countries = countries == null ? List.of() : List.copyOf(countries);
+            countries = immutableNullableList(countries);
         }
 
         public static GeographicAvailability global() {
@@ -115,7 +137,7 @@ public record PluginManifest(
                               Integer minimumLength, Integer maximumLength,
                               Double minimum, Double maximum) {
         public ConfigField {
-            options = options == null ? List.of() : List.copyOf(options);
+            options = immutableNullableList(options);
         }
     }
 }

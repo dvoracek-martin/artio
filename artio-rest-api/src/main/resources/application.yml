@@ -47,10 +47,14 @@ management:
   otlp:
     tracing:
       endpoint: ${ARTIO_OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+      headers:
+        Authorization: ${ARTIO_OTLP_GATEWAY_AUTHORIZATION:}
     metrics:
       export:
         enabled: ${ARTIO_METRICS_OTLP_ENABLED:false}
         url: ${ARTIO_OTLP_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
+        headers:
+          Authorization: ${ARTIO_OTLP_GATEWAY_AUTHORIZATION:}
   endpoints:
     web:
       exposure:

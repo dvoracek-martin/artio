@@ -20,6 +20,7 @@ This review covers the Artio Core API, PostgreSQL extension registry, isolated D
 4. **Core to extension container:** The authenticated v1 invocation uses a plugin-scoped HMAC-derived bearer token over a private Docker network. The network is trusted and traffic is not encrypted with TLS. External provider connections use the separate allowlisted CONNECT gateway.
 5. **Image registry to runtime:** Images must be digest-pinned and from an explicitly trusted registry. Image provenance/signature verification is not implemented; allowlisting and digest pinning provide identity and immutability, not publisher assurance.
 6. **Extension to provider/customer systems:** A plugin can use the secrets Core sends to it and may perform external provider side effects. Core cannot guarantee exactly-once effects or prevent a plugin from misusing credentials granted to it.
+7. **Core telemetry to observability plugin:** Optional OTLP is sent only to the authenticated lifecycle-controller route, which accepts the `observability.artio` plugin and metrics/traces signals and forwards to its managed collector on a declared private port. The caller cannot select a host, service or URL path. Request and response bodies are bounded, and the controller bearer is not forwarded to the plugin.
 
 ## Threats and controls
 
@@ -35,6 +36,7 @@ This review covers the Artio Core API, PostgreSQL extension registry, isolated D
 | Operator cannot diagnose failed lifecycle action | Lifecycle failure audit stores action and exception class only; Backoffice shows the recent bounded audit timeline, health result, and safe API detail; explicit live diagnostic invocation uses declared extension point | Exception classes are coarse diagnostics; detailed daemon logs remain deployment-side and should be access-controlled |
 | Rollback/update corrupts state or secrets | Immutable release history; update pulls before replacing stopped container; only stopped plugins update/rollback; configuration is validated against target schema; incompatible secret/public values block, removed secret fields are purged | External provider side effects from the prior release cannot be reversed by image rollback |
 | Unauthorized administrator changes plugin | Admin-only endpoints and audit actor identity; runtime disabled by default | Compromised administrator account or bearer token can still change extension behavior; deployment should use MFA and least-privilege account access |
+| Telemetry exporter is abused to reach arbitrary internal services | OTLP gateway allowlists plugin identity and signal, fixes the collector service/port and route, limits content type and body size, and uses the controller credential only between Core and controller | The telemetry gateway is an internal authenticated feature, not a general purpose proxy; collector parsing and storage still require resource limits and patching |
 
 ## Operational guidance
 

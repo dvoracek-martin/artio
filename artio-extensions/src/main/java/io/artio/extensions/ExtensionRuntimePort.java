@@ -29,6 +29,9 @@ public interface ExtensionRuntimePort {
     }
     RuntimeHealth health(String pluginId, String healthPath);
     default RuntimeHealth health(PluginManifest manifest) { return health(manifest.id(), manifest.healthPath()); }
+    default TelemetryResponse forwardOtlp(String pluginId, String signal, byte[] payload) {
+        throw new ExtensionUnavailableException("OTLP receiver is unavailable");
+    }
     InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                             String configurationJson, String requestJson, Duration deadline);
     default InvocationResult invoke(String pluginId, int credentialGeneration, String extensionPoint, String operation,
@@ -62,6 +65,10 @@ public interface ExtensionRuntimePort {
     record RuntimeHealth(boolean healthy, String status, Map<String, String> services) {
         public RuntimeHealth { services = services == null ? Map.of() : Map.copyOf(services); }
         public RuntimeHealth(boolean healthy, String status) { this(healthy, status, Map.of()); }
+    }
+    record TelemetryResponse(int statusCode, String contentType, byte[] body) {
+        public TelemetryResponse { body = body == null ? new byte[0] : body.clone(); }
+        @Override public byte[] body() { return body.clone(); }
     }
     record InvocationResult(int statusCode, String responseJson) { }
     class ExtensionUnavailableException extends RuntimeException { public ExtensionUnavailableException(String message) { super(message); } }

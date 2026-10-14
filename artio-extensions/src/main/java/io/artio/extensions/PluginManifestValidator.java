@@ -80,6 +80,29 @@ public final class PluginManifestValidator {
             validatePath(service.healthPath(), "bundle service healthPath", errors);
             validateConfigurationBindings(service.configurationBindings(), manifest.configuration(),
                     "bundle service " + service.id(), errors);
+            if (service.persistentPaths().size() > 4) errors.add("bundle service may declare at most 4 persistent paths");
+            Set<String> persistentPaths = new HashSet<>();
+            for (String path : service.persistentPaths()) {
+                if (path == null || !(path.matches("/data(?:/[A-Za-z0-9._-]+)+")
+                        || path.matches("/var/lib(?:/[A-Za-z0-9._-]+)+") || path.equals("/prometheus"))
+                        || path.contains("..")) errors.add("bundle persistent path must be under /data, /var/lib, or equal /prometheus");
+                else {
+                    if (!persistentPaths.add(path)) errors.add("bundle service has a duplicate persistent path");
+                    if (persistentPaths.stream().anyMatch(existing -> !existing.equals(path)
+                            && (existing.startsWith(path + "/") || path.startsWith(existing + "/")))) {
+                        errors.add("bundle persistent paths must not overlap");
+                    }
+                }
+            }
+            if (service.internalPorts().size() > 8) errors.add("bundle service may declare at most 8 additional private ports");
+            Set<Integer> ports = new HashSet<>();
+            for (Integer additionalPort : service.internalPorts()) {
+                if (additionalPort == null || additionalPort < 1 || additionalPort > 65535) {
+                    errors.add("bundle additional private port must be between 1 and 65535");
+                } else if (additionalPort == service.port() || !ports.add(additionalPort)) {
+                    errors.add("bundle additional private ports must be unique and differ from the health port");
+                }
+            }
         }
         Set<String> knownServiceIds = new HashSet<>(serviceIds);
         knownServiceIds.add("main");
@@ -157,6 +180,10 @@ public final class PluginManifestValidator {
     }
 
     private static void validateField(String key, PluginManifest.ConfigField field, List<String> errors) {
+        if (field == null) {
+            errors.add("configuration field cannot be null: " + key);
+            return;
+        }
         if (!key.matches("[a-zA-Z][a-zA-Z0-9_.-]{0,63}")) errors.add("invalid configuration field key: " + key);
         if (field.type() == null || !FIELD_TYPES.contains(field.type())) errors.add("unsupported type for configuration field: " + key);
         if (field.label() == null || field.label().isBlank() || field.label().length() > 120) errors.add("invalid label for configuration field: " + key);
@@ -165,7 +192,7 @@ public final class PluginManifestValidator {
         if (field.minimumLength() != null && field.minimumLength() < 0 || field.maximumLength() != null && field.maximumLength() > 10000) errors.add("invalid string length bound for configuration field: " + key);
         if (field.minimumLength() != null && field.maximumLength() != null && field.minimumLength() > field.maximumLength()) errors.add("inverted string length range for configuration field: " + key);
         if (field.minimum() != null && field.maximum() != null && field.minimum() > field.maximum()) errors.add("inverted numeric range for configuration field: " + key);
-        if ("enum".equals(field.type()) && (field.options().isEmpty() || field.options().size() > 100 || field.options().stream().anyMatch(String::isBlank))) errors.add("enum requires 1 to 100 non-empty options: " + key);
+        if ("enum".equals(field.type()) && (field.options().isEmpty() || field.options().size() > 100 || field.options().stream().anyMatch(option -> option == null || option.isBlank()))) errors.add("enum requires 1 to 100 non-empty options: " + key);
         if (field.format() != null && !Set.of("email", "uri", "hostname").contains(field.format())) errors.add("unsupported format for configuration field: " + key);
     }
 

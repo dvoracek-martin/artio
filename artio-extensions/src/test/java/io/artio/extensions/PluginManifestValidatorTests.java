@@ -63,9 +63,21 @@ class PluginManifestValidatorTests {
                 manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(),
                 manifest.extensionPoints(), manifest.healthPath(), manifest.diagnosticsPath(), manifest.geographicAvailability(),
                 List.of(new PluginManifest.BundleService("grafana", manifest.image(), 3000, "/health", Map.of(), List.of("prometheus")),
-                        new PluginManifest.BundleService("prometheus", manifest.image(), 9090, "/health", Map.of(), List.of("collector")),
+                        new PluginManifest.BundleService("prometheus", manifest.image(), 9090, "/health", Map.of(), List.of("collector"), List.of("/prometheus"), List.of(9091)),
                         new PluginManifest.BundleService("collector", manifest.image(), 13133, "/health")));
         assertThat(validator.validate(bundle, "0.1.0", Set.of())).isEmpty();
+
+        var unsafeStorage = new PluginManifest.BundleService("storage", manifest.image(), 9000, "/health",
+                Map.of(), List.of(), List.of("/etc/secrets", "/data/cache", "/data/cache/child"), List.of(9000, 70000));
+        var unsafe = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), List.of(), List.of(), Map.of(), List.of(), manifest.healthPath(), manifest.diagnosticsPath(),
+                manifest.geographicAvailability(), List.of(unsafeStorage));
+        assertThat(validator.validate(unsafe, "0.1.0", Set.of()))
+                .contains("bundle persistent path must be under /data, /var/lib, or equal /prometheus",
+                        "bundle persistent paths must not overlap",
+                        "bundle additional private ports must be unique and differ from the health port",
+                        "bundle additional private port must be between 1 and 65535");
 
         var cycle = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
                 manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
@@ -144,6 +156,39 @@ class PluginManifestValidatorTests {
         assertThat(validator.validate(malformed, "0.1.0", Set.of()))
                 .contains("invalid dependency id: null", "invalid dependency version range: null",
                         "unsupported type for configuration field: apiKey");
+    }
+
+    @Test
+    void reportsNullEntriesInBundleListsAndConfigurationWithoutThrowing() {
+        var base = validManifest();
+        var dependencies = new java.util.ArrayList<PluginManifest.Dependency>();
+        dependencies.add(null);
+        var permissions = new java.util.ArrayList<String>();
+        permissions.add(null);
+        var points = new java.util.ArrayList<String>();
+        points.add(null);
+        var schema = new java.util.LinkedHashMap<String, PluginManifest.ConfigField>();
+        schema.put("missing", null);
+        schema.put("enum", new PluginManifest.ConfigField("enum", false, false, "Enum", null,
+                null, java.util.Arrays.asList((String) null), null, null, null, null));
+        var nullServices = new java.util.ArrayList<PluginManifest.BundleService>();
+        nullServices.add(null);
+        nullServices.add(new PluginManifest.BundleService("metrics", base.image(), 9090, "/health",
+                Map.of(), java.util.Arrays.asList((String) null), java.util.Arrays.asList((String) null),
+                java.util.Arrays.asList((Integer) null)));
+        var malformed = new PluginManifest(base.manifestVersion(), base.id(), base.name(), base.vendor(), base.version(),
+                base.description(), base.minimumCoreVersion(), base.maximumCoreVersion(), base.image(), dependencies,
+                permissions, schema, points, base.healthPath(), base.diagnosticsPath(),
+                new PluginManifest.GeographicAvailability("COUNTRY_SPECIFIC", java.util.Arrays.asList((String) null)),
+                nullServices);
+
+        assertThat(validator.validate(malformed, "0.1.0", Set.of()))
+                .contains("dependency cannot be null", "unsupported permission: null", "unsupported extension point: null",
+                        "configuration field cannot be null: missing", "enum requires 1 to 100 non-empty options: enum",
+                        "bundle service cannot be null", "bundle service metrics depends on an unknown service",
+                        "bundle persistent path must be under /data, /var/lib, or equal /prometheus",
+                        "bundle additional private port must be between 1 and 65535",
+                        "geographicAvailability countries must use ISO 3166-1 alpha-2 codes");
     }
 
     @Test

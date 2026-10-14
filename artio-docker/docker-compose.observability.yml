@@ -47,8 +47,8 @@ services:
     environment:
       MANAGEMENT_TRACING_ENABLED: ${ARTIO_OBSERVABILITY_TRACES_ENABLED:-true}
       ARTIO_METRICS_OTLP_ENABLED: ${ARTIO_OBSERVABILITY_METRICS_ENABLED:-true}
-      ARTIO_OTLP_TRACING_ENDPOINT: http://otel-collector:4318/v1/traces
-      ARTIO_OTLP_METRICS_ENDPOINT: http://otel-collector:4318/v1/metrics
+      ARTIO_OTLP_TRACING_ENDPOINT: http://extension-controller:8090/internal/v1/telemetry/observability.artio/traces
+      ARTIO_OTLP_METRICS_ENDPOINT: http://extension-controller:8090/internal/v1/telemetry/observability.artio/metrics
     depends_on:
       otel-collector:
         condition: service_started

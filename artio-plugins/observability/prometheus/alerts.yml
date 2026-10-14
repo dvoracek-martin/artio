@@ -1,0 +1,32 @@
+groups:
+  - name: artio-api
+    interval: 30s
+    rules:
+      - alert: ArtioApiUnavailable
+        expr: up{job="artio-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Artio API scrape target is unavailable
+      - alert: ArtioHighServerErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{job="artio-api",status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{job="artio-api"}[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Artio API 5xx rate exceeded 5 percent
+      - alert: ArtioDatabasePoolSaturated
+        expr: max_over_time(hikaricp_connections_pending{job="artio-api"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Requests are waiting for a JDBC connection
+      - alert: ArtioJvmMemoryPressure
+        expr: sum(jvm_memory_used_bytes{job="artio-api",area="heap"}) / clamp_min(sum(jvm_memory_max_bytes{job="artio-api",area="heap"}), 1) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Artio API JVM heap is above 90 percent

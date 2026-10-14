@@ -33,6 +33,15 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void persistentPluginVolumeNamesAreBoundToPluginServiceAndPathWithoutLeakingPath() {
+        String first = DockerExtensionRuntime.volumeName("observability.artio", "prometheus", "/prometheus");
+        assertThat(first).isEqualTo(DockerExtensionRuntime.volumeName("observability.artio", "prometheus", "/prometheus"));
+        assertThat(first).isNotEqualTo(DockerExtensionRuntime.volumeName("observability.artio", "grafana", "/prometheus"))
+                .isNotEqualTo(DockerExtensionRuntime.volumeName("observability.artio", "prometheus", "/var/lib/prometheus"));
+        assertThat(first).startsWith("artio-vol-").doesNotContain("/prometheus");
+    }
+
+    @Test
     void invocationPayloadMustFitWithinOneMiB() {
         io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1", "authorize",
                 "00000000-0000-0000-0000-000000000001", "{}", "small", Duration.ofSeconds(1));
@@ -137,7 +146,46 @@ class DockerExtensionRuntimeTests {
         }
     }
 
+    @Test
+    void forwardsOnlyBoundedOtlpSignalsToManagedObservabilityCollector() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        var received = new AtomicReference<String>();
+        server.createContext("/v1/metrics", exchange -> {
+            received.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String pluginId = "observability.artio";
+            String collectorName = DockerExtensionRuntime.serviceName(pluginId, "collector");
+            DockerClient docker = mock(DockerClient.class);
+            var command = mock(InspectContainerCmd.class);
+            var container = runningContainer(pluginId, "collector", 13133, 4318);
+            var networkSettings = container.getNetworkSettings();
+            var bindings = new com.github.dockerjava.api.model.Ports();
+            bindings.bind(com.github.dockerjava.api.model.ExposedPort.tcp(4318),
+                    com.github.dockerjava.api.model.Ports.Binding.bindIpAndPort("127.0.0.1", server.getAddress().getPort()));
+            when(networkSettings.getPorts()).thenReturn(bindings);
+            when(docker.inspectContainerCmd(collectorName)).thenReturn(command);
+            when(command.exec()).thenReturn(container);
+            var runtime = new DockerExtensionRuntime(docker, "extensions", 8080,
+                    new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"), true);
+
+            var response = runtime.forwardOtlp(pluginId, "metrics", "test-otlp".getBytes(StandardCharsets.UTF_8));
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(received.get()).isEqualTo("test-otlp");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static InspectContainerResponse runningContainer(String pluginId, String serviceId, int port) {
+        return runningContainer(pluginId, serviceId, port, new int[0]);
+    }
+
+    private static InspectContainerResponse runningContainer(String pluginId, String serviceId, int port, int... additionalPorts) {
         var container = mock(InspectContainerResponse.class);
         var state = mock(InspectContainerResponse.ContainerState.class);
         var config = mock(com.github.dockerjava.api.model.ContainerConfig.class);
@@ -147,8 +195,13 @@ class DockerExtensionRuntimeTests {
         when(container.getState()).thenReturn(state);
         when(state.getRunning()).thenReturn(true);
         when(container.getConfig()).thenReturn(config);
-        when(config.getLabels()).thenReturn(Map.of("io.artio.extension", pluginId, "io.artio.managed", "true", "io.artio.extension.service", serviceId));
-        when(config.getExposedPorts()).thenReturn(new com.github.dockerjava.api.model.ExposedPort[] { com.github.dockerjava.api.model.ExposedPort.tcp(port) });
+        when(config.getLabels()).thenReturn(Map.of("io.artio.extension", pluginId, "io.artio.managed", "true",
+                "io.artio.extension.service", serviceId, "io.artio.extension.ports", java.util.Arrays.stream(additionalPorts)
+                        .mapToObj(Integer::toString).collect(java.util.stream.Collectors.joining(","))));
+        var exposedPorts = new java.util.ArrayList<com.github.dockerjava.api.model.ExposedPort>();
+        exposedPorts.add(com.github.dockerjava.api.model.ExposedPort.tcp(port));
+        java.util.Arrays.stream(additionalPorts).forEach(additional -> exposedPorts.add(com.github.dockerjava.api.model.ExposedPort.tcp(additional)));
+        when(config.getExposedPorts()).thenReturn(exposedPorts.toArray(com.github.dockerjava.api.model.ExposedPort[]::new));
         when(container.getNetworkSettings()).thenReturn(settings);
         when(settings.getNetworks()).thenReturn(Map.of("extensions", network));
         when(network.getIpAddress()).thenReturn("127.0.0.1");

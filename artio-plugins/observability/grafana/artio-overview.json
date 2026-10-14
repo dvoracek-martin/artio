@@ -1,0 +1,14 @@
+{
+  "title": "Artio service overview",
+  "uid": "artio-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    { "id": 1, "title": "API request rate", "type": "timeseries", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }, "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{job=\"artio-api\"}[5m]))", "legendFormat": "requests/s" }] },
+    { "id": 2, "title": "5xx error rate", "type": "timeseries", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }, "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{job=\"artio-api\",status=~\"5..\"}[5m]))", "legendFormat": "5xx/s" }] },
+    { "id": 3, "title": "JVM heap utilization", "type": "timeseries", "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }, "targets": [{ "expr": "sum(jvm_memory_used_bytes{job=\"artio-api\",area=\"heap\"}) / clamp_min(sum(jvm_memory_max_bytes{job=\"artio-api\",area=\"heap\"}),1)", "legendFormat": "heap ratio" }] },
+    { "id": 4, "title": "Database pool connections", "type": "timeseries", "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }, "targets": [{ "expr": "hikaricp_connections_active{job=\"artio-api\"}", "legendFormat": "active" }, { "expr": "hikaricp_connections_pending{job=\"artio-api\"}", "legendFormat": "pending" }] }
+  ]
+}
