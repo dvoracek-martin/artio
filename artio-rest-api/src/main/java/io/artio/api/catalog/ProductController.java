@@ -46,6 +46,12 @@ public class ProductController {
         return ResponseEntity.created(URI.create("/api/products/" + product.id())).body(product);
     }
 
+    @PostMapping("/{id}/duplicate")
+    public ResponseEntity<ProductResponse> duplicate(@PathVariable UUID id,@RequestBody ProductRequest request){
+        var product=products.duplicate(id,request);
+        return ResponseEntity.created(URI.create("/api/products/"+product.id())).body(product);
+    }
+
     @PutMapping("/{id}")
     public ProductResponse update(@PathVariable UUID id, @RequestBody UpdateProductRequest request) {
         return products.update(id, request);

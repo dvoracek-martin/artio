@@ -161,6 +161,24 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void duplicatesProductAsUnpublishedDraftWithFreshIdentityAndSku(){
+        var source=adminExchange("/api/v1/products",HttpMethod.POST,
+                new io.artio.api.catalog.ProductRequest("Desk lamp","Brass lamp","LAMP-ORIGINAL"),
+                io.artio.api.catalog.ProductResponse.class);
+        assertThat(source.getBody()).isNotNull();
+        var copy=adminExchange("/api/v1/products/{id}/duplicate",HttpMethod.POST,
+                new io.artio.api.catalog.ProductRequest("Desk lamp copy","Brass lamp","LAMP-COPY"),
+                io.artio.api.catalog.ProductResponse.class,source.getBody().id());
+        assertThat(copy.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(copy.getBody()).isNotNull();
+        assertThat(copy.getBody().id()).isNotEqualTo(source.getBody().id());
+        assertThat(copy.getBody().sku()).isEqualTo("LAMP-COPY");
+        assertThat(copy.getBody().name()).isEqualTo("Desk lamp copy");
+        assertThat(copy.getBody().active()).isFalse();
+        assertThat(copy.getBody().description()).isEqualTo(source.getBody().description());
+    }
+
+    @Test
     void updatesProductDescriptionAndActivationStateWithoutChangingItsSku() {
         var created = adminExchange("/api/products", HttpMethod.POST,
                 new ProductRequest("Studio Display", "Original description", "DSP-2701"), ProductResponse.class);

@@ -55,6 +55,27 @@ public class ProductApplicationService {
         return ProductResponse.from(product);
     }
 
+    @CacheEvict(cacheNames = "catalog-products", allEntries = true)
+    public ProductResponse duplicate(UUID sourceId,ProductRequest request){
+        if(request==null)throw new IllegalArgumentException("A new product name and SKU are required");
+        searchIndexLock.lockCatalogWrite();
+        Product source=findProduct(sourceId);
+        Product copy=Product.create(new ProductId(UUID.randomUUID()),new ProductName(request.name()),
+                new ProductDescription(request.description()),new Sku(request.sku()));
+        copy.deactivate();
+        copy.classify(source.getBrandId(),source.getCategoryIds());
+        var definitions=attributeDefinitions.findAll().stream().collect(java.util.stream.Collectors.toMap(
+                definition->definition.getCode().value(),definition->definition));
+        source.getAttributes().forEach((code,value)->{
+            var definition=definitions.get(code);
+            if(definition==null)throw new IllegalStateException("Stored attribute definition is missing: "+code);
+            copy.setAttribute(definition,value);
+        });
+        products.save(copy);
+        index(copy);
+        return ProductResponse.from(copy);
+    }
+
     @Transactional(readOnly = true)
     @Cacheable(cacheNames = "catalog-products", key = "'all'")
     public List<ProductResponse> findAll() {
