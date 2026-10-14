@@ -53,6 +53,7 @@ class CatalogApiIntegrationTests {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
     private static final AtomicReference<String> PROVIDER_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\",\"amount\":\"12.50\",\"currency\":\"CHF\"}");
+    private static final AtomicReference<RuntimeException> PROVIDER_CHECKOUT_FAILURE = new AtomicReference<>();
 
     @Autowired
     private TestRestTemplate http;
@@ -112,6 +113,7 @@ class CatalogApiIntegrationTests {
 
     @BeforeEach
     void authenticateAdminForCatalogAdministration() {
+        PROVIDER_CHECKOUT_FAILURE.set(null);
         UUID userId = UUID.randomUUID();
         adminUserId = userId;
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) "
@@ -911,6 +913,32 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void definitivePaymentProviderRejectionReturns422AndCancelsThePendingCheckout() {
+        UUID orderId = UUID.randomUUID();
+        UUID sellableId = UUID.randomUUID();
+        var warehouse = inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "ROUTE-" + orderId.toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Checkout route", "CH-ZH"));
+        inventory.receive(warehouse.id(), sellableId, BigDecimal.ONE);
+        inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                orderId, warehouse.id(), sellableId, BigDecimal.ONE));
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                        + "VALUES (?,?,'PENDING',1,0,0,1,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
+                orderId, adminUserId, "route-rejection-" + orderId);
+        PROVIDER_CHECKOUT_FAILURE.set(new PaymentProvider.CheckoutRejectedException("PROVIDER_REJECTED_422"));
+        var headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+
+        var response = http.exchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                new HttpEntity<>(null, headers), ApiError.class, orderId);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
+        assertThat(inventory.reservationsByOrder(orderId)).singleElement()
+                .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
+                .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
+    }
+
+    @Test
     void expiryJobCancelsUnpaidOrdersOnlyAfterEveryReservationHasExpired() {
         var warehouse = adminExchange("/api/warehouses", HttpMethod.POST,
                 new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
@@ -1667,6 +1695,8 @@ class CatalogApiIntegrationTests {
                     return new PaymentCapabilities(true, false, true, true, true, true, Optional.of(Duration.ofMinutes(31)));
                 }
                 @Override public CheckoutResult createCheckout(CheckoutRequest request) {
+                    RuntimeException failure = PROVIDER_CHECKOUT_FAILURE.getAndSet(null);
+                    if (failure != null) throw failure;
                     return new CheckoutResult("test-" + request.orderId(), "https://payments.example.test/checkout", PaymentState.PENDING);
                 }
                 @Override public PaymentResult capture(String reference, String key) {
