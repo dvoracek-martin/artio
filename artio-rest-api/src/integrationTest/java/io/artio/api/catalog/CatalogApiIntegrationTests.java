@@ -358,6 +358,12 @@ class CatalogApiIntegrationTests {
         assertThat(saved.getBody().storeName()).isEqualTo("Studio Zürich");
         assertThat(saved.getBody().availableLanguages()).containsExactly("de", "fr", "it", "en");
 
+        var publicConfig = http.getForEntity("/api/v1/public/config", JsonNode.class);
+        assertThat(publicConfig.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(publicConfig.getBody().path("countryCode").asText()).isEqualTo("CH");
+        assertThat(publicConfig.getBody().path("currencyCode").asText()).isEqualTo("CHF");
+        assertThat(publicConfig.getBody().path("locale").asText()).isEqualTo("de-CH");
+
         var invalidUrl = adminExchange("/api/v1/admin/system/settings", HttpMethod.PUT,
                 new io.artio.api.enterprise.SystemSettingsController.SystemSettingsUpdate("Studio Zürich", "CH", "CHF", "de-CH",
                         List.of("de"), "Europe/Zurich", "http://shop.example.test"), ApiError.class);
