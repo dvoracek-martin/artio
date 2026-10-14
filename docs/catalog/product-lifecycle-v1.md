@@ -9,3 +9,5 @@ Products can be soft-archived with `PUT /api/v1/products/{id}/archive` and resto
 The duplicate operation does not clone variant records, scheduled publication data, or merchandising associations. These remain separate product-lifecycle workflows and are not implied by duplication.
 
 Archive verification: catalog domain tests, selected API tests, integration source compilation and Backoffice production build passed. The targeted V30 clean-install and archive/restore PostgreSQL integration methods were requested and skipped because Docker was unavailable; they have not been runtime-verified. See the 2026-10-14 technical state ledger.
+
+Duplication copy acceptance: `ProductMediaServiceTests` passed and the updated duplicate API integration scenario compiles. Its PostgreSQL/blob-storage execution has not been run because Docker Engine is unavailable.

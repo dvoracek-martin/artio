@@ -172,11 +172,18 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void duplicatesProductAsUnpublishedDraftWithFreshIdentityAndSku(){
+    void duplicatesProductAsUnpublishedDraftWithFreshIdentityAndSku() throws Exception {
         var source=adminExchange("/api/v1/products",HttpMethod.POST,
                 new io.artio.api.catalog.ProductRequest("Desk lamp","Brass lamp","LAMP-ORIGINAL"),
                 io.artio.api.catalog.ProductResponse.class);
         assertThat(source.getBody()).isNotNull();
+        adminExchange("/api/v1/products/{id}/translations/de",HttpMethod.PUT,
+                new io.artio.api.catalog.ProductTranslationApplicationService.TranslationRequest(
+                        "Schreibtischleuchte","Messinglampe","source-lamp","Quell-SEO-Titel","Quell-SEO-Text"),
+                io.artio.api.catalog.ProductTranslationApplicationService.TranslationView.class,source.getBody().id());
+        byte[] sourceImage=testPng(8,6);
+        var sourceMedia=uploadProductImage(source.getBody().id(),sourceImage,"Vorderseite");
+        assertThat(sourceMedia.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         var copy=adminExchange("/api/v1/products/{id}/duplicate",HttpMethod.POST,
                 new io.artio.api.catalog.ProductRequest("Desk lamp copy","Brass lamp","LAMP-COPY"),
                 io.artio.api.catalog.ProductResponse.class,source.getBody().id());
@@ -187,6 +194,21 @@ class CatalogApiIntegrationTests {
         assertThat(copy.getBody().name()).isEqualTo("Desk lamp copy");
         assertThat(copy.getBody().active()).isFalse();
         assertThat(copy.getBody().description()).isEqualTo(source.getBody().description());
+        var translations=http.getForEntity("/api/v1/products/{id}/translations",
+                io.artio.api.catalog.ProductTranslationApplicationService.TranslationView[].class,copy.getBody().id());
+        assertThat(translations.getBody()).singleElement().satisfies(translation->{
+            assertThat(translation.name()).isEqualTo("Schreibtischleuchte");
+            assertThat(translation.description()).isEqualTo("Messinglampe");
+            assertThat(translation.seoSlug()).isNull();
+            assertThat(translation.seoTitle()).isNull();
+        });
+        var copiedMedia=http.getForEntity("/api/v1/products/{id}/media",ProductMediaController.MediaResponse[].class,copy.getBody().id());
+        assertThat(copiedMedia.getBody()).singleElement().satisfies(media->{
+            assertThat(media.id()).isNotEqualTo(sourceMedia.getBody().id());
+            assertThat(media.productId()).isEqualTo(copy.getBody().id());
+            assertThat(media.altText()).isEqualTo("Vorderseite");
+        });
+        assertThat(http.getForEntity(copiedMedia.getBody()[0].contentUrl(),byte[].class).getBody()).isEqualTo(sourceImage);
     }
 
     @Test
