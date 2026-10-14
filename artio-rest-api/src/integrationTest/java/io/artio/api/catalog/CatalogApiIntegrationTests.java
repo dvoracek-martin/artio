@@ -1127,6 +1127,15 @@ class CatalogApiIntegrationTests {
                 Integer.class);
         assertThat(enterpriseTables).isEqualTo(8);
 
+        var storedValueColumns = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE table_schema=current_schema() AND ((table_name='payments' AND column_name='gift_card_id') "
+                + "OR (table_name='gift_card_transactions' AND column_name='payment_refund_id'))", Integer.class);
+        assertThat(storedValueColumns).isEqualTo(2);
+        var storedValueIndexes = jdbc.queryForObject("SELECT COUNT(*) FROM pg_indexes "
+                + "WHERE schemaname=current_schema() AND indexname IN "
+                + "('uq_gift_card_redemption_per_order','uq_gift_card_refund_transaction')", Integer.class);
+        assertThat(storedValueIndexes).isEqualTo(2);
+
         var tenantTables = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables "
                 + "WHERE table_schema=current_schema() AND table_name IN ('tenants','tenant_memberships')", Integer.class);
         var tenantColumn = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns "

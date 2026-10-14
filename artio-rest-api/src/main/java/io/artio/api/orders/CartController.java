@@ -3,6 +3,7 @@ package io.artio.api.orders;
 import io.artio.api.pricing.PricingApplicationService;
 import io.artio.api.inventory.InventoryApplicationService;
 import io.artio.api.bundles.BundleApplicationService;
+import io.artio.api.enterprise.GiftCardAccounting;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.RoundingMode;
@@ -138,7 +139,7 @@ public class CartController {
         UUID userId = userId(auth);
         if(idempotencyKey==null||!idempotencyKey.matches("[A-Za-z0-9._:-]{8,128}"))throw new IllegalArgumentException("Idempotency-Key must contain 8 to 128 safe characters");
         OrderView prior=findByIdempotencyKey(userId,idempotencyKey);if(prior!=null)return org.springframework.http.ResponseEntity.ok(prior);
-        if(stripeKey.isBlank()&&paymentProvider.getIfAvailable()==null)throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
+        if(stripeKey.isBlank()&&paymentProvider.getIfAvailable()==null&&blank(request.giftCardCode()))throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
         UUID cartId = jdbc.query("SELECT id FROM carts WHERE user_id=? AND expires_at>now()", rs -> rs.next() ? UUID.fromString(rs.getString(1)) : null, userId);
         if (cartId == null) throw new IllegalArgumentException("Cart is empty");
         List<CartRow> items = jdbc.query("SELECT id,variant_id,quantity,unit_price,currency,bundle_ref,bundle_id FROM cart_items WHERE cart_id=?", (rs,n) -> new CartRow(rs.getObject("id",UUID.class),rs.getObject("variant_id",UUID.class),rs.getBigDecimal("quantity"),rs.getBigDecimal("unit_price"),rs.getString("currency").trim(),rs.getObject("bundle_ref",UUID.class),rs.getObject("bundle_id",UUID.class)), cartId);
@@ -201,6 +202,11 @@ public class CartController {
         order.items().forEach(i->jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,?,?,?,?)",UUID.randomUUID(),order.getId().value(),i.variantId(),i.quantity().value(),i.unitPrice().amount(),i.unitPrice().currency().getCurrencyCode(),i.bundleId()));
         var warehouses=inventory.warehouses().stream().filter(InventoryApplicationService.WarehouseView::active).toList();
         for(var requirement:requirements.entrySet()){var selected=warehouses.stream().filter(w->inventory.stockByWarehouse(w.id()).stream().anyMatch(s->s.sellableId().equals(requirement.getKey())&&s.available().compareTo(requirement.getValue())>=0)).findFirst().orElseThrow(()->new IllegalStateException("Insufficient inventory for item "+requirement.getKey()));inventory.reserve(new InventoryApplicationService.ReserveRequest(order.getId().value(),selected.id(),requirement.getKey(),requirement.getValue()));}
+        if(!blank(request.giftCardCode())){
+            var redemption=GiftCardAccounting.redeem(jdbc,request.giftCardCode(),userId,order.getId().value(),null);
+            if(redemption.remainingDue().signum()>0&&stripeKey.isBlank()&&paymentProvider.getIfAvailable()==null)
+                throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Gift card was applied only partially and no external payment provider is configured");
+        }
         UUID eventId=UUID.randomUUID();
         String eventPayload;
         try{eventPayload=mapper.writeValueAsString(Map.of("schemaVersion",1,"eventId",eventId,"type","ORDER_CREATED","occurredAt",Instant.now(),"orderId",order.getId().value(),"userId",userId,"locale",request.locale()));}
@@ -211,7 +217,8 @@ public class CartController {
         jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,?,?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
                 UUID.randomUUID(),userId,"ORDER_CREATED",confirmation.subject(),confirmation.body(),"order-created:"+orderNumber);
         jdbc.update("DELETE FROM cart_items WHERE cart_id=?",cartId);jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=?",cartId);
-        return org.springframework.http.ResponseEntity.status(HttpStatus.CREATED).body(new OrderView(order.getId().value(),order.status().name(),order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null,request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshot));
+        String persistedStatus=jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,order.getId().value());
+        return org.springframework.http.ResponseEntity.status(HttpStatus.CREATED).body(new OrderView(order.getId().value(),persistedStatus,order.subtotal().amount(),order.tax().amount(),order.shipping().amount(),order.total().amount(),order.total().currency().getCurrencyCode(),null,request.shippingCountry().toUpperCase(java.util.Locale.ROOT),market.market(),market.jurisdiction(),taxSnapshot));
     }
 
     @GetMapping("/orders")
@@ -249,11 +256,11 @@ public class CartController {
     public record AddItemRequest(UUID variantId, BigDecimal quantity, String market, String channel, String jurisdiction) { }
     public record AddBundleRequest(UUID bundleId,Map<String,Set<UUID>> selectedOptions,BigDecimal bundleQuantity,String market,String channel,String jurisdiction){}
     public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale,
-                                  String shippingMethodId, ShippingAddressDetails shippingDetails, BigDecimal parcelWeightKg) {
+                                  String shippingMethodId, ShippingAddressDetails shippingDetails, BigDecimal parcelWeightKg,String giftCardCode) {
         public CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry) {
-            this(shippingAddress, billingAddress, shippingCountry, "en", null, null, null);
+            this(shippingAddress, billingAddress, shippingCountry, "en", null, null, null,null);
         }
-        public CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale) { this(shippingAddress,billingAddress,shippingCountry,locale,null,null,null); }
+        public CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale) { this(shippingAddress,billingAddress,shippingCountry,locale,null,null,null,null); }
     }
     public record ShippingAddressDetails(String recipientName, String postalCode, String locality, String addressLine1, String addressLine2) {
         ShippingProvider.Address toAddress(String country) {

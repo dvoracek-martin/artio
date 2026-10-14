@@ -60,10 +60,14 @@ public class EnterpriseFeaturesController {
     public GiftCardIssued issueGiftCard(@RequestBody GiftCardRequest request){if(request==null||request.amount()==null||request.amount().signum()<=0||request.amount().scale()>4||request.currency()==null||!request.currency().matches("[A-Za-z]{3}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A positive amount and ISO currency are required");String code=randomGiftCode();UUID id=UUID.randomUUID();jdbc.update("INSERT INTO gift_cards(id,code_hash,initial_balance,balance,currency,expires_at) VALUES (?,?,?,?,?,?)",id,sha256(code),request.amount(),request.amount(),request.currency().toUpperCase(Locale.ROOT),request.expiresAt()==null?null:java.sql.Timestamp.from(request.expiresAt()));return new GiftCardIssued(id,code,request.amount(),request.currency().toUpperCase(Locale.ROOT),request.expiresAt());}
 
     @PostMapping("/api/gift-cards/redeem") @Transactional
-    public GiftCardBalance redeem(@RequestBody GiftCardRedeem request,JwtAuthenticationToken auth){if(request==null||request.code()==null||request.amount()==null||request.amount().signum()<=0||request.amount().scale()>4||request.currency()==null||!request.currency().matches("(?i)[a-z]{3}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A gift card code, ISO currency and positive amount are required");String hash=sha256(request.code().replace("-","").toUpperCase(Locale.ROOT));
-        var rows=jdbc.query("SELECT id,balance,currency FROM gift_cards WHERE code_hash=? AND active AND (expires_at IS NULL OR expires_at>now()) FOR UPDATE",(rs,n)->new GiftRow(rs.getObject(1,UUID.class),rs.getBigDecimal(2),rs.getString(3).trim()),hash);
-        if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Gift card not found, inactive or expired");GiftRow card=rows.getFirst();if(!request.currency().equalsIgnoreCase(card.currency()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Gift card currency does not match");if(request.amount().compareTo(card.balance())>0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Gift card balance is insufficient");
-        jdbc.update("UPDATE gift_cards SET balance=balance-? WHERE id=?",request.amount(),card.id());jdbc.update("INSERT INTO gift_card_transactions(id,gift_card_id,user_id,order_id,amount,kind) VALUES (?,?,?,?,?,'REDEEM')",UUID.randomUUID(),card.id(),user(auth),request.orderId(),request.amount());return new GiftCardBalance(card.id(),card.balance().subtract(request.amount()),card.currency());}
+    public GiftCardRedemption redeem(@RequestBody GiftCardRedeem request,JwtAuthenticationToken auth){
+        if(request==null||request.code()==null||request.orderId()==null||request.amount()!=null&&request.amount().signum()<=0||request.currency()!=null&&!request.currency().matches("(?i)[a-z]{3}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A gift card code and order id are required; an optional amount must be positive");
+        var redemption=GiftCardAccounting.redeem(jdbc,request.code(),user(auth),request.orderId(),request.amount());
+        if(request.currency()!=null&&!request.currency().equalsIgnoreCase(redemption.currency()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Gift card currency does not match the request");
+        return new GiftCardRedemption(redemption.cardId(),redemption.balance(),redemption.currency(),redemption.appliedAmount(),redemption.remainingDue(),redemption.orderStatus());
+    }
 
     @GetMapping("/api/loyalty/me")
     public LoyaltyView loyalty(JwtAuthenticationToken auth){UUID user=user(auth);jdbc.update("INSERT INTO loyalty_accounts(user_id) VALUES (?) ON CONFLICT DO NOTHING",user);return jdbc.queryForObject("SELECT points,tier,updated_at FROM loyalty_accounts WHERE user_id=?",(rs,n)->new LoyaltyView(rs.getLong(1),rs.getString(2),rs.getTimestamp(3).toInstant()),user);}
@@ -133,6 +137,7 @@ public class EnterpriseFeaturesController {
     public record GiftCardIssued(UUID id,String code,BigDecimal balance,String currency,Instant expiresAt){}
     public record GiftCardRedeem(String code,BigDecimal amount,String currency,UUID orderId){}
     public record GiftCardBalance(UUID id,BigDecimal balance,String currency){}
+    public record GiftCardRedemption(UUID id,BigDecimal balance,String currency,BigDecimal appliedAmount,BigDecimal remainingDue,String orderStatus){}
     public record LoyaltyView(long points,String tier,Instant updatedAt){}
     public record LoyaltyAccountView(UUID userId,LoyaltyView balance,List<LoyaltyTransactionView> transactions){}
     public record LoyaltyTransactionView(UUID id,UUID orderId,UUID refundId,long points,String kind,String reason,Instant createdAt){}

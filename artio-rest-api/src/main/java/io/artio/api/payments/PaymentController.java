@@ -6,6 +6,7 @@ import io.artio.api.inventory.InventoryApplicationService;
 import io.artio.api.orders.OrderUpdatePublisher;
 import io.artio.api.orders.OrderTimelineEvents;
 import io.artio.api.enterprise.LoyaltyAccounting;
+import io.artio.api.enterprise.GiftCardAccounting;
 import io.artio.extensions.commerce.PaymentProvider;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -64,10 +65,11 @@ public class PaymentController {
         if (extension != null) return extensionCheckout(orderId, auth, extension);
         if (stripeKey.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Stripe is not configured");
         UUID userId=UUID.fromString(auth.getToken().getSubject());
-        var rows=jdbc.query("SELECT total,currency,status FROM orders WHERE id=? AND user_id=?",(rs,n)->new OrderRow(rs.getBigDecimal(1),rs.getString(2).trim(),rs.getString(3)),orderId,userId);
+        var rows=jdbc.query("SELECT o.total-COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='CAPTURED'),0),o.currency,o.status FROM orders o WHERE o.id=? AND o.user_id=?",(rs,n)->new OrderRow(rs.getBigDecimal(1),rs.getString(2).trim(),rs.getString(3)),orderId,userId);
         if(rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");
         OrderRow order=rows.getFirst();
         if(!"PENDING".equals(order.status())) throw new ResponseStatusException(HttpStatus.CONFLICT,"Order is not awaiting payment");
+        if(order.total().signum()<=0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Order has no remaining payment due");
         Instant now=Instant.now();
         Instant sessionExpiresAt=now.plus(Duration.ofMinutes(31));
         try { inventory.extendReservationsForPayment(orderId,sessionExpiresAt.plus(Duration.ofMinutes(1))); }
@@ -95,11 +97,12 @@ public class PaymentController {
 
     private CheckoutSession extensionCheckout(UUID orderId, JwtAuthenticationToken auth, PaymentProvider extension) {
         UUID userId = UUID.fromString(auth.getToken().getSubject());
-        var rows = jdbc.query("SELECT total,currency,status FROM orders WHERE id=? AND user_id=?",
+        var rows = jdbc.query("SELECT o.total-COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='CAPTURED'),0),o.currency,o.status FROM orders o WHERE o.id=? AND o.user_id=?",
                 (rs, n) -> new OrderRow(rs.getBigDecimal(1), rs.getString(2).trim(), rs.getString(3)), orderId, userId);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
         OrderRow order = rows.getFirst();
         if (!"PENDING".equals(order.status())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Order is not awaiting payment");
+        if(order.total().signum()<=0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Order has no remaining payment due");
         Instant expiresAt = Instant.now().plus(Duration.ofMinutes(31));
         try { inventory.extendReservationsForPayment(orderId, expiresAt.plus(Duration.ofMinutes(1))); }
         catch (IllegalStateException | io.artio.api.catalog.CatalogNotFoundException e) {
@@ -357,8 +360,8 @@ public class PaymentController {
         if (role == null || !Set.of("ADMIN", "SUPERADMIN").contains(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Idempotency-Key header is required");
-        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method,order_id FROM payments WHERE id=? FOR UPDATE",
-                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6),rs.getObject(7,UUID.class)),paymentId);
+        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method,order_id,user_id,gift_card_id FROM payments WHERE id=? FOR UPDATE",
+                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6),rs.getObject(7,UUID.class),rs.getObject(8,UUID.class),rs.getObject(9,UUID.class)),paymentId);
         if (payments.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
         RefundRow payment = payments.getFirst();
         var priorRows = jdbc.query("SELECT id,amount,status,provider_reference FROM payment_refunds WHERE payment_id=? AND idempotency_key=?",
@@ -388,7 +391,11 @@ public class PaymentController {
         String providerReference;
         try {
             PaymentProvider extension = provider.getIfAvailable();
-            if (extension != null) {
+            if ("GIFT_CARD".equals(payment.method())) {
+                if(payment.giftCardId()==null)throw new IllegalStateException("Stored-value payment has no card ledger");
+                GiftCardAccounting.refund(jdbc,payment.giftCardId(),payment.userId(),payment.orderId(),refundId,refundAmount);
+                providerReference="giftcard-refund:"+refundId;
+            } else if (extension != null) {
                 if (!extension.capabilities().refunds()) throw new IllegalStateException("Provider does not support refunds");
                 PaymentProvider.PaymentResult result = extension.refund(new PaymentProvider.RefundRequest(payment.providerReference(),
                         "artio-refund-" + refundId, refundAmount, payment.currency()));
@@ -440,7 +447,7 @@ public class PaymentController {
         }catch(Exception e){return false;}
     }
     public record CheckoutSession(String sessionId,String checkoutUrl){}
-    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method,UUID orderId){}
+    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method,UUID orderId,UUID userId,UUID giftCardId){}
     private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference){}
     public record RefundCommand(BigDecimal amount){}
     public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,

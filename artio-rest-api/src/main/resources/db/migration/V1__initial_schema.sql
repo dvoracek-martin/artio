@@ -381,16 +381,19 @@ CREATE TABLE gift_cards (
   active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE payments ADD COLUMN gift_card_id UUID REFERENCES gift_cards(id);
 CREATE TABLE gift_card_transactions (
   id UUID PRIMARY KEY,
   gift_card_id UUID NOT NULL REFERENCES gift_cards(id),
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   order_id UUID,
+  payment_refund_id UUID REFERENCES payment_refunds(id),
   amount NUMERIC(19,4) NOT NULL CHECK (amount > 0),
   kind VARCHAR(16) NOT NULL CHECK (kind IN ('REDEEM','REFUND')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX uq_gift_card_redemption_per_order ON gift_card_transactions(gift_card_id,order_id) WHERE order_id IS NOT NULL AND kind='REDEEM';
+CREATE UNIQUE INDEX uq_gift_card_refund_transaction ON gift_card_transactions(payment_refund_id) WHERE payment_refund_id IS NOT NULL;
 
 CREATE TABLE loyalty_accounts (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
