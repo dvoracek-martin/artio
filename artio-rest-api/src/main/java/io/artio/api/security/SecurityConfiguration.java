@@ -62,7 +62,7 @@ public class SecurityConfiguration {
                 .contentTypeOptions(Customizer.withDefaults())
                 .frameOptions(frame -> frame.deny())
                 .referrerPolicy(referrer -> referrer.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
-                .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.stripe.com")))
+                .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/brands/**", "/api/attributes/**", "/api/bundles", "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**", "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
                         "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles", "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**", "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**").hasAnyRole("ADMIN", "SUPERADMIN")
@@ -74,8 +74,8 @@ public class SecurityConfiguration {
                         "/api/inventory/**", "/api/v1/warehouses/**", "/api/v1/stock/**", "/api/v1/inventory/**", "/api/v1/orders/*/inventory-reservations").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/setup/status", "/api/v1/setup/status").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/setup/progress", "/api/setup/complete", "/api/setup/resume", "/api/v1/setup/progress", "/api/v1/setup/complete", "/api/v1/setup/resume",
-                        "/api/auth/register", "/api/auth/login", "/api/payments/stripe/webhook", "/api/payments/provider/webhook",
-                        "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/payments/stripe/webhook", "/api/v1/payments/provider/webhook").permitAll()
+                        "/api/auth/register", "/api/auth/login", "/api/payments/provider/webhook",
+                        "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/payments/provider/webhook").permitAll()
                 .requestMatchers("/api/public/**", "/api/v1/public/**", "/actuator/health/**", "/actuator/info",
                         "/api/products/**", "/api/variants/**", "/api/categories/**", "/api/brands/**", "/api/attributes/**", "/api/bundles/**", "/api/pricing/quote",
                         "/api/v1/products/**", "/api/v1/variants/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/pricing/quote").permitAll()

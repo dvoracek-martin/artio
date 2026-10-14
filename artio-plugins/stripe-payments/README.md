@@ -17,7 +17,7 @@ docker build -f artio-plugins/stripe-payments/Dockerfile -t artio/stripe-payment
 
 The Python tests mock Stripe HTTP calls and verify request amount conversion, stable idempotency forwarding, webhook HMAC/timestamp checks, and secret-safe errors. They do not claim a provider sandbox transaction or a Docker runtime test.
 
-The source manifest is `manifest.template.json`. Before installation it must be converted to a valid registry digest reference and the registry must be explicitly trusted by the Artio installation. The template deliberately contains a placeholder because publishing an image and inventing its digest would be misleading. Artio's existing Stripe path remains the default until an administrator selects the enabled extension provider.
+The source manifest is `manifest.template.json`. Before installation it must be converted to a valid registry digest reference and the registry must be explicitly trusted by the Artio installation. The template deliberately contains a placeholder because publishing an image and inventing its digest would be misleading. Core has no built-in Stripe fallback; after the plugin is installed and configured, select it with `ARTIO_PAYMENT_PROVIDER=extension` and `ARTIO_PAYMENTS_EXTENSION_PLUGIN_ID=payments.stripe`.
 
 ## Provider references
 

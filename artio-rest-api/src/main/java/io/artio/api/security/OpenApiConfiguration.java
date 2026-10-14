@@ -56,7 +56,6 @@ public class OpenApiConfiguration {
         if (method == PathItem.HttpMethod.POST
                 && ("/api/auth/register".equals(path)
                 || "/api/auth/login".equals(path)
-                || "/api/payments/stripe/webhook".equals(path)
                 || "/api/payments/provider/webhook".equals(path)
                 || "/api/pricing/quote".equals(path))) return true;
         if (path.startsWith("/api/public/")) return true;

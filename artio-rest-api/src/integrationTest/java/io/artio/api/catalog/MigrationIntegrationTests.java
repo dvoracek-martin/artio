@@ -10,7 +10,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import io.artio.api.payments.StripeWebhookReceiptRetentionWorker;
+import io.artio.api.payments.PaymentWebhookReceiptRetentionWorker;
 
 /** Exercises the supported clean installation against PostgreSQL. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -161,7 +161,7 @@ class MigrationIntegrationTests {
         jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('STRIPE',?,'completed',now()-interval '5 days',now()-interval '5 days')", prefix + "-recent");
         jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at) VALUES ('STRIPE',?,'pending',now()-interval '120 days')", prefix + "-unprocessed");
 
-        var worker = new StripeWebhookReceiptRetentionWorker(jdbc, 90);
+        var worker = new PaymentWebhookReceiptRetentionWorker(jdbc, 90);
         assertThat(worker.removeExpiredReceipts()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE event_id LIKE ?", Integer.class, prefix + "%"))
                 .isEqualTo(2);

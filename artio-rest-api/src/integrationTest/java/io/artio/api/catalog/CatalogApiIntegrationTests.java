@@ -11,14 +11,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.util.HexFormat;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
+import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.AfterAll;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -41,9 +39,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import io.artio.api.error.ApiError;
+import io.artio.extensions.commerce.PaymentProvider;
 import io.artio.api.catalog.media.ProductMediaController;
-import com.sun.net.httpserver.HttpServer;
-import java.net.InetSocketAddress;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -55,8 +52,7 @@ class CatalogApiIntegrationTests {
     private static final String PREVIOUS_TEST_ENCRYPTION_KEY = "previous-test-encryption-key-value-32-bytes-minimum";
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
-    private static final AtomicReference<String> STRIPE_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\"}");
-    private static final HttpServer MOCK_STRIPE = startMockStripe();
+    private static final AtomicReference<String> PROVIDER_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\"}");
 
     @Autowired
     private TestRestTemplate http;
@@ -89,7 +85,7 @@ class CatalogApiIntegrationTests {
     private io.artio.api.payments.CheckoutFailureCompensation checkoutFailureCompensation;
 
     @Autowired
-    private io.artio.api.payments.StripePaymentReconciliationWorker stripePaymentReconciliationWorker;
+    private io.artio.api.payments.PaymentReconciliationWorker paymentReconciliationWorker;
 
     private String adminToken;
     private UUID adminUserId;
@@ -111,32 +107,7 @@ class CatalogApiIntegrationTests {
         registry.add("artio.events.kafka.enabled", () -> "true");
         registry.add("artio.events.kafka.consumer-enabled", () -> "false");
         registry.add("artio.workers.enabled", () -> "false");
-        registry.add("artio.payments.stripe-secret-key", () -> "sk_test_integration_only");
-        registry.add("artio.payments.stripe-webhook-secret", () -> "whsec_integration_test_secret");
-        registry.add("artio.payments.reconciliation-api-url", () -> "http://127.0.0.1:" + MOCK_STRIPE.getAddress().getPort());
-    }
-
-    private static HttpServer startMockStripe() {
-        try {
-            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            server.createContext("/v1/checkout/sessions/", exchange -> {
-                exchange.getRequestBody().readAllBytes();
-                byte[] response = STRIPE_RESPONSE.get().getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.sendResponseHeaders(200, response.length);
-                exchange.getResponseBody().write(response);
-                exchange.close();
-            });
-            server.start();
-            return server;
-        } catch (IOException failure) {
-            throw new ExceptionInInitializerError(failure);
-        }
-    }
-
-    @AfterAll
-    static void stopMockStripe() {
-        MOCK_STRIPE.stop(0);
+        registry.add("artio.payments.provider", () -> "none");
     }
 
     @BeforeEach
@@ -905,7 +876,7 @@ class CatalogApiIntegrationTests {
                         + "VALUES (?,?,'PENDING',1,0,0,1,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
                 orderId, adminUserId, "compensation-" + orderId);
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
-                        + "VALUES (?,?,?,1,'CHF','STRIPE','PENDING',?,now(),now())",
+                        + "VALUES (?,?,?,1,'CHF','EXTENSION','PENDING',?,now(),now())",
                 UUID.randomUUID(), orderId, adminUserId, "cs_compensation_" + orderId);
 
         checkoutFailureCompensation.cancelRejectedCheckout(orderId);
@@ -941,7 +912,7 @@ class CatalogApiIntegrationTests {
         jdbc.update("UPDATE inventory_reservation SET expires_at=now()-interval '1 second' WHERE id=?", reservation.id());
         UUID paymentId = UUID.randomUUID();
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
-                        + "VALUES (?,?,?,1,'USD','STRIPE','PENDING',?,now(),now())",
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
                 paymentId, unpaidOrderId, userId, "cs_expired_" + paymentId);
 
         reservationExpiryScheduler.releaseExpiredReservations();
@@ -954,34 +925,34 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void signedStripeExpiryWebhookCancelsOrderAndFailsItsPayment() throws Exception {
+    void providerExpiryWebhookCancelsOrderAndFailsItsPayment() throws Exception {
         UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
         UUID orderId = insertPendingOrder(userId);
         UUID paymentId = UUID.randomUUID();
         String sessionId = "cs_expired_" + paymentId;
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
-                        + "VALUES (?,?,?,1,'USD','STRIPE','PENDING',?,now(),now())",
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
                 paymentId, orderId, userId, sessionId);
         UUID secondPaymentId = UUID.randomUUID();
         String secondSessionId = "cs_second_" + secondPaymentId;
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
-                        + "VALUES (?,?,?,1,'USD','STRIPE','PENDING',?,now(),now())",
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
                 secondPaymentId, orderId, userId, secondSessionId);
 
-        var expired = signedStripeWebhook("checkout.session.expired", sessionId, "unpaid");
+        var expired = providerWebhook("checkout.session.expired", sessionId, "unpaid");
         assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PENDING");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
-        var duplicateExpiry = signedStripeWebhook("checkout.session.expired", sessionId, "unpaid");
+        var duplicateExpiry = providerWebhook("checkout.session.expired", sessionId, "unpaid");
         assertThat(duplicateExpiry.getBody()).contains("duplicate");
         String expiryEventId = "evt_test_" + UUID.nameUUIDFromBytes(("checkout.session.expired:" + sessionId).getBytes(StandardCharsets.UTF_8));
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE provider='STRIPE' AND event_id=?", Integer.class, expiryEventId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_webhook_receipts WHERE provider='EXTENSION' AND event_id=?", Integer.class, expiryEventId)).isEqualTo(1);
 
-        var lateSuccess = signedStripeWebhook("checkout.session.completed", sessionId, "paid");
+        var lateSuccess = providerWebhook("checkout.session.completed", sessionId, "paid");
         assertThat(lateSuccess.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PENDING");
 
-        signedStripeWebhook("checkout.session.expired", secondSessionId, "unpaid");
+        providerWebhook("checkout.session.expired", secondSessionId, "unpaid");
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
     }
@@ -1036,18 +1007,14 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT attempts FROM event_outbox WHERE id=?", Integer.class, eventId)).isZero();
     }
 
-    private ResponseEntity<String> signedStripeWebhook(String type, String sessionId, String paymentStatus) throws Exception {
+    private ResponseEntity<String> providerWebhook(String type, String sessionId, String paymentStatus) throws Exception {
         String eventId = "evt_test_" + UUID.nameUUIDFromBytes((type + ":" + sessionId).getBytes(StandardCharsets.UTF_8));
         String body = "{\"id\":\"" + eventId + "\",\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
                 + "\",\"payment_status\":\"" + paymentStatus + "\"}}}";
-        String timestamp = Long.toString(java.time.Instant.now().getEpochSecond());
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec("whsec_integration_test_secret".getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-        String signature = HexFormat.of().formatHex(mac.doFinal((timestamp + "." + body).getBytes(StandardCharsets.UTF_8)));
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-        headers.set("Stripe-Signature", "t=" + timestamp + ",v1=" + signature);
-        return http.exchange("/api/v1/payments/stripe/webhook", HttpMethod.POST,
+        headers.set("Provider-Signature", "integration-test-signature");
+        return http.exchange("/api/v1/payments/provider/webhook", HttpMethod.POST,
                 new HttpEntity<>(body, headers), String.class);
     }
 
@@ -1309,8 +1276,8 @@ class CatalogApiIntegrationTests {
     void outboxDiagnosticsAreAdminOnlyAndExposeAggregateCounts() {
         long oldProcessedReceipts = jdbc.queryForObject("SELECT count(*) FROM payment_webhook_receipts WHERE processed_at IS NOT NULL AND processed_at < now()-interval '90 days'", Long.class);
         String eventPrefix = "diagnostic-" + UUID.randomUUID();
-        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('STRIPE',?,'completed',now()-interval '120 days',now()-interval '5 days')", eventPrefix + "-recently-processed");
-        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('STRIPE',?,'completed',now()-interval '1 day',now()-interval '120 days')", eventPrefix + "-old-processed");
+        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('EXTENSION',?,'completed',now()-interval '120 days',now()-interval '5 days')", eventPrefix + "-recently-processed");
+        jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('EXTENSION',?,'completed',now()-interval '1 day',now()-interval '120 days')", eventPrefix + "-old-processed");
         var anonymous = http.getForEntity("/api/v1/admin/operations/outbox",
                 io.artio.api.notifications.OutboxOperationsController.OutboxSummary.class);
         assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -1355,11 +1322,11 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void reconciliationMarksLostPaidWebhookAsCapturedAndPaid() {
-        UUID orderId = createStaleStripeOrder("cs_reconcile_paid_" + UUID.randomUUID());
-        STRIPE_RESPONSE.set("{\"status\":\"complete\",\"payment_status\":\"paid\"}");
+    void reconciliationMarksLostPaidProviderSessionAsCapturedAndPaid() {
+        UUID orderId = createStaleProviderOrder("cs_reconcile_paid_" + UUID.randomUUID());
+        PROVIDER_RESPONSE.set("{\"status\":\"complete\",\"payment_status\":\"paid\"}");
 
-        stripePaymentReconciliationWorker.reconcileDueSessions();
+        paymentReconciliationWorker.reconcileDueSessions();
 
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PAID");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("CAPTURED");
@@ -1367,17 +1334,17 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void reconciliationExpiresLostSessionAndReleasesReservations() {
-        UUID orderId = createStaleStripeOrder("cs_reconcile_expired_" + UUID.randomUUID());
+    void reconciliationExpiresLostProviderSessionAndReleasesReservations() {
+        UUID orderId = createStaleProviderOrder("cs_reconcile_expired_" + UUID.randomUUID());
         UUID sellableId = UUID.randomUUID();
         var warehouse = inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
                 "RECON-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Reconciliation", "CH-ZH"));
         inventory.receive(warehouse.id(), sellableId, BigDecimal.ONE);
         var reservation = inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
                 orderId, warehouse.id(), sellableId, BigDecimal.ONE));
-        STRIPE_RESPONSE.set("{\"status\":\"expired\",\"payment_status\":\"unpaid\"}");
+        PROVIDER_RESPONSE.set("{\"status\":\"expired\",\"payment_status\":\"unpaid\"}");
 
-        stripePaymentReconciliationWorker.reconcileDueSessions();
+        paymentReconciliationWorker.reconcileDueSessions();
 
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("FAILED");
@@ -1386,13 +1353,13 @@ class CatalogApiIntegrationTests {
                 .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
     }
 
-    private UUID createStaleStripeOrder(String sessionId) {
+    private UUID createStaleProviderOrder(String sessionId) {
         UUID orderId = UUID.randomUUID();
         jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
                         + "VALUES (?,?,'PENDING',12.50,0,0,12.50,'CHF','address','address',now()-interval '45 minutes','CH','CH','CH','{}'::jsonb,?)",
                 orderId, adminUserId, "reconciliation-" + orderId);
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
-                        + "VALUES (?,?,?,12.50,'CHF','STRIPE','PENDING',?,now()-interval '45 minutes',now())",
+                        + "VALUES (?,?,?,12.50,'CHF','EXTENSION','PENDING',?,now()-interval '45 minutes',now())",
                 UUID.randomUUID(), orderId, adminUserId, sessionId);
         return orderId;
     }
@@ -1673,6 +1640,57 @@ class CatalogApiIntegrationTests {
         @Primary
         CacheManager integrationTestCacheManager() {
             return new ConcurrentMapCacheManager("catalog-products", "price-lookups");
+        }
+
+        @Bean
+        @Primary
+        PaymentProvider integrationPaymentProvider(ObjectMapper mapper) {
+            return new PaymentProvider() {
+                @Override public PaymentCapabilities capabilities() {
+                    return new PaymentCapabilities(true, false, true, true, true, true, Optional.of(Duration.ofMinutes(31)));
+                }
+                @Override public CheckoutResult createCheckout(CheckoutRequest request) {
+                    return new CheckoutResult("test-" + request.orderId(), "https://payments.example.test/checkout", PaymentState.PENDING);
+                }
+                @Override public PaymentResult capture(String reference, String key) {
+                    return new PaymentResult(reference, PaymentState.CAPTURED, null, null, null);
+                }
+                @Override public PaymentResult cancel(String reference, String key) {
+                    return new PaymentResult(reference, PaymentState.CANCELLED, null, null, null);
+                }
+                @Override public PaymentResult refund(RefundRequest request) {
+                    return new PaymentResult("refund-" + request.idempotencyKey(), PaymentState.REFUNDED,
+                            request.amount(), request.currency(), null);
+                }
+                @Override public WebhookResult verifyWebhook(String signature, byte[] rawBody) {
+                    return verifyWebhook(Map.of("provider-signature", signature == null ? "" : signature), rawBody);
+                }
+                @Override public WebhookResult verifyWebhook(Map<String, String> headers, byte[] rawBody) {
+                    try {
+                        JsonNode event = mapper.readTree(rawBody);
+                        String type = event.path("type").asText();
+                        String state = event.path("data").path("object").path("payment_status").asText();
+                        PaymentState paymentState = "checkout.session.expired".equals(type) ? PaymentState.EXPIRED
+                                : "paid".equals(state) ? PaymentState.CAPTURED : PaymentState.PENDING;
+                        return new WebhookResult(event.path("id").asText(), type,
+                                event.path("data").path("object").path("id").asText(), paymentState, true);
+                    } catch (IOException invalid) {
+                        return new WebhookResult("", "", "", PaymentState.FAILED, false);
+                    }
+                }
+                @Override public Optional<PaymentResult> reconcile(String reference, String key) {
+                    try {
+                        JsonNode response = mapper.readTree(PROVIDER_RESPONSE.get());
+                        String status = response.path("status").asText();
+                        String paid = response.path("payment_status").asText();
+                        if ("complete".equals(status) && "paid".equals(paid))
+                            return Optional.of(new PaymentResult(reference, PaymentState.CAPTURED, null, null, null));
+                        if ("expired".equals(status))
+                            return Optional.of(new PaymentResult(reference, PaymentState.EXPIRED, null, null, null));
+                        return Optional.empty();
+                    } catch (IOException invalid) { return Optional.empty(); }
+                }
+            };
         }
     }
 

@@ -78,7 +78,7 @@ Credentials and provider secrets are injected/stored through an operator-control
 
 Preserve existing modular domains, PostgreSQL adapters and API behavior when compatible. The project owner confirmed that no production or other external data ever existed. SaaS tenancy is outside the product boundary; V10 defines the applicable single-installation identity/security and commerce schema. Legacy external database preservation is not a requirement.
 
-Direct Stripe integration in `artio-rest-api` is also a known conflict. Introduce and test the Core-owned payment Extension API first, then migrate provider behavior and webhook compatibility into a Docker plugin without changing accepted order/payment history.
+The provider-neutral `payment.provider.v1` port now owns checkout, cancellation, capture, refund, webhook verification and reconciliation boundaries. Stripe-specific HTTP, credentials, webhook signature code and CSP permission have been removed from Core. Stripe and PayPal implementations remain separately sourced Docker plugins. Release acceptance still requires publishing immutable plugin images, verifying provider sandbox flows, and exercising lifecycle/recovery against Docker and PostgreSQL.
 
 ## Verification required before claiming a boundary
 

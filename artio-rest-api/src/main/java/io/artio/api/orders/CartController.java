@@ -39,10 +39,9 @@ public class CartController {
     private final BundleApplicationService bundles;
     private final ObjectMapper mapper;
     private final BigDecimal shippingCost;
-    private final String stripeKey;
     private final ObjectProvider<PaymentProvider> paymentProvider;
     private final ObjectProvider<ShippingProvider> shippingProvider;
-    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,@Value("${artio.payments.stripe-secret-key:}") String stripeKey,ObjectProvider<PaymentProvider> paymentProvider,ObjectProvider<ShippingProvider> shippingProvider) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.stripeKey=stripeKey;this.paymentProvider=paymentProvider;this.shippingProvider=shippingProvider; }
+    public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,ObjectProvider<PaymentProvider> paymentProvider,ObjectProvider<ShippingProvider> shippingProvider) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.paymentProvider=paymentProvider;this.shippingProvider=shippingProvider; }
 
     @GetMapping("/shipping-methods")
     public List<ShippingMethodView> shippingMethods(@RequestParam String country, @RequestParam(required=false) String postalCode,
@@ -139,7 +138,7 @@ public class CartController {
         UUID userId = userId(auth);
         if(idempotencyKey==null||!idempotencyKey.matches("[A-Za-z0-9._:-]{8,128}"))throw new IllegalArgumentException("Idempotency-Key must contain 8 to 128 safe characters");
         OrderView prior=findByIdempotencyKey(userId,idempotencyKey);if(prior!=null)return org.springframework.http.ResponseEntity.ok(prior);
-        if(stripeKey.isBlank()&&paymentProvider.getIfAvailable()==null&&blank(request.giftCardCode()))throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
+        if(paymentProvider.getIfAvailable()==null&&blank(request.giftCardCode()))throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payments are not configured");
         UUID cartId = jdbc.query("SELECT id FROM carts WHERE user_id=? AND expires_at>now()", rs -> rs.next() ? UUID.fromString(rs.getString(1)) : null, userId);
         if (cartId == null) throw new IllegalArgumentException("Cart is empty");
         List<CartRow> items = jdbc.query("SELECT id,variant_id,quantity,unit_price,currency,bundle_ref,bundle_id FROM cart_items WHERE cart_id=?", (rs,n) -> new CartRow(rs.getObject("id",UUID.class),rs.getObject("variant_id",UUID.class),rs.getBigDecimal("quantity"),rs.getBigDecimal("unit_price"),rs.getString("currency").trim(),rs.getObject("bundle_ref",UUID.class),rs.getObject("bundle_id",UUID.class)), cartId);
@@ -204,7 +203,7 @@ public class CartController {
         for(var requirement:requirements.entrySet()){var selected=warehouses.stream().filter(w->inventory.stockByWarehouse(w.id()).stream().anyMatch(s->s.sellableId().equals(requirement.getKey())&&s.available().compareTo(requirement.getValue())>=0)).findFirst().orElseThrow(()->new IllegalStateException("Insufficient inventory for item "+requirement.getKey()));inventory.reserve(new InventoryApplicationService.ReserveRequest(order.getId().value(),selected.id(),requirement.getKey(),requirement.getValue()));}
         if(!blank(request.giftCardCode())){
             var redemption=GiftCardAccounting.redeem(jdbc,request.giftCardCode(),userId,order.getId().value(),null);
-            if(redemption.remainingDue().signum()>0&&stripeKey.isBlank()&&paymentProvider.getIfAvailable()==null)
+            if(redemption.remainingDue().signum()>0&&paymentProvider.getIfAvailable()==null)
                 throw new org.springframework.web.server.ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Gift card was applied only partially and no external payment provider is configured");
         }
         UUID eventId=UUID.randomUUID();

@@ -3,8 +3,6 @@ package io.artio.api.payments;
 import io.artio.api.enterprise.LoyaltyAccounting;
 import io.artio.api.orders.OrderTimelineEvents;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.inventory.InventoryApplicationService;
 import io.artio.api.orders.OrderUpdatePublisher;
 import io.artio.extensions.commerce.PaymentProvider;
@@ -24,50 +22,39 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.client.RestClient;
 
-/** Reconciles Stripe Checkout sessions when webhook delivery is delayed or lost. */
+/** Reconciles provider-neutral hosted checkout sessions when webhook delivery is delayed or lost. */
 @Component
 @ConditionalOnProperty(name = "artio.workers.enabled", havingValue = "true", matchIfMissing = true)
-public class StripePaymentReconciliationWorker {
-    private static final Logger log = LoggerFactory.getLogger(StripePaymentReconciliationWorker.class);
+public class PaymentReconciliationWorker {
+    private static final Logger log = LoggerFactory.getLogger(PaymentReconciliationWorker.class);
     private static final int BATCH_SIZE = 50;
     private static final int SESSION_LIFETIME_MINUTES = 32;
     private static final Duration CLAIM_LEASE = Duration.ofMinutes(5);
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;
     private final OrderUpdatePublisher orderUpdates;
-    private final RestClient stripe;
-    private final ObjectMapper mapper;
-    private final String stripeKey;
     private final TransactionTemplate transactions;
     private final ObjectProvider<PaymentProvider> paymentProvider;
 
-    public StripePaymentReconciliationWorker(JdbcTemplate jdbc, InventoryApplicationService inventory,
-            OrderUpdatePublisher orderUpdates, ObjectMapper mapper, PlatformTransactionManager transactionManager,
-            ObjectProvider<PaymentProvider> paymentProvider,
-            RestClient.Builder stripeBuilder, @Value("${artio.payments.stripe-secret-key:}") String stripeKey,
-            @Value("${artio.payments.reconciliation-api-url:https://api.stripe.com}") String stripeApiUrl) {
+    public PaymentReconciliationWorker(JdbcTemplate jdbc, InventoryApplicationService inventory,
+            OrderUpdatePublisher orderUpdates, PlatformTransactionManager transactionManager,
+            ObjectProvider<PaymentProvider> paymentProvider) {
         this.jdbc = jdbc;
         this.inventory = inventory;
         this.orderUpdates = orderUpdates;
-        this.mapper = mapper;
-        this.stripe = stripeBuilder.baseUrl(stripeApiUrl).build();
-        this.stripeKey = stripeKey;
         this.transactions = new TransactionTemplate(transactionManager);
         this.paymentProvider = paymentProvider;
     }
 
     @Scheduled(fixedDelayString = "${artio.payments.reconciliation-interval-ms:60000}")
     public void reconcileDueSessions() {
-        if (stripeKey.isBlank() && paymentProvider.getIfAvailable() == null) return;
-        String eligibleMethods = stripeKey.isBlank() ? "'EXTENSION'"
-                : paymentProvider.getIfAvailable() == null ? "'STRIPE'" : "'STRIPE','EXTENSION'";
+        if (paymentProvider.getIfAvailable() == null) return;
         String claimSql = """
                 UPDATE payments SET reconciliation_claimed_at=now(), reconciliation_attempts=reconciliation_attempts+1
                 WHERE id IN (
                     SELECT id FROM payments
-                    WHERE method IN (%s) AND status='PENDING'
+                    WHERE method='EXTENSION' AND status='PENDING'
                       AND created_at < now() - (? * interval '1 minute')
                       AND reconciliation_available_at <= now()
                       AND (reconciliation_claimed_at IS NULL OR reconciliation_claimed_at < now() - (? * interval '1 second'))
@@ -75,7 +62,7 @@ public class StripePaymentReconciliationWorker {
                     LIMIT ? FOR UPDATE SKIP LOCKED
                 )
                 RETURNING id, order_id, provider_reference, reconciliation_attempts, method
-                """.formatted(eligibleMethods);
+                """;
         List<PaymentSession> claimed = transactions.execute(status -> jdbc.query(claimSql, (rs, row) -> new PaymentSession(rs.getObject("id", UUID.class),
                 rs.getObject("order_id", UUID.class), rs.getString("provider_reference"),
                 rs.getInt("reconciliation_attempts"), rs.getString("method")), SESSION_LIFETIME_MINUTES,
@@ -85,45 +72,20 @@ public class StripePaymentReconciliationWorker {
     }
 
     private void reconcile(PaymentSession payment) {
-        if ("EXTENSION".equals(payment.method())) {
-            PaymentProvider provider = paymentProvider.getIfAvailable();
-            if (provider == null) { retry(payment, "PAYMENT_PROVIDER_UNAVAILABLE"); return; }
-            try {
-                var result = provider.reconcile(payment.sessionId(), "artio-reconcile-" + payment.id());
-                if (result.isEmpty()) { retry(payment, "PROVIDER_PENDING"); return; }
-                switch (result.get().state()) {
-                    case CAPTURED -> applyPaid(payment);
-                    case EXPIRED, FAILED, CANCELLED -> applyExpired(payment);
-                    default -> retry(payment, "PROVIDER_" + result.get().state().name());
-                }
-            } catch (Exception failure) {
-                log.warn("Payment extension reconciliation failed for payment {}; retry scheduled ({})",
-                        payment.id(), failure.getClass().getSimpleName());
-                retry(payment, failure.getClass().getSimpleName());
-            }
-            return;
-        }
-        if (stripeKey.isBlank()) { retry(payment, "STRIPE_NOT_CONFIGURED"); return; }
+        PaymentProvider provider = paymentProvider.getIfAvailable();
+        if (provider == null) { retry(payment, "PAYMENT_PROVIDER_UNAVAILABLE"); return; }
         try {
-            Map<?, ?> body = stripe.get()
-                    .uri("/v1/checkout/sessions/{id}", payment.sessionId())
-                    .headers(headers -> headers.setBearerAuth(stripeKey))
-                    .retrieve().body(Map.class);
-            JsonNode session = mapper.valueToTree(body);
-            String status = session.path("status").asText();
-            String paymentStatus = session.path("payment_status").asText();
-            if ("complete".equals(status) && "paid".equals(paymentStatus)) {
-                applyPaid(payment);
-            } else if ("expired".equals(status)) {
-                applyExpired(payment);
-            } else {
-                retry(payment, "SESSION_" + (status.isBlank() ? "UNKNOWN" : status.toUpperCase(java.util.Locale.ROOT)));
+            var result = provider.reconcile(payment.sessionId(), "artio-reconcile-" + payment.id());
+            if (result.isEmpty()) { retry(payment, "PROVIDER_PENDING"); return; }
+            switch (result.get().state()) {
+                case CAPTURED -> applyPaid(payment);
+                case EXPIRED, FAILED, CANCELLED -> applyExpired(payment);
+                default -> retry(payment, "PROVIDER_" + result.get().state().name());
             }
         } catch (Exception failure) {
-            String errorType = failure instanceof org.springframework.web.client.RestClientResponseException response
-                    ? "StripeHttp" + response.getStatusCode().value() : failure.getClass().getSimpleName();
-            log.warn("Stripe reconciliation failed for payment {}; retry scheduled ({})", payment.id(), errorType);
-            retry(payment, errorType);
+            log.warn("Payment provider reconciliation failed for payment {}; retry scheduled ({})",
+                    payment.id(), failure.getClass().getSimpleName());
+            retry(payment, failure.getClass().getSimpleName());
         }
     }
 

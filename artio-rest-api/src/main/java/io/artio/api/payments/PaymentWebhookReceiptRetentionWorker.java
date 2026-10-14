@@ -9,12 +9,12 @@ import org.springframework.stereotype.Component;
 /** Bounded cleanup for already processed webhook deduplication receipts. */
 @Component
 @ConditionalOnProperty(name = "artio.workers.enabled", havingValue = "true", matchIfMissing = true)
-public class StripeWebhookReceiptRetentionWorker {
+public class PaymentWebhookReceiptRetentionWorker {
     private static final int BATCH_SIZE = 1000;
     private final JdbcTemplate jdbc;
     private final int retentionDays;
 
-    public StripeWebhookReceiptRetentionWorker(JdbcTemplate jdbc,
+    public PaymentWebhookReceiptRetentionWorker(JdbcTemplate jdbc,
             @Value("${artio.payments.webhook-receipt-retention-days:90}") int retentionDays) {
         if (retentionDays < 1 || retentionDays > 3650) {
             throw new IllegalArgumentException("Webhook receipt retention must be between 1 and 3650 days");

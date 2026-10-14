@@ -30,7 +30,7 @@ class CartControllerShippingTests {
     private final ShippingProvider provider=mock(ShippingProvider.class);
     private final ObjectProvider<ShippingProvider> providerRef=mock(ObjectProvider.class);
     private final CartController controller=new CartController(mock(JdbcTemplate.class),mock(PricingApplicationService.class),
-            mock(InventoryApplicationService.class),mock(BundleApplicationService.class),new ObjectMapper(),new BigDecimal("4.50"),"",
+            mock(InventoryApplicationService.class),mock(BundleApplicationService.class),new ObjectMapper(),new BigDecimal("4.50"),
             mock(ObjectProvider.class),providerRef);
     private final UUID userId=UUID.randomUUID();
 

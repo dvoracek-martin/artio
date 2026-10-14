@@ -707,7 +707,7 @@ ALTER TABLE payments
 
 CREATE INDEX idx_payments_reconciliation_due
     ON payments(reconciliation_available_at, created_at)
-    WHERE method = 'STRIPE' AND status = 'PENDING';
+    WHERE method = 'EXTENSION' AND status = 'PENDING';
 
 
 -- ===== Legacy V22__bundle_localizations =====
