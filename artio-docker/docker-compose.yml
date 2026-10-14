@@ -99,8 +99,10 @@ services:
       ARTIO_JWT_SECRET: ${ARTIO_JWT_SECRET:-}
       ARTIO_ENCRYPTION_KEY: ${ARTIO_ENCRYPTION_KEY:-}
       ARTIO_SETUP_TOKEN: ${ARTIO_SETUP_TOKEN:-}
+      ARTIO_EXTENSION_CONTROLLER_TOKEN: ${ARTIO_EXTENSION_CONTROLLER_TOKEN:-}
     volumes:
       - artio-installation-secrets:/run/artio-secrets
+      - artio-extension-controller-secrets:/run/artio-controller-secrets
       - ./initialize-secrets.sh:/init/initialize-secrets.sh:ro
 
   rest-api:
@@ -114,8 +116,11 @@ services:
       ARTIO_SEARCH_ENABLED: ${ARTIO_SEARCH_ENABLED:-false}
       ARTIO_SEARCH_URL: http://opensearch:9200
       ARTIO_EXTENSION_TRUSTED_REGISTRIES: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-}
-      ARTIO_EXTENSION_DOCKER_ENABLED: ${ARTIO_EXTENSION_DOCKER_ENABLED:-false}
+      ARTIO_EXTENSION_DOCKER_ENABLED: ${ARTIO_EXTENSION_DOCKER_ENABLED:-true}
+      ARTIO_EXTENSION_DOCKER_MODE: remote
       ARTIO_EXTENSION_DOCKER_NETWORK: artio-extensions
+      ARTIO_EXTENSION_CONTROLLER_URL: http://extension-controller:8090
+      ARTIO_EXTENSION_CONTROLLER_TOKEN: ${ARTIO_EXTENSION_CONTROLLER_TOKEN:-}
       ARTIO_INVENTORY_RESERVATION_TTL: ${ARTIO_INVENTORY_RESERVATION_TTL:-PT30M}
       ARTIO_INVENTORY_EXPIRY_INTERVAL_MS: ${ARTIO_INVENTORY_EXPIRY_INTERVAL_MS:-60000}
       ARTIO_ALLOWED_ORIGINS: ${ARTIO_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4201}
@@ -144,7 +149,7 @@ services:
       - "${ARTIO_BIND_ADDRESS:-127.0.0.1}:${ARTIO_API_PORT:-8080}:8080"
     networks:
       - default
-      - extensions
+      - extension-control
     volumes:
       - artio-installation-secrets:/run/artio-secrets:ro
     depends_on:
@@ -152,6 +157,44 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      installation-secrets:
+        condition: service_completed_successfully
+      extension-controller:
+        condition: service_healthy
+
+  extension-controller:
+    build:
+      context: ..
+      dockerfile: artio-docker/Dockerfile
+    environment:
+      ARTIO_RUNTIME_ROLE: extension-controller
+      ARTIO_EXTENSION_DOCKER_ENABLED: "true"
+      ARTIO_EXTENSION_DOCKER_MODE: controller
+      ARTIO_EXTENSION_DOCKER_NETWORK: artio-extensions
+      ARTIO_EXTENSION_DOCKER_PORT: "8080"
+      ARTIO_EXTENSION_CONTROLLER_TOKEN: ${ARTIO_EXTENSION_CONTROLLER_TOKEN:-}
+      PORT: "8090"
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
+    volumes:
+      - artio-extension-controller-secrets:/run/artio-controller-secrets:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - extension-control
+      - extensions
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8090'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
       installation-secrets:
         condition: service_completed_successfully
 
@@ -226,10 +269,14 @@ volumes:
   artio-postgres-data:
   artio-redis-data:
   artio-installation-secrets:
+  artio-extension-controller-secrets:
   artio-kafka-data:
 
 networks:
   default: {}
+  extension-control:
+    name: artio-extension-control
+    internal: true
   extensions:
     name: artio-extensions
     internal: true

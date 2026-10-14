@@ -41,3 +41,14 @@ write_secret_once database-password "${ARTIO_DATABASE_PASSWORD:-}"
 write_secret_once jwt-secret "${ARTIO_JWT_SECRET:-}"
 write_secret_once encryption-key "${ARTIO_ENCRYPTION_KEY:-}"
 write_secret_once setup-token "${ARTIO_SETUP_TOKEN:-}"
+write_secret_once extension-controller-token "${ARTIO_EXTENSION_CONTROLLER_TOKEN:-}"
+
+controller_secret_dir=/run/artio-controller-secrets
+mkdir -p "$controller_secret_dir"
+chmod 700 "$controller_secret_dir"
+for name in encryption-key extension-controller-token; do
+    temporary=$(mktemp "$controller_secret_dir/.${name}.XXXXXX")
+    cat "$secret_dir/$name" > "$temporary"
+    chmod 600 "$temporary"
+    mv -f "$temporary" "$controller_secret_dir/$name"
+done

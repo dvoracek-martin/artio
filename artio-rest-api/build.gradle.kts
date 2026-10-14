@@ -34,9 +34,24 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.kafka:spring-kafka")
     implementation("org.springframework.boot:spring-boot-starter-mail")
-    implementation("com.github.docker-java:docker-java-core:3.7.1")
-    implementation("com.github.docker-java:docker-java-transport-httpclient5:3.7.1")
+    compileOnly("com.github.docker-java:docker-java-core:3.7.1")
+    compileOnly("com.github.docker-java:docker-java-transport-httpclient5:3.7.1")
+    testImplementation("com.github.docker-java:docker-java-core:3.7.1")
+    testImplementation("com.github.docker-java:docker-java-transport-httpclient5:3.7.1")
 }
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     archiveFileName.set("artio-rest-api.jar")
+    mainClass.set("io.artio.api.ArtioRestApiApplication")
 }
+
+tasks.register<org.springframework.boot.gradle.tasks.bundling.BootJar>("extensionControllerBootJar") {
+    group = "build"
+    description = "Builds the isolated Docker lifecycle controller application."
+    archiveFileName.set("artio-extension-controller.jar")
+    mainClass.set("io.artio.api.extensions.controller.ExtensionControllerApplication")
+    classpath = sourceSets.main.get().runtimeClasspath + sourceSets.main.get().compileClasspath
+    targetJavaVersion.set(tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar")
+        .flatMap { it.targetJavaVersion })
+}
+
+tasks.named("assemble") { dependsOn("extensionControllerBootJar") }

@@ -18,12 +18,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 /** Restricted Docker runtime for digest-pinned extensions. The Docker daemon is an administrative trust boundary. */
-@Component
-@ConditionalOnProperty(prefix = "artio.extensions.docker", name = "enabled", havingValue = "true")
 public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private final int port;
     private static final long MAX_REQUEST_BYTES = 1_048_576;

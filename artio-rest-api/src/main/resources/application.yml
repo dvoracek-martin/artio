@@ -60,6 +60,8 @@ management:
       probes:
         enabled: true
 artio:
+  runtime:
+    role: ${ARTIO_RUNTIME_ROLE:api}
   workers:
     enabled: ${ARTIO_WORKERS_ENABLED:true}
   setup:
@@ -99,6 +101,14 @@ artio:
   extensions:
     core-version: ${ARTIO_CORE_VERSION:0.1.0}
     trusted-registries: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:}
+    controller:
+      url: ${ARTIO_EXTENSION_CONTROLLER_URL:http://extension-controller:8090}
+      token: ${ARTIO_EXTENSION_CONTROLLER_TOKEN:}
+    docker:
+      enabled: ${ARTIO_EXTENSION_DOCKER_ENABLED:false}
+      mode: ${ARTIO_EXTENSION_DOCKER_MODE:remote}
+      network: ${ARTIO_EXTENSION_DOCKER_NETWORK:artio-extensions}
+      port: ${ARTIO_EXTENSION_DOCKER_PORT:8080}
   inventory:
     reservation-ttl: ${ARTIO_INVENTORY_RESERVATION_TTL:PT30M}
     expiry-interval-ms: ${ARTIO_INVENTORY_EXPIRY_INTERVAL_MS:60000}

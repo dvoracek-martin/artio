@@ -2,7 +2,7 @@
 
 ## Scope and security objective
 
-This review covers the Artio Core API, PostgreSQL extension registry, optional Docker Engine runtime, extension containers, and the Backoffice operator surface. The goal is to let a store administrator run a separately deployed extension while limiting its access to the Core host, other extensions, and customer data. The extension platform is opt-in; the default deployment does not mount the Docker socket or enable the Docker runtime.
+This review covers the Artio Core API, PostgreSQL extension registry, isolated Docker lifecycle controller, extension containers, and the Backoffice operator surface. The goal is to let a store administrator run a separately deployed extension while limiting its access to the Core host, other extensions, and customer data. The controller owns the Docker socket; the public Core API does not mount it and sends only authenticated, narrow lifecycle requests. Operators may disable Core-to-controller calls with `ARTIO_EXTENSION_DOCKER_ENABLED=false`.
 
 ## Assets
 
@@ -16,7 +16,7 @@ This review covers the Artio Core API, PostgreSQL extension registry, optional D
 
 1. **Administrator to Backoffice/API:** JWT authentication and administrator authorization protect registration, configuration, lifecycle, update, rollback, rotation, invocation, health, and audit routes. Manifest and configuration input is treated as untrusted.
 2. **Core to PostgreSQL:** Persistent plugin data and audit records are stored through parameterized SQL. Secret values are encrypted with AES-GCM. API views and audit details omit secret values and request/response bodies.
-3. **Core to Docker daemon:** The daemon is a host-administrator boundary. Anyone able to control it can start privileged workloads or access the host. Artio does not make an untrusted Docker socket safe; operators must protect it as root-equivalent access.
+3. **Extension controller to Docker daemon:** The daemon is a host-administrator boundary. Anyone able to control it can start privileged workloads or access the host. Artio does not make an untrusted Docker socket safe; operators must protect it as root-equivalent access. The REST API has no Docker socket mount.
 4. **Core to extension container:** The authenticated v1 invocation uses a plugin-scoped HMAC-derived bearer token over a private Docker network. The network is trusted and traffic is not encrypted with TLS.
 5. **Image registry to runtime:** Images must be digest-pinned and from an explicitly trusted registry. Image provenance/signature verification is not implemented; allowlisting and digest pinning provide identity and immutability, not publisher assurance.
 6. **Extension to provider/customer systems:** A plugin can use the secrets Core sends to it and may perform external provider side effects. Core cannot guarantee exactly-once effects or prevent a plugin from misusing credentials granted to it.
@@ -27,7 +27,7 @@ This review covers the Artio Core API, PostgreSQL extension registry, optional D
 |---|---|---|
 | Malicious manifest requests unsafe image or unsupported capability | Structural/schema validation, compatible Core-version bounds, registry allowlist, sha256 image pin, declared permissions and extension points; no manifest-provided Docker flags or commands | Trusted registry administrators can publish malicious content; signatures and provenance attestations are not checked |
 | Compromised extension escapes container or accesses host | Non-root UID, read-only root filesystem, no host mounts, no published production ports, dropped Linux capabilities, `no-new-privileges`, memory/CPU/PID limits, bounded `/tmp`, private network | Container isolation depends on Docker/Linux kernel and daemon configuration; resource ceilings do not stop every denial-of-service vector |
-| Extension calls another service or another plugin | Private internal extension network; no direct egress or host ports in production runtime configuration | Core API is not attached to the extension network by default, but host/daemon operators can change topology; no separate network policy engine |
+| Extension calls another service or another plugin | Private internal extension network; no direct egress or host ports in production runtime configuration; Core API is isolated from the plugin network | The privileged controller joins the extension network to manage/probe containers; host/daemon operators can change topology and no separate network policy engine exists |
 | Secret exposure through management responses, audit, or logs | AES-GCM encrypted storage, secrets represented by configured field names, secret-free audit metadata, no invocation payload/body audit, bounded generic API errors | Secrets are decrypted into Core memory and sent to the plugin; a malicious plugin can retain or exfiltrate any secret it receives through its allowed provider access |
 | Stolen or reused plugin credential | Per-plugin HMAC credential, generation-based rotation, generation 1 compatibility, explicit rotation audit without token value | Bearer token is not TLS-protected inside the trusted Docker network; rotating the application encryption key changes derived credentials and requires a coordinated restart |
 | Replayed or retried invocation causes duplicate provider action | Required UUID idempotency key, the same key reused across one Core retry, deadline and 1 MiB request/response bounds | Exactly-once execution is not promised; each plugin must persist/deduplicate idempotency keys, and provider outcomes can be ambiguous |
@@ -38,7 +38,7 @@ This review covers the Artio Core API, PostgreSQL extension registry, optional D
 
 ## Operational guidance
 
-- Keep `ARTIO_EXTENSION_DOCKER_ENABLED=false` unless extension execution is required. Do not expose the Docker socket to general application users.
+- Keep the controller Docker socket mounted only in the isolated controller service. Do not expose its internal HTTP port or Docker socket to general application users or plugin containers. Disabling `ARTIO_EXTENSION_DOCKER_ENABLED` prevents Core lifecycle calls but does not remove the socket mount from the controller.
 - Use a registry controlled by the operator, configure `ARTIO_EXTENSION_TRUSTED_REGISTRIES` narrowly, and review the exact image digest and manifest before registration.
 - Grant each plugin only the provider credentials and extension points it needs. Rotate a credential after suspected exposure and remove the plugin if trust is lost.
 - Treat Backoffice diagnostic invocation as a real operation. Use a non-destructive operation and synthetic payload; the endpoint is intentionally admin-only and is not a customer workflow API.
