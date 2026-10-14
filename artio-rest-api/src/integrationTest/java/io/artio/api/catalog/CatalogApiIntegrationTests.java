@@ -179,6 +179,44 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void catalogMetadataAdminManagesHierarchyBrandsAndTypedAttributes(){
+        var root=adminExchange("/api/v1/categories",HttpMethod.POST,
+                new io.artio.api.catalog.MetadataApplicationService.CategoryRequest("Lighting",null,true),
+                io.artio.api.catalog.MetadataApplicationService.CategoryView.class);
+        assertThat(root.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var child=adminExchange("/api/v1/categories",HttpMethod.POST,
+                new io.artio.api.catalog.MetadataApplicationService.CategoryRequest("Table lamps",root.getBody().id(),true),
+                io.artio.api.catalog.MetadataApplicationService.CategoryView.class);
+        assertThat(child.getBody()).isNotNull();
+        var cycle=adminExchange("/api/v1/categories/{id}",HttpMethod.PUT,
+                new io.artio.api.catalog.MetadataApplicationService.CategoryRequest("Lighting",child.getBody().id(),true),
+                ApiError.class,root.getBody().id());
+        assertThat(cycle.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        var brand=adminExchange("/api/v1/brands",HttpMethod.POST,
+                new io.artio.api.catalog.MetadataApplicationService.BrandRequest("Artio Lighting","Internal brand",true),
+                io.artio.api.catalog.MetadataApplicationService.BrandView.class);
+        assertThat(brand.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var inactiveBrand=adminExchange("/api/v1/brands/{id}",HttpMethod.PUT,
+                new io.artio.api.catalog.MetadataApplicationService.BrandRequest("Artio Lighting","Internal brand",false),
+                io.artio.api.catalog.MetadataApplicationService.BrandView.class,brand.getBody().id());
+        assertThat(inactiveBrand.getBody()).isNotNull();
+        assertThat(inactiveBrand.getBody().active()).isFalse();
+
+        var attribute=adminExchange("/api/v1/attribute-definitions",HttpMethod.POST,
+                new io.artio.api.catalog.MetadataApplicationService.AttributeRequest("MATERIAL","Material",
+                        io.artio.catalog.AttributeDefinition.Type.TEXT,false),
+                io.artio.api.catalog.MetadataApplicationService.AttributeView.class);
+        assertThat(attribute.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var disabledAttribute=adminExchange("/api/v1/attribute-definitions/{id}",HttpMethod.PUT,
+                new io.artio.api.catalog.MetadataApplicationService.AttributeUpdateRequest("Material composition",false),
+                io.artio.api.catalog.MetadataApplicationService.AttributeView.class,attribute.getBody().id());
+        assertThat(disabledAttribute.getBody()).isNotNull();
+        assertThat(disabledAttribute.getBody().label()).isEqualTo("Material composition");
+        assertThat(disabledAttribute.getBody().active()).isFalse();
+    }
+
+    @Test
     void updatesProductDescriptionAndActivationStateWithoutChangingItsSku() {
         var created = adminExchange("/api/products", HttpMethod.POST,
                 new ProductRequest("Studio Display", "Original description", "DSP-2701"), ProductResponse.class);

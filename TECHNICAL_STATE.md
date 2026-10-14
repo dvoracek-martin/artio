@@ -155,6 +155,7 @@ Všechny JSON API běží pod `/api`, GraphQL pod `/graphql`, realtime STOMP/Web
 REST katalogové cesty viz `README.md` a controllery v `artio-rest-api/.../catalog`. GraphQL je zatím **read-only**:
 
 `POST /api/v1/products/{id}/duplicate` vytváří nový neaktivní draft s novým SKU, zděděnou značkou, kategoriemi a atributy; název, popis a SKU musí dodat admin. Varianty, překlady, media a merchandising vazby se zatím nekopírují. Detail: [product lifecycle v1](docs/catalog/product-lifecycle-v1.md).
+Backoffice → Catalog data spravuje category hierarchii, brandy a typed attribute definitions přes zabezpečené API. Produktové přiřazení metadat přes `PUT /api/v1/products/{id}/catalog-metadata` zatím nemá vlastní UI. Kontrakt: [metadata administration v1](docs/catalog/metadata-administration-v1.md).
 
 ```graphql
 query Catalog($q: String, $first: Int) {
