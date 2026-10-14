@@ -16,7 +16,7 @@ The Core retains inventory reservation and compensation guarantees. A provider r
 
 ## Notification transport
 
-`NotificationTransport` sends an already persisted message and returns an accepted/rejected result. The Core owns the transactional delivery outbox, retry schedule, dead-letter state and redaction. SMTP remains the default transport. An installation can select an enabled Docker plugin by setting `ARTIO_EMAIL_PROVIDER=extension` and `ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID`; the plugin declares `notification.channel.v1` and `notifications.send`, then implements the bounded `deliver` operation with the stable delivery ID as its idempotency key. Missing or disabled notification providers leave messages queued and do not prevent checkout or order creation.
+`NotificationTransport` sends an already persisted message and returns an accepted/rejected result. Core owns the transactional delivery outbox, retry schedule, dead-letter state and redaction; provider implementations run only in Docker plugins. The default provider is `none`, so absent/disabled plugins leave messages queued without consuming attempts and never prevent checkout or order creation. An installation can select an enabled Docker plugin by setting `ARTIO_EMAIL_PROVIDER=extension` and `ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID`; the plugin declares `notification.channel.v1` and `notifications.send`, then implements the bounded `deliver` operation with the stable delivery ID as its idempotency key. The Brevo reference source is under `artio-plugins/brevo-email`; image publication and provider acceptance are not claimed.
 
 ## Search provider
 
@@ -30,4 +30,4 @@ The Core retains inventory reservation and compensation guarantees. A provider r
 
 Plugin manifests name the supported `extensionPoints` and permissions. Core invokes plugins over the authenticated Docker runtime API with bounded request/response sizes and timeouts. Each point maps to one request and response schema. Provider credentials are passed only through encrypted plugin configuration and are never part of requests, logs, or returned configuration. Plugins cannot connect to the Core database. See [plugin manifest v1](plugin-manifest-v1.md) for image pinning, geographic availability, and configuration rules.
 
-These contracts do not claim that the reference Stripe, Swiss Post, notification, search, or Kafka plugin images have been built and published. Current SMTP/OpenSearch adapters remain selectable native implementations; publishing reference plugins and completing Docker-backed end-to-end workflows remain in the Phase 2 ledger.
+These contracts do not claim that the reference Stripe, Swiss Post, notification, search, or Kafka plugin images have been built and published. OpenSearch remains an optional in-process adapter; publishing reference plugins and completing Docker-backed end-to-end workflows remain in the Phase 2 ledger. Core has no SMTP dependency or provider implementation.

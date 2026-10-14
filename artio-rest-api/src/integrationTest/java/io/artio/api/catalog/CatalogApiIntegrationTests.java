@@ -1004,41 +1004,32 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void mailOutboxWorkerDeliversAndRedactsSuccessfulDelivery() throws Exception {
+    void mailOutboxWorkerDeliversAndRedactsSuccessfulDelivery() {
         UUID orderId = UUID.randomUUID();
         UUID deliveryId = UUID.randomUUID();
         jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body) VALUES (?,?,?,?,?,?)",
                 deliveryId, "integration-email:" + deliveryId, adminUserId, orderId, "Test order", "Thank you for your order");
-        org.springframework.mail.javamail.JavaMailSender sender = org.mockito.Mockito.mock(org.springframework.mail.javamail.JavaMailSender.class);
-        org.mockito.Mockito.when(sender.createMimeMessage()).thenReturn(new jakarta.mail.internet.MimeMessage(
-                jakarta.mail.Session.getInstance(new java.util.Properties())));
         org.springframework.beans.factory.ObjectProvider<io.artio.extensions.commerce.NotificationTransport> provider =
                 org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
         org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(
-                new io.artio.api.notifications.SmtpNotificationTransport(sender, "no-reply@artio.test"));
+                message -> new io.artio.extensions.commerce.NotificationTransport.DeliveryResult(true, "test-reference", null, null));
 
         new io.artio.api.notifications.OrderNotificationHandler(jdbc, provider, true)
                 .deliverPendingBatch();
 
-        org.mockito.Mockito.verify(sender, org.mockito.Mockito.atLeastOnce()).send(org.mockito.ArgumentMatchers.any(jakarta.mail.internet.MimeMessage.class));
         assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("SENT");
         assertThat(jdbc.queryForObject("SELECT subject || body FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEmpty();
     }
 
     @Test
-    void mailOutboxWorkerRetriesTransientFailureWithBackoff() throws Exception {
+    void mailOutboxWorkerRetriesTransientFailureWithBackoff() {
         UUID deliveryId = UUID.randomUUID();
         jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body) VALUES (?,?,?,?,?,?)",
                 deliveryId, "integration-email-retry:" + deliveryId, adminUserId, UUID.randomUUID(), "Retry order", "Retry body");
-        org.springframework.mail.javamail.JavaMailSender sender = org.mockito.Mockito.mock(org.springframework.mail.javamail.JavaMailSender.class);
-        org.mockito.Mockito.when(sender.createMimeMessage()).thenReturn(new jakarta.mail.internet.MimeMessage(
-                jakarta.mail.Session.getInstance(new java.util.Properties())));
-        org.mockito.Mockito.doThrow(new org.springframework.mail.MailSendException("simulated SMTP failure"))
-                .when(sender).send(org.mockito.ArgumentMatchers.any(jakarta.mail.internet.MimeMessage.class));
         org.springframework.beans.factory.ObjectProvider<io.artio.extensions.commerce.NotificationTransport> provider =
                 org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
         org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(
-                new io.artio.api.notifications.SmtpNotificationTransport(sender, "no-reply@artio.test"));
+                message -> { throw new IllegalStateException("simulated provider failure"); });
 
         new io.artio.api.notifications.OrderNotificationHandler(jdbc, provider, true)
                 .deliverPendingBatch();
@@ -1047,7 +1038,7 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT attempts FROM notification_delivery_outbox WHERE id=?", Integer.class, deliveryId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT next_attempt_at>now() FROM notification_delivery_outbox WHERE id=?", Boolean.class, deliveryId)).isTrue();
         assertThat(jdbc.queryForObject("SELECT last_error_class FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId))
-                .isEqualTo("MailSendException");
+                .isEqualTo("IllegalStateException");
         assertThat(jdbc.queryForObject("SELECT body FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId))
                 .isEqualTo("Retry body");
     }

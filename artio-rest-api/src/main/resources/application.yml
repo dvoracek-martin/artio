@@ -23,21 +23,11 @@ spring:
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         max.block.ms: ${ARTIO_KAFKA_MAX_BLOCK_MS:3000}
-  mail:
-    host: ${ARTIO_SMTP_HOST:localhost}
-    port: ${ARTIO_SMTP_PORT:1025}
-    username: ${ARTIO_SMTP_USERNAME:}
-    password: ${ARTIO_SMTP_PASSWORD:}
-    properties:
-      mail.smtp.auth: ${ARTIO_SMTP_AUTH:false}
-      mail.smtp.starttls.enable: ${ARTIO_SMTP_STARTTLS:false}
 server:
   port: ${PORT:8080}
   forward-headers-strategy: framework
 management:
   health:
-    mail:
-      enabled: ${ARTIO_EMAIL_ENABLED:false}
     redis:
       enabled: ${ARTIO_CACHE_REDIS_ENABLED:false}
   tracing:
@@ -80,11 +70,10 @@ artio:
       order-topic: ${ARTIO_KAFKA_ORDER_TOPIC:artio.order.events}
       notification-consumer-group: ${ARTIO_KAFKA_CONSUMER_GROUP:artio-notification-worker}
       consumer-concurrency: ${ARTIO_KAFKA_CONSUMER_CONCURRENCY:1}
-  mail-from: ${ARTIO_MAIL_FROM:no-reply@artio.local}
   notifications:
     email:
       enabled: ${ARTIO_EMAIL_ENABLED:false}
-      provider: ${ARTIO_EMAIL_PROVIDER:smtp}
+      provider: ${ARTIO_EMAIL_PROVIDER:none}
       extension-plugin-id: ${ARTIO_NOTIFICATIONS_EXTENSION_PLUGIN_ID:}
       poll-interval-ms: ${ARTIO_EMAIL_POLL_INTERVAL_MS:30000}
   security:
