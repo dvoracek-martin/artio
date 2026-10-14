@@ -9,7 +9,6 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.time.Duration;
 import java.util.Properties;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -33,7 +32,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** Exercises broker delivery, transactional inbox deduplication and durable notification enqueue. */
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(classes = io.artio.api.ArtioRestApiApplication.class, webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class OrderCreatedNotificationConsumerIntegrationTests {
     private static final String TOPIC = "artio.order.events";
     private static final String DLQ = TOPIC + ".dlq";

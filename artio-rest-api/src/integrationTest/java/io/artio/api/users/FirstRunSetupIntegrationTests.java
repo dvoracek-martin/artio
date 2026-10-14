@@ -21,7 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(classes = io.artio.api.ArtioRestApiApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class FirstRunSetupIntegrationTests {
     private static final String SETUP_TOKEN = "first-run-integration-token-value-at-least-32";
     @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -84,8 +84,9 @@ class FirstRunSetupIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT store_name || ':' || distribution_id || ':' || external_base_url FROM artio_installation_settings WHERE singleton_id=true", String.class))
                 .isEqualTo("Artio Test Shop:switzerland-v1:https://shop.example.test");
         assertThat(jdbc.queryForObject("SELECT available_languages::text FROM artio_installation_settings WHERE singleton_id=true", String.class)).contains("de", "fr", "it", "en");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artio_distribution_plugin_provisioning WHERE distribution_id='switzerland-v1'", Integer.class)).isEqualTo(3);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artio_distribution_plugin_provisioning WHERE provisioning_status='WAITING_FOR_RELEASE'", Integer.class)).isEqualTo(3);
+        assertThat(jdbc.queryForList("SELECT plugin_id FROM artio_distribution_plugin_provisioning WHERE distribution_id='switzerland-v1'", String.class))
+                .containsExactlyInAnyOrder("payments.stripe", "payments.twint", "shipping.swiss-post", "catalog.opensearch");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artio_distribution_plugin_provisioning WHERE provisioning_status='WAITING_FOR_RELEASE'", Integer.class)).isEqualTo(4);
         var ownerLogin=http.postForObject("/api/v1/auth/login",Map.of("email","owner@example.test","password","an-extremely-strong-admin-password"),AuthController.LoginResponse.class);
         assertThat(ownerLogin.mfaEnrollmentRequired()).isTrue();
         HttpHeaders ownerHeaders=new HttpHeaders();ownerHeaders.setBearerAuth(ownerLogin.accessToken());
@@ -102,10 +103,10 @@ class FirstRunSetupIntegrationTests {
         assertThat(disabled.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         var pluginStatus=http.exchange("/api/v1/admin/system/distribution/plugins",HttpMethod.GET,new HttpEntity<>(ownerHeaders),DistributionPluginProvisioningService.ProvisioningItem[].class);
         assertThat(pluginStatus.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(pluginStatus.getBody()).hasSize(3).allMatch(item->item.status().equals("WAITING_FOR_RELEASE")&&item.optional());
+        assertThat(pluginStatus.getBody()).hasSize(4).allMatch(item->item.status().equals("WAITING_FOR_RELEASE")&&item.optional());
         var refreshed=http.exchange("/api/v1/admin/system/distribution/plugins/refresh",HttpMethod.POST,new HttpEntity<>(Map.of(),ownerHeaders),DistributionPluginProvisioningService.ProvisioningItem[].class);
         assertThat(refreshed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(refreshed.getBody()).hasSize(3);
+        assertThat(refreshed.getBody()).hasSize(4);
         assertThat(jdbc.queryForObject("SELECT draft::text FROM artio_first_run_setup WHERE singleton_id=true", String.class)).isEqualTo("{}");
         assertThat(http.getForObject("/api/v1/setup/status", String.class)).contains("\"complete\":true");
         assertThat(postWithToken("/api/v1/setup/complete", SETUP_TOKEN, Map.of("password", "an-extremely-strong-admin-password")).getStatusCode())

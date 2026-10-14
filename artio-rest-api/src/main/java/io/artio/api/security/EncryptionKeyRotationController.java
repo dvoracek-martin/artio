@@ -64,10 +64,23 @@ public class EncryptionKeyRotationController {
                     write(rotated), row.pluginId());
         }
 
+        var deadLetterRows = jdbc.query("""
+                SELECT id,encrypted_payload FROM kafka_consumer_dead_letters
+                WHERE encrypted_payload IS NOT NULL ORDER BY id FOR UPDATE
+                """, (rs, row) -> new DeadLetterRow(rs.getObject("id", UUID.class), rs.getString("encrypted_payload")));
+        int deadLetterPayloadsUpdated = 0;
+        for (DeadLetterRow row : deadLetterRows) {
+            String rotated = encryption.reencryptWithActiveKey(row.ciphertext());
+            if (!rotated.equals(row.ciphertext())) {
+                jdbc.update("UPDATE kafka_consumer_dead_letters SET encrypted_payload=? WHERE id=?", rotated, row.id());
+                deadLetterPayloadsUpdated++;
+            }
+        }
+
         UUID actorId = actorId(actor);
         jdbc.update("INSERT INTO audit_logs(id,user_id,action,path,status,occurred_at) VALUES (?,?,?,?,?,now())",
                 UUID.randomUUID(), actorId, "UPDATE", "/api/v1/admin/system/security/encryption/rotate", 200);
-        return new RotationResult(encryption.activeKeyId(), mfaUpdated, extensionSecretsUpdated);
+        return new RotationResult(encryption.activeKeyId(), mfaUpdated, extensionSecretsUpdated, deadLetterPayloadsUpdated);
     }
 
     private Map<String, String> readSecrets(String json) {
@@ -93,5 +106,7 @@ public class EncryptionKeyRotationController {
 
     private record MfaRow(UUID userId, String ciphertext) { }
     private record ExtensionRow(String pluginId, String ciphertexts) { }
-    public record RotationResult(String activeKeyId, int mfaSecretsRewrapped, int extensionSecretsRewrapped) { }
+    private record DeadLetterRow(UUID id, String ciphertext) { }
+    public record RotationResult(String activeKeyId, int mfaSecretsRewrapped, int extensionSecretsRewrapped,
+            int deadLetterPayloadsRewrapped) { }
 }

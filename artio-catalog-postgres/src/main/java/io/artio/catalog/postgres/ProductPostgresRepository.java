@@ -102,7 +102,7 @@ public class ProductPostgresRepository implements ProductRepository {
                 (rs, row) -> new io.artio.catalog.CategoryId(rs.getObject(1, UUID.class)), id));
         var attributes = new LinkedHashMap<String, String>();
         jdbc.query("SELECT attribute_code, value FROM catalog_product_attribute WHERE product_id = ?", rs -> {
-            while (rs.next()) attributes.put(rs.getString(1), rs.getString(2));
+            attributes.put(rs.getString(1), rs.getString(2));
         }, id);
         var seo = jdbc.query("SELECT seo_slug,seo_title,seo_description FROM catalog_product WHERE id=? AND seo_slug IS NOT NULL",
                 rs -> rs.next() ? new io.artio.catalog.ProductSeoMetadata(rs.getString(1), rs.getString(2), rs.getString(3)) : null, id);

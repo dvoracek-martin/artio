@@ -7,6 +7,10 @@
 
 ## Aktuálně ověřený stav (2026-10-14)
 
+- **Nejnovější brána:** `gradlew.bat build integrationTest --init-script build/continuation-output.init.gradle --no-daemon` prošla (144 úloh). API má 94 úspěšných unit testů a 58 integračních scénářů: 57 prošlo, žádný neselhal, 1 referenční Docker lifecycle čeká na fixture images. Prošel skutečný PostgreSQL/Kafka tok, instalace/MFA, média, katalog, migrace, atomický OpenSearch rebuild i oba Angular buildy. Opraveno přeskakování prvního katalogového atributu, aktivace variant archivovaného produktu, počáteční Kafka offsety a duplicitní zapínání schedulerů. Rotace zahrnuje MFA, plugin secrets i DLQ payloady. Dřívější neúspěšné běhy níže jsou historická diagnostika; nejsou aktuálním výsledkem. Následuje samostatný Docker lifecycle proof a izolovaná obnova záloh.
+
+- Pokračovací audit začal na HEAD `6b937c6`: čistý `main`, remote `dvoracek-martin/artio`, Docker Engine 29.8.2 dostupný. Testcontainers 1.21.4 umožnil skutečné PostgreSQL/Kafka běhy. P2-09a doplňuje rotaci šifrovaných Kafka dead-letter payloadů do stejné transakce jako MFA a plugin secrets; PostgreSQL ověřil oprávnění, čitelnost novým klíčem, idempotenci i rollback při poškozeném ciphertextu. 89 API unit testů prošlo. Opakovaná katalogová sada s izolovanými reporty má 51 scénářů: 45 prošlo, 6 selhalo, žádný přeskočen. Celá fáze není dokončena; zbývající chyby a přesné příkazy jsou v `docs/ROADMAP.md`. Souběžné externí commity a změny nejsou součástí tohoto zásahu.
+
 Tento souhrn je autoritativní pro současný checkout; následující původní technická dokumentace z 13. 10. 2026 je historický snapshot a v případě rozporu nepopisuje dnešní stav.
 
 - Repozitář má 19 Gradle projektů: 16 Java modulů, Backoffice, volitelný Storefront a Docker packaging. `artio-mobile`, `artio-kubernetes` a `terraform` byly odstraněny. Java moduly `artio-persistence` a `artio-events` a nepoužívaná Java vrstva observability byly odstraněny; samostatný Docker plugin bundle `artio-plugins/observability` obsahuje Grafana/Prometheus/Jaeger/OTLP collector zdroje a spravuje jej Plugin Manager. `artio-docker/observability` je lokální Compose cesta.

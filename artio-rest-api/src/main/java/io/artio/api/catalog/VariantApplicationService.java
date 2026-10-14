@@ -56,9 +56,9 @@ public class VariantApplicationService {
 
     public VariantResponse setActive(UUID id, boolean active) {
         var variant = findVariant(id);
+        if (active && products.findById(variant.getProductId()).map(io.artio.catalog.Product::isArchived).orElse(false))
+            throw new IllegalStateException("Archived product variants cannot be activated");
         if (active != variant.isActive()) {
-            if(active&&products.findById(variant.getProductId()).map(io.artio.catalog.Product::isArchived).orElse(false))
-                throw new IllegalStateException("Archived product variants cannot be activated");
             if (active) variant.activate();
             else variant.deactivate();
             variants.save(variant);

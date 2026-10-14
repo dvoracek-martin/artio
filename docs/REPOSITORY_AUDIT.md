@@ -1,5 +1,22 @@
 # Artio repository audit
 
+## Continuation audit (2026-10-14, HEAD 6b937c6)
+
+**Superseding executable result:** P0-02 root build/integration gate passed on 2026-10-14 (144 tasks, exit 0): API 94 units passed, API integration 57 passed / 0 failed / 1 reference-container fixture skipped, OpenSearch rebuild/rollback passed, both Angular builds and module boundaries passed. The previously identified attribute hydration, archived-parent lifecycle, setup fixture, Kafka initial-offset and scheduler-isolation defects are repaired. Exact commands/results and remaining lifecycle/recovery acceptance are in `ROADMAP.md`. Capability areas remain PARTIAL where broader product/release scope is still open.
+
+Actual checkout is `D:\Development\Projects\Artio`, `main`, remote `https://github.com/dvoracek-martin/artio.git`; the worktree was clean at entry. Existing historical matrices below are retained for provenance and are not fresh capability acceptance. The supplied v3.1 directive governs this session. No new product-owner decision is needed for the selected slice.
+
+| Area | Status | Evidence / decision / acceptance |
+|---|---|---|
+| Repository/build | PARTIAL | `gradlew.bat build integrationTest --no-daemon` exited 0; boundary checker, API units and both Angular production builds passed, DB/container tests skipped. Retain Gradle/module structure; refactor Testcontainers compatibility and verify real execution. |
+| Plugin platform | PARTIAL | Existing lifecycle/controller/manifest/configuration implementations and runtime unit tests in `artio-rest-api` / `artio-extensions`. Retain, require live lifecycle and published immutable provider releases before completion. |
+| Security/privacy | PARTIAL | `EncryptionKeyRotationController` locks MFA/plugin rows but omitted `kafka_consumer_dead_letters.encrypted_payload`. Refactor rotation to include all retained non-null payloads in the same transaction; prove active-only decryption and corruption rollback. |
+| Events/messaging | PARTIAL | `KafkaConsumerConfiguration`, `KafkaDeadLetterReplayWorker`, V2 DLQ persistence. Retain durable encrypted replay, protect it across key retirement; Kafka worker/recovery acceptance remains open. |
+| Backoffice / Storefront | PARTIAL | Both Angular production builds passed; existing included administration and optional API consumer retained. Build success does not establish workflow/accessibility completeness. |
+| Operations/deployment | PARTIAL | Docker Engine 29.8.2 responds; backup/recovery runbook exists. Retain Compose and recovery set, complete isolated restore rehearsal. |
+
+First slice is `P2-09a`, complete AES rewrap coverage, with no schema migration and only an additive response field. Dependency order after this slice: worker/DLQ recovery, isolated restore rehearsal, controller/container lifecycle, then real provider releases/acceptance. Full product completion and production readiness are not inferred from this audit. Exact results and current task state are recorded in `ROADMAP.md`.
+
 **Audit date:** 2026-10-13
 **Directive:** `ARTIO-Codex-Final-Implementation-Directive-v3.1.md` (user-provided product brief)
 **Repository:** `D:\Development\Projects\Artio`

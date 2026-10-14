@@ -9,7 +9,7 @@ configurations[integrationTest.implementationConfigurationName].extendsFrom(conf
 configurations[integrationTest.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
 
 dependencies {
-    add(integrationTest.implementationConfigurationName, platform("org.testcontainers:testcontainers-bom:1.20.4"))
+    add(integrationTest.implementationConfigurationName, platform("org.testcontainers:testcontainers-bom:1.21.4"))
     add(integrationTest.implementationConfigurationName, "org.junit.jupiter:junit-jupiter")
     add(integrationTest.implementationConfigurationName, "org.testcontainers:junit-jupiter")
     add(integrationTest.implementationConfigurationName, "org.testcontainers:postgresql")

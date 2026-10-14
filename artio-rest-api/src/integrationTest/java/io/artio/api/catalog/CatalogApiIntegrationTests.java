@@ -67,7 +67,6 @@ class CatalogApiIntegrationTests {
     @Autowired
     private io.artio.api.inventory.InventoryApplicationService inventory;
 
-    @Autowired
     private io.artio.api.inventory.ReservationExpiryScheduler reservationExpiryScheduler;
 
     @Autowired
@@ -85,8 +84,16 @@ class CatalogApiIntegrationTests {
     @Autowired
     private io.artio.api.payments.CheckoutFailureCompensation checkoutFailureCompensation;
 
-    @Autowired
     private io.artio.api.payments.PaymentReconciliationWorker paymentReconciliationWorker;
+
+    @Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private io.artio.api.orders.OrderUpdatePublisher orderUpdates;
+
+    @Autowired
+    private org.springframework.beans.factory.ObjectProvider<PaymentProvider> paymentProviders;
 
     private String adminToken;
     private UUID adminUserId;
@@ -113,6 +120,11 @@ class CatalogApiIntegrationTests {
 
     @BeforeEach
     void authenticateAdminForCatalogAdministration() {
+        // Exercise maintenance explicitly without enabling background schedules in API integration tests.
+        reservationExpiryScheduler = new io.artio.api.inventory.ReservationExpiryScheduler(
+                inventory, jdbc, orderUpdates, transactionManager);
+        paymentReconciliationWorker = new io.artio.api.payments.PaymentReconciliationWorker(
+                jdbc, inventory, orderUpdates, transactionManager, paymentProviders);
         PROVIDER_CHECKOUT_FAILURE.set(null);
         UUID userId = UUID.randomUUID();
         adminUserId = userId;
@@ -231,7 +243,7 @@ class CatalogApiIntegrationTests {
                 io.artio.api.catalog.MetadataApplicationService.BrandView.class);
         assertThat(brand.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         var attribute=adminExchange("/api/v1/attribute-definitions",HttpMethod.POST,
-                new io.artio.api.catalog.MetadataApplicationService.AttributeRequest("MATERIAL","Material",
+                new io.artio.api.catalog.MetadataApplicationService.AttributeRequest("material_meta","Material",
                         io.artio.catalog.AttributeDefinition.Type.TEXT,false),
                 io.artio.api.catalog.MetadataApplicationService.AttributeView.class);
         assertThat(attribute.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -239,11 +251,11 @@ class CatalogApiIntegrationTests {
         var product=adminExchange("/api/v1/products",HttpMethod.POST,new ProductRequest("Table lamp","Brass finish","LMP-META"),ProductResponse.class);
         var assigned=adminExchange("/api/v1/products/{id}/catalog-metadata",HttpMethod.PUT,
                 new io.artio.api.catalog.ProductApplicationService.CatalogMetadataRequest(brand.getBody().id(),
-                        Set.of(root.getBody().id(),child.getBody().id()),Map.of("MATERIAL","brass")),ProductResponse.class,product.getBody().id());
+                        Set.of(root.getBody().id(),child.getBody().id()),Map.of("material_meta","brass")),ProductResponse.class,product.getBody().id());
         assertThat(assigned.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(assigned.getBody().brandId()).isEqualTo(brand.getBody().id());
         assertThat(assigned.getBody().categoryIds()).contains(root.getBody().id(),child.getBody().id());
-        assertThat(assigned.getBody().attributes()).containsEntry("MATERIAL","brass");
+        assertThat(assigned.getBody().attributes()).containsEntry("material_meta","brass");
 
         var inactiveBrand=adminExchange("/api/v1/brands/{id}",HttpMethod.PUT,
                 new io.artio.api.catalog.MetadataApplicationService.BrandRequest("Artio Lighting","Internal brand",false),
@@ -263,7 +275,7 @@ class CatalogApiIntegrationTests {
         assertThat(disabledCategory.getBody().active()).isFalse();
         var updatedWithExistingInactiveMetadata=adminExchange("/api/v1/products/{id}/catalog-metadata",HttpMethod.PUT,
                 new io.artio.api.catalog.ProductApplicationService.CatalogMetadataRequest(brand.getBody().id(),
-                        Set.of(root.getBody().id(),child.getBody().id()),Map.of("MATERIAL","brass")),ProductResponse.class,product.getBody().id());
+                        Set.of(root.getBody().id(),child.getBody().id()),Map.of("material_meta","brass")),ProductResponse.class,product.getBody().id());
         assertThat(updatedWithExistingInactiveMetadata.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(updatedWithExistingInactiveMetadata.getBody().categoryIds()).contains(child.getBody().id());
         var removedInactiveValue=adminExchange("/api/v1/products/{id}/catalog-metadata",HttpMethod.PUT,
@@ -319,7 +331,7 @@ class CatalogApiIntegrationTests {
         var fallback = http.getForEntity("/api/v1/products/{id}/localized?locale=fr",
                 ProductTranslationApplicationService.LocalizedProductView.class, id);
         assertThat(fallback.getBody()).isNotNull();
-        assertThat(fallback.getBody().requestedLocale()).isEqualTo("en");
+        assertThat(fallback.getBody().requestedLocale()).isEqualTo("fr");
         assertThat(fallback.getBody().seoSlug()).isEqualTo("coffee");
 
         var translations = http.getForEntity("/api/products/{id}/translations",
@@ -533,6 +545,17 @@ class CatalogApiIntegrationTests {
         var previousEncryption = new io.artio.api.security.EncryptionService(PREVIOUS_TEST_ENCRYPTION_KEY);
         String oldMfaCiphertext = previousEncryption.encrypt("mfa-secret-material");
         String oldPluginCiphertext = previousEncryption.encrypt("provider-secret-material");
+        String oldDeadLetterCiphertext = previousEncryption.encrypt("private-dead-letter-material");
+        UUID deadLetterId = UUID.randomUUID();
+        UUID tombstoneId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO kafka_consumer_dead_letters(id,source_topic,source_partition,source_offset,encrypted_payload,error_class)
+                VALUES (?,'rotation-test',0,0,?,'TestFailure')
+                """, deadLetterId, oldDeadLetterCiphertext);
+        jdbc.update("""
+                INSERT INTO kafka_consumer_dead_letters(id,source_topic,source_partition,source_offset,payload_is_null,error_class)
+                VALUES (?,'rotation-test',0,1,true,'TestFailure')
+                """, tombstoneId);
         jdbc.update("UPDATE mfa_methods SET encrypted_secret=? WHERE user_id=?", oldMfaCiphertext, adminUserId);
         jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,encrypted_secrets) "
                         + "VALUES ('test.key-rotation','{}'::jsonb,'ghcr.io/artio/test@sha256:'||repeat('a',64),'VALIDATED',?::jsonb)",
@@ -546,13 +569,43 @@ class CatalogApiIntegrationTests {
         assertThat(rotated.getBody().activeKeyId()).isEqualTo(io.artio.api.security.EncryptionService.keyId(ACTIVE_TEST_ENCRYPTION_KEY));
         assertThat(rotated.getBody().mfaSecretsRewrapped()).isEqualTo(1);
         assertThat(rotated.getBody().extensionSecretsRewrapped()).isEqualTo(1);
+        assertThat(rotated.getBody().deadLetterPayloadsRewrapped()).isEqualTo(1);
         String newMfaCiphertext = jdbc.queryForObject("SELECT encrypted_secret FROM mfa_methods WHERE user_id=?", String.class, adminUserId);
         String newPluginCiphertext = jdbc.queryForObject("SELECT encrypted_secrets->>'apiKey' FROM extension_plugins WHERE plugin_id='test.key-rotation'", String.class);
         assertThat(encryption.isEncryptedWithActiveKey(newMfaCiphertext)).isTrue();
         assertThat(encryption.isEncryptedWithActiveKey(newPluginCiphertext)).isTrue();
         assertThat(encryption.decrypt(newMfaCiphertext)).isEqualTo("mfa-secret-material");
         assertThat(encryption.decrypt(newPluginCiphertext)).isEqualTo("provider-secret-material");
+        String newDeadLetterCiphertext = jdbc.queryForObject(
+                "SELECT encrypted_payload FROM kafka_consumer_dead_letters WHERE id=?", String.class, deadLetterId);
+        var activeOnlyEncryption = new io.artio.api.security.EncryptionService(ACTIVE_TEST_ENCRYPTION_KEY);
+        assertThat(activeOnlyEncryption.decrypt(newDeadLetterCiphertext)).isEqualTo("private-dead-letter-material");
+        assertThat(jdbc.queryForObject("SELECT encrypted_payload FROM kafka_consumer_dead_letters WHERE id=?", String.class, tombstoneId)).isNull();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE path=? AND action='UPDATE'", Integer.class, path)).isEqualTo(1);
+
+        var repeated = adminExchange(path, HttpMethod.POST, null,
+                io.artio.api.security.EncryptionKeyRotationController.RotationResult.class);
+        assertThat(repeated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(repeated.getBody().deadLetterPayloadsRewrapped()).isZero();
+        assertThat(repeated.getBody().mfaSecretsRewrapped()).isZero();
+        assertThat(repeated.getBody().extensionSecretsRewrapped()).isZero();
+
+        // A corrupt DLQ payload must roll back the preceding MFA/plugin updates and the audit event.
+        jdbc.update("UPDATE mfa_methods SET encrypted_secret=? WHERE user_id=?", oldMfaCiphertext, adminUserId);
+        jdbc.update("UPDATE extension_plugins SET encrypted_secrets=?::jsonb WHERE plugin_id='test.key-rotation'",
+                mapper.writeValueAsString(Map.of("apiKey", oldPluginCiphertext)));
+        jdbc.update("UPDATE kafka_consumer_dead_letters SET encrypted_payload='invalid-ciphertext' WHERE id=?", deadLetterId);
+        try {
+            var failed = adminExchange(path, HttpMethod.POST, null, String.class);
+            assertThat(failed.getStatusCode().isError()).isTrue();
+            assertThat(failed.getBody()).doesNotContain("private-dead-letter-material", "provider-secret-material", "mfa-secret-material");
+            assertThat(jdbc.queryForObject("SELECT encrypted_secret FROM mfa_methods WHERE user_id=?", String.class, adminUserId)).isEqualTo(oldMfaCiphertext);
+            assertThat(jdbc.queryForObject("SELECT encrypted_secrets->>'apiKey' FROM extension_plugins WHERE plugin_id='test.key-rotation'", String.class)).isEqualTo(oldPluginCiphertext);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE path=? AND action='UPDATE'", Integer.class, path)).isEqualTo(2);
+        } finally {
+            jdbc.update("DELETE FROM kafka_consumer_dead_letters WHERE source_topic='rotation-test'");
+            jdbc.update("DELETE FROM extension_plugins WHERE plugin_id='test.key-rotation'");
+        }
     }
 
     @Test
@@ -739,7 +792,8 @@ class CatalogApiIntegrationTests {
     @Test
     void variantCombinationsAreTypedUniqueEditableAndPersisted() {
         var product = adminExchange("/api/v1/products", HttpMethod.POST,
-                new ProductRequest("Variant shirt", "Combination test", "VAR-" + UUID.randomUUID().toString().substring(0, 8)), ProductResponse.class);
+                new ProductRequest("Variant shirt", "Combination test", "VAR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT)), ProductResponse.class);
+        assertThat(product.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         adminExchange("/api/v1/attribute-definitions", HttpMethod.POST,
                 new MetadataApplicationService.AttributeRequest("color", "Color", io.artio.catalog.AttributeDefinition.Type.TEXT, false),
                 MetadataApplicationService.AttributeView.class);
@@ -773,7 +827,8 @@ class CatalogApiIntegrationTests {
     @Test
     void scheduledProductPublicationCanBeCancelledOrPublishedWhenDue() {
         var product = adminExchange("/api/v1/products", HttpMethod.POST,
-                new ProductRequest("Scheduled item", "Publication test", "SCH-" + UUID.randomUUID().toString().substring(0, 8)), ProductResponse.class);
+                new ProductRequest("Scheduled item", "Publication test", "SCH-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT)), ProductResponse.class);
+        assertThat(product.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         adminExchange("/api/v1/products/{id}/active", HttpMethod.PUT,
                 new SetActiveRequest(false), ProductResponse.class, product.getBody().id());
         var publishAt = java.time.Instant.now().plusSeconds(120).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -816,7 +871,8 @@ class CatalogApiIntegrationTests {
     @Test
     void productMediaRequiresStaffAndSupportsSafeUploadReplacementOrderingAndDeletion() throws Exception {
         var product = adminExchange("/api/v1/products", HttpMethod.POST,
-                new ProductRequest("Media lamp", "Image workflow", "MEDIA-" + UUID.randomUUID().toString().substring(0, 8)), ProductResponse.class);
+                new ProductRequest("Media lamp", "Image workflow", "MEDIA-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT)), ProductResponse.class);
+        assertThat(product.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         byte[] firstImage = testPng(3, 2);
         var anonymousParts = imagePart(firstImage);
         var anonymousHeaders = new HttpHeaders();
@@ -844,9 +900,9 @@ class CatalogApiIntegrationTests {
         var replacementHeaders = new HttpHeaders();
         replacementHeaders.setBearerAuth(adminToken);
         replacementHeaders.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
-        var replaced = http.exchange("/api/v1/products/{id}/media/{mediaId}?altText=Front%20detail", HttpMethod.PUT,
+        var replaced = http.exchange("/api/v1/products/{id}/media/{mediaId}?altText={altText}", HttpMethod.PUT,
                 new HttpEntity<>(replacementParts, replacementHeaders), ProductMediaController.MediaResponse.class,
-                product.getBody().id(), first.getBody().id());
+                product.getBody().id(), first.getBody().id(), "Front detail");
         assertThat(replaced.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(replaced.getBody().id()).isEqualTo(first.getBody().id());
         assertThat(replaced.getBody().width()).isEqualTo(8);
@@ -1030,11 +1086,13 @@ class CatalogApiIntegrationTests {
         jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload) "
                         + "VALUES (?,'ORDER_CREATED','ORDER',?,'{}'::jsonb)", eventId, UUID.randomUUID().toString());
 
+        java.time.Instant publicationStartedAt = java.time.Instant.now();
         orderEventOutboxPublisher.publishPending();
 
         assertThat(jdbc.queryForObject("SELECT status FROM event_outbox WHERE id=?", String.class, eventId)).isEqualTo("PENDING");
         assertThat(jdbc.queryForObject("SELECT attempts FROM event_outbox WHERE id=?", Integer.class, eventId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT available_at>now() FROM event_outbox WHERE id=?", Boolean.class, eventId)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT available_at FROM event_outbox WHERE id=?", java.sql.Timestamp.class, eventId)
+                .toInstant()).isAfter(publicationStartedAt);
         assertThat(jdbc.queryForObject("SELECT last_error IS NOT NULL FROM event_outbox WHERE id=?", Boolean.class, eventId)).isTrue();
     }
 
@@ -1285,7 +1343,7 @@ class CatalogApiIntegrationTests {
         String eventPayload = jdbc.queryForObject("SELECT payload::text FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CREATED'",
                 String.class, firstBody.orderId().toString());
         assertThat(mapper.readTree(eventPayload).path("schemaVersion").asInt()).isEqualTo(1);
-        assertThat(eventPayload).contains("\"locale\":\"de\"");
+        assertThat(mapper.readTree(eventPayload).path("locale").asText()).isEqualTo("de-CH");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
                 "order-email:" + firstBody.orderId())).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE dedupe_key=?", Integer.class,
@@ -1547,8 +1605,8 @@ class CatalogApiIntegrationTests {
     @Test
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
-                "SELECT version FROM flyway_schema_history WHERE success = TRUE", String.class);
-        assertThat(appliedVersions).containsExactly("1");
+                "SELECT version FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
+        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
@@ -1745,7 +1803,7 @@ class CatalogApiIntegrationTests {
                                 : "paid".equals(state) ? PaymentState.CAPTURED : PaymentState.PENDING;
                         JsonNode object = event.path("data").path("object");
                         return new WebhookResult(event.path("id").asText(), type, object.path("id").asText(), paymentState,
-                                object.path("amount").decimalValue(), object.path("currency").asText(), true);
+                                new BigDecimal(object.path("amount").asText()), object.path("currency").asText(), true);
                     } catch (IOException invalid) {
                         return new WebhookResult("", "", "", PaymentState.FAILED, false);
                     }
@@ -1757,7 +1815,7 @@ class CatalogApiIntegrationTests {
                         String paid = response.path("payment_status").asText();
                         if ("complete".equals(status) && "paid".equals(paid))
                             return Optional.of(new PaymentResult(reference, PaymentState.CAPTURED,
-                                    response.path("amount").decimalValue(), response.path("currency").asText(), null));
+                                    new BigDecimal(response.path("amount").asText()), response.path("currency").asText(), null));
                         if ("expired".equals(status))
                             return Optional.of(new PaymentResult(reference, PaymentState.EXPIRED, null, null, null));
                         return Optional.empty();

@@ -2,6 +2,8 @@
 
 Kafka is required platform infrastructure in the default Docker Compose installation. PostgreSQL transactions write events to `event_outbox`; the publisher sends only committed rows to Kafka. Kafka delivery is at least once: a process can fail after the broker accepts an event but before PostgreSQL records `PUBLISHED`, so every consumer must deduplicate by the stable `eventId` before applying effects.
 
+New consumer groups start at the earliest retained offset, so events published before the first assignment are not silently skipped. Existing committed offsets remain authoritative; inbox deduplication protects replay of retained events.
+
 ## Order events v1
 
 - **Topic:** `artio.order.events`
