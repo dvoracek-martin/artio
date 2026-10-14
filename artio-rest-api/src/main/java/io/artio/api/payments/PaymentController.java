@@ -125,6 +125,47 @@ public class PaymentController {
         return new CheckoutSession(result.providerReference(), result.checkoutUrl());
     }
 
+    @PostMapping("/orders/{orderId}/cancel")
+    @Transactional
+    public Map<String,String> cancelPendingOrder(@PathVariable UUID orderId, JwtAuthenticationToken auth) {
+        UUID userId=UUID.fromString(auth.getToken().getSubject());
+        String status=jdbc.query("SELECT status FROM orders WHERE id=? AND user_id=? FOR UPDATE",(rs,n)->rs.getString(1),orderId,userId)
+                .stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found"));
+        if("CANCELLED".equals(status))return Map.of("status","cancelled");
+        if(!"PENDING".equals(status))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only orders awaiting payment can be cancelled");
+        var pending=jdbc.query("SELECT id,provider_reference,method FROM payments WHERE order_id=? AND status='PENDING' FOR UPDATE",
+                (rs,n)->new PendingPayment(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3)),orderId);
+        PaymentProvider extension=provider.getIfAvailable();
+        for(PendingPayment payment:pending){
+            try{
+                if(extension!=null){
+                    if(!extension.capabilities().cancellation())throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payment provider cannot cancel this checkout");
+                    PaymentProvider.PaymentResult result=extension.cancel(payment.providerReference(),"artio-cancel-"+orderId);
+                    if(result==null||!payment.providerReference().equals(result.providerReference()))throw new IllegalStateException("Provider returned invalid cancellation");
+                    if(result.state()==PaymentProvider.PaymentState.CAPTURED)throw new ResponseStatusException(HttpStatus.CONFLICT,"Payment was captured and is being reconciled");
+                    if(result.state()!=PaymentProvider.PaymentState.CANCELLED&&result.state()!=PaymentProvider.PaymentState.EXPIRED)
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,"Payment cancellation is not confirmed");
+                }else if("STRIPE".equals(payment.method())&&!stripeKey.isBlank()){
+                    Map<?,?> session=stripe.post().uri("https://api.stripe.com/v1/checkout/sessions/{id}/expire",payment.providerReference())
+                            .headers(h->h.setBearerAuth(stripeKey)).retrieve().body(Map.class);
+                    if(session==null||!payment.providerReference().equals(session.get("id"))||!"expired".equals(session.get("status")))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,"Payment cancellation is not confirmed");
+                }else throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payment provider cannot cancel this checkout");
+                jdbc.update("UPDATE payments SET status='CANCELLED',updated_at=now() WHERE id=? AND status='PENDING'",payment.id());
+            }catch(ResponseStatusException known){throw known;}
+            catch(RuntimeException failure){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Payment cancellation was not confirmed; retry after provider reconciliation");}
+        }
+        if(jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'",orderId)==0)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Order status changed while cancellation was in progress");
+        for(var reservation:inventory.reservationsByOrder(orderId))
+            if(reservation.state()==io.artio.inventory.ReservationState.RESERVED)inventory.release(reservation.id());
+        OrderTimelineEvents.record(jdbc,orderId,userId,"ORDER_CANCELLED","Order cancelled before payment",true);
+        jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,dedupe_key,created_at) VALUES (?,?,?,'Order cancelled',?,false,?,now()) ON CONFLICT (dedupe_key) DO NOTHING",
+                UUID.randomUUID(),userId,"ORDER_CANCELLED","Order "+orderId+" was cancelled.","order-cancelled:"+orderId);
+        orderUpdates.publish(orderId);
+        return Map.of("status","cancelled");
+    }
+
     /** Captures a buyer-approved provider order after a verified ownership and reference check. */
     @PostMapping("/provider/orders/{orderId}/capture")
     @Transactional
@@ -397,5 +438,6 @@ public class PaymentController {
     public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,
                              BigDecimal remainingAmount,String providerReference,String status){}
     private record OrderRow(BigDecimal total,String currency,String status){}
+    private record PendingPayment(UUID id,String providerReference,String method){}
     private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency) { }
 }

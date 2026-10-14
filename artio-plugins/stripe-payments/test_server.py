@@ -10,6 +10,17 @@ import server
 
 
 class StripeExtensionTests(unittest.TestCase):
+    def test_cancel_expires_checkout_with_stable_idempotency_key(self):
+        response = {"id": "cs_test_123", "status": "expired", "payment_status": "unpaid"}
+        with patch.object(server, "stripe_request", return_value=response) as request:
+            result = server.operation({"stripeSecretKey": "sk_test_secret"}, "cancel", {
+                "providerReference": "cs_test_123", "idempotencyKey": "cancel-order-123",
+            }, {"idempotencyKey": "cancel-order-123"})
+
+        self.assertEqual("CANCELLED", result["state"])
+        self.assertEqual("cs_test_123", result["providerReference"])
+        self.assertEqual("cancel-order-123", request.call_args.args[4])
+
     def test_refund_sends_requested_partial_amount_with_stable_idempotency(self):
         session = {"payment_intent": "pi_test_123"}
         refund = {"id": "re_test_123", "status": "succeeded", "failure_reason": None}
