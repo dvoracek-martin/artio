@@ -4,6 +4,8 @@ plugins {
 }
 
 dependencies {
+    implementation("software.amazon.awssdk:s3:2.55.14")
+    implementation("software.amazon.awssdk:url-connection-client:2.55.14")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-api:2.6.0")
     implementation("org.springframework.boot:spring-boot-starter-jdbc")

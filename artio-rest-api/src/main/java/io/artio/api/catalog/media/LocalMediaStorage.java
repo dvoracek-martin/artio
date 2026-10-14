@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 /** Filesystem adapter intended for a persistent mounted volume, never the container writable layer. */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "artio.catalog.media.storage", havingValue = "local", matchIfMissing = true)
 public class LocalMediaStorage implements MediaStorage {
     private static final java.util.regex.Pattern KEY = java.util.regex.Pattern
             .compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(jpg|png)");

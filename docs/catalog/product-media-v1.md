@@ -4,7 +4,30 @@ Product images use PostgreSQL metadata plus the `MediaStorage` port. The default
 
 Each product can hold up to 100 images; writes lock the parent product row so simultaneous uploads cannot exceed that cap or assign the same next position. Only JPEG and PNG are accepted. The server detects the actual decoded image format instead of trusting a filename or request `Content-Type`, limits uploads to 10 MiB, dimensions to 10,000 pixels per side and 20 million total pixels, decodes and re-encodes images to strip untrusted metadata, and gives each stored object an opaque random key. SVG, animated formats and arbitrary files are rejected. Stored files are never placed in the container writable layer or served from a user-controlled path.
 
-## API
+## Optional S3-compatible storage
+
+Set `ARTIO_CATALOG_MEDIA_STORAGE=s3` to select the S3 adapter. The default remains `local`; the Backoffice uses the same upload API in both modes. Configure an existing private bucket and credentials on the API server, never in the browser:
+
+| Environment variable | Purpose / default |
+| --- | --- |
+| `ARTIO_CATALOG_MEDIA_S3_BUCKET` | Required existing private bucket |
+| `ARTIO_CATALOG_MEDIA_S3_REGION` | Signing region, default `us-east-1` |
+| `ARTIO_CATALOG_MEDIA_S3_ENDPOINT` | Optional HTTP(S) endpoint for S3-compatible providers; blank uses AWS |
+| `ARTIO_CATALOG_MEDIA_S3_PATH_STYLE` | Default `true` for compatible providers; can be `false` for AWS virtual host addressing |
+| `ARTIO_CATALOG_MEDIA_S3_PREFIX` | Object namespace, default `products` |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Standard AWS credentials; the SDK also supports its default profile/workload credential chain |
+
+The SDK signs requests and handles authentication. The service requires `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on the configured prefix. It does not create buckets, set public ACLs or expose signed storage credentials to clients. Public catalog images continue to be served through Artio's content endpoint. Use HTTPS for a remote object-storage endpoint. The adapter sets bounded connection/request timeouts and uses required-only checksums for S3-compatible implementations. [AWS SDK endpoint configuration](https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/endpoint-config.html) describes custom endpoints.
+
+For Compose, export the variables above (or set them in your uncommitted `.env`) and add the supplied overlay:
+
+```shell
+docker compose -f artio-docker/docker-compose.yml -f artio-docker/docker-compose.media-s3.yml up -d --build
+```
+
+The overlay uses explicit access keys. Workload-role deployments can provide the same media configuration and the SDK credential chain without that overlay. Existing filesystem objects are not automatically migrated when switching adapters: copy them to the configured bucket/prefix with their original keys before switching, and retain matching database backups. Back up the object bucket together with PostgreSQL.
+
+## Media routes
 
 - `GET /api/v1/products/{productId}/media` — ordered media metadata and content URLs; public read.
 - `GET /api/v1/products/{productId}/media/{mediaId}/content` — validated image bytes; public read, `nosniff`, revalidated cache.

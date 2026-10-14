@@ -1,0 +1,13 @@
+# Optional product media only. Start with the standard Compose stack plus this overlay.
+services:
+  rest-api:
+    environment:
+      ARTIO_CATALOG_MEDIA_STORAGE: s3
+      ARTIO_CATALOG_MEDIA_S3_BUCKET: ${ARTIO_CATALOG_MEDIA_S3_BUCKET:?Set the existing private product media bucket}
+      ARTIO_CATALOG_MEDIA_S3_REGION: ${ARTIO_CATALOG_MEDIA_S3_REGION:-us-east-1}
+      ARTIO_CATALOG_MEDIA_S3_ENDPOINT: ${ARTIO_CATALOG_MEDIA_S3_ENDPOINT:-}
+      ARTIO_CATALOG_MEDIA_S3_PATH_STYLE: ${ARTIO_CATALOG_MEDIA_S3_PATH_STYLE:-true}
+      ARTIO_CATALOG_MEDIA_S3_PREFIX: ${ARTIO_CATALOG_MEDIA_S3_PREFIX:-products}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?Set the product media access key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?Set the product media secret key}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
