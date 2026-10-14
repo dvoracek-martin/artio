@@ -110,6 +110,8 @@ Administrators can store DE/IT/FR/EN bundle names and option-group labels with `
 
 ## Storefront, backoffice and operations
 
+First-run setup uses a [five-step installation wizard](docs/setup/first-run-wizard.md) with token verification, store identity, regional settings, owner access, review and a success screen. [Shared Backoffice controls](docs/backoffice-ux.md) provide searchable dropdowns, multiple selections and readable product/variant choices across setup, catalog, pricing, inventory and bundles.
+
 The shared visual language is documented in [Artio visual identity](docs/BRAND_IDENTITY.md): Sora typography, dark navy surfaces and cyan–indigo–violet accents. Backoffice product creation has a [dedicated four-step wizard](docs/catalog/backoffice-product-wizard.md) at `/products/new`, including category assignment, a first variant, image previews and a final review. Product drafts and their initial variant/classification are created atomically. Image storage supports the default persistent volume or an optional [S3-compatible private bucket](docs/catalog/product-media-v1.md#optional-s3-compatible-storage).
 
 The storefront includes responsive catalog browsing, search, bundle configuration, account registration/login, cart, optional plugin-backed checkout, order history and order-status views. The Backoffice includes catalog, bundle, pricing, inventory, order/return/refund, customer, gift-card, regional settings, plugin lifecycle and operational delivery workflows. Both are strict-mode Angular applications with responsive layouts and dark-mode support.

@@ -1,6 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject } from '@angular/core';
+import { SellableSelectComponent } from './sellable-select.component';
+import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
 
 type Warehouse = { id: string; code: string; name: string; location: string; active: boolean };
@@ -11,7 +13,7 @@ type LowStock = { warehouseId: string; sellableId: string; available: number; th
 @Component({
   selector: 'artio-inventory-admin',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SellableSelectComponent, SearchSelectComponent],
   template: `
     <section>
       <div class="panel" *ngIf="lowStock.length">
@@ -30,7 +32,7 @@ type LowStock = { warehouseId: string; sellableId: string; available: number; th
           <span class="row-main"><strong>{{warehouse.name}} · {{warehouse.code}}</strong><small>{{warehouse.location}} · {{warehouse.active?'Active':'Inactive'}}</small></span>
           <button class="link-button" (click)="selectWarehouse(warehouse)">{{selectedWarehouse?.id===warehouse.id?'Selected':'View stock'}}</button>
         </div>
-        <p *ngIf="!warehouses.length" class="empty">Create a warehouse to start tracking inventory.</p>
+        <div class="setup-field" *ngIf="warehouses.length"><span>Jump to warehouse</span><artio-search-select [ngModel]="selectedWarehouse?.id || ''" (ngModelChange)="chooseWarehouse($event)" label="Warehouse" [options]="warehouseOptions" placeholder="Choose a warehouse"></artio-search-select></div><p *ngIf="!warehouses.length" class="empty">Create a warehouse to start tracking inventory.</p>
       </div>
 
       <ng-container *ngIf="selectedWarehouse">
@@ -39,7 +41,7 @@ type LowStock = { warehouseId: string; sellableId: string; available: number; th
           <table><thead><tr><th>SELLABLE ID</th><th>ON HAND</th><th>RESERVED</th><th>AVAILABLE</th><th>ACTION</th></tr></thead><tbody>
             <tr *ngFor="let row of stocks"><td><code>{{row.sellableId}}</code></td><td>{{row.onHand}}</td><td>{{row.reserved}}</td><td>{{row.available}}</td><td><button class="link-button" (click)="manage(row)">Receive / adjust / history</button></td></tr>
           </tbody></table><p *ngIf="!stocks.length" class="empty">No stock records in this warehouse yet.</p>
-          <form class="create-form" (ngSubmit)="receive()"><input [(ngModel)]="draft.sellableId" name="newSellableId" placeholder="Product or variant UUID" required><input [(ngModel)]="draft.quantity" name="newQuantity" type="number" min="0.0001" step="0.0001" placeholder="Receipt quantity" required><input [(ngModel)]="draft.reason" name="newReceiptReason" maxlength="500" placeholder="Receipt note (optional)"><button class="primary" [disabled]="busy">Receive stock</button></form>
+          <form class="create-form" (ngSubmit)="receive()"><artio-sellable-select [(ngModel)]="draft.sellableId" name="newSellableId" label="Stock receipt product variant"></artio-sellable-select><input [(ngModel)]="draft.quantity" name="newQuantity" type="number" min="0.0001" step="0.0001" placeholder="Receipt quantity" required><input [(ngModel)]="draft.reason" name="newReceiptReason" maxlength="500" placeholder="Receipt note (optional)"><button class="primary" [disabled]="busy">Receive stock</button></form>
         </div>
 
         <div *ngIf="selectedStock" class="panel">
@@ -71,6 +73,8 @@ export class InventoryAdminComponent {
   busy = false;
   error = '';
 
+  get warehouseOptions():SelectOption[]{return this.warehouses.map(x=>({value:x.id,label:x.name,detail:x.code+' · '+x.location,disabled:!x.active}));}
+  chooseWarehouse(id:string):void{const row=this.warehouses.find(x=>x.id===id);if(row)this.selectWarehouse(row);}
   constructor() { this.loadWarehouses(); this.loadLowStock(); }
 
   loadLowStock(): void { this.http.get<LowStock[]>('/api/v1/inventory/low-stock').subscribe({next:rows=>this.lowStock=rows,error:e=>this.error=e.error?.detail??'Could not load low-stock alerts.'}); }

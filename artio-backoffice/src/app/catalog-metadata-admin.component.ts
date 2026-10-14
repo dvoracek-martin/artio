@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject } from '@angular/core';
+import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
@@ -11,14 +12,14 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
 @Component({
   selector: 'artio-catalog-metadata-admin',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SearchSelectComponent],
   template: `
     <section>
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">CATALOG STRUCTURE</p><h2>Categories</h2></div><button class="link-button" (click)="load()">Refresh</button></div>
         <form class="create-form" (ngSubmit)="createCategory()">
           <input [(ngModel)]="categoryDraft.name" name="categoryName" maxlength="120" placeholder="Category name" required>
-          <select [(ngModel)]="categoryDraft.parentId" name="categoryParent"><option value="">Top-level category</option><option *ngFor="let category of categories" [value]="category.id">{{category.name}}</option></select>
+          <artio-search-select [(ngModel)]="categoryDraft.parentId" name="categoryParent" label="Parent category" [options]="parentOptions" placeholder="Top-level category"></artio-search-select>
           <button class="primary">Add category</button>
         </form>
         <div class="row" *ngFor="let category of categories"><span class="row-main"><strong>{{category.name}}</strong><small>{{category.parentId?'Child of '+categoryName(category.parentId):'Top level'}} · {{category.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editCategory(category)">Edit</button><button class="link-button" (click)="toggleCategory(category)">{{category.active?'Deactivate':'Activate'}}</button></div>
@@ -27,10 +28,10 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
 
       <div class="panel" *ngIf="products.length">
         <div class="panel-heading"><div><p class="eyebrow">PRODUCT CLASSIFICATION</p><h2>Assign catalog data</h2></div></div>
-        <label>Product<select [(ngModel)]="selectedProductId" name="metadataProduct" (ngModelChange)="selectProduct($event)"><option value="">Choose a product</option><option *ngFor="let product of products" [value]="product.id">{{product.name}} · {{product.sku}}</option></select></label>
+        <div class="setup-field"><span>Product</span><artio-search-select [(ngModel)]="selectedProductId" name="metadataProduct" (ngModelChange)="selectProduct($event)" label="Product to classify" [options]="productOptions" placeholder="Choose a product"></artio-search-select></div>
         <form *ngIf="selectedProduct" (ngSubmit)="saveProductMetadata()">
-          <label>Brand<select [(ngModel)]="productDraft.brandId" name="productBrand"><option value="">No brand</option><option *ngFor="let brand of brands" [value]="brand.id" [disabled]="!brand.active">{{brand.name}}{{brand.active?'':' · inactive'}}</option></select></label>
-          <h3>Categories</h3><label class="row" *ngFor="let category of categories"><span>{{category.name}}{{category.active?'':' · inactive'}}</span><input type="checkbox" [checked]="productDraft.categoryIds.includes(category.id)" [disabled]="!category.active" (change)="toggleProductCategory(category.id,$event)"></label>
+          <div class="setup-field"><span>Brand</span><artio-search-select [(ngModel)]="productDraft.brandId" name="productBrand" label="Product brand" [options]="brandOptions" placeholder="No brand"></artio-search-select></div>
+          <h3>Categories</h3><artio-search-select [(ngModel)]="productDraft.categoryIds" name="productCategories" label="Product categories" [options]="categoryOptions" [multiple]="true" placeholder="Choose categories"></artio-search-select>
           <h3>Attributes</h3><div *ngFor="let attribute of productAttributeDefinitions"><label>{{attribute.label}} · {{attribute.code}}<small>{{attribute.required?'Required':'Optional'}}{{attribute.active?'':' · inactive, retained read-only'}}</small><select *ngIf="attribute.type==='BOOLEAN'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [disabled]="!attribute.active"><option value="">Unset</option><option value="true">Yes</option><option value="false">No</option></select><input *ngIf="attribute.type!=='BOOLEAN'" [type]="attribute.type==='NUMBER'?'number':'text'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [required]="attribute.required&&attribute.active" [disabled]="!attribute.active"></label></div>
           <button class="primary">Save product classification</button>
         </form>
@@ -68,6 +69,10 @@ export class CatalogMetadataAdminComponent {
   brandDraft = { name: '', description: '' };
   attributeDraft = { code: '', label: '', type: 'TEXT' as AttributeDefinition['type'], required: false };
 
+  get parentOptions():SelectOption[]{return [{value:'',label:'Top-level category'},...this.categories.map(x=>({value:x.id,label:x.name}))];}
+  get productOptions():SelectOption[]{return this.products.map(x=>({value:x.id,label:x.name,detail:x.sku}));}
+  get brandOptions():SelectOption[]{return [{value:'',label:'No brand'},...this.brands.map(x=>({value:x.id,label:x.name,disabled:!x.active,detail:x.active?'':'Inactive'}))];}
+  get categoryOptions():SelectOption[]{return this.categories.map(x=>({value:x.id,label:x.name,disabled:!x.active,detail:x.parentId?'Under '+this.categoryName(x.parentId):x.active?'Top level':'Inactive'}));}
   constructor() { this.load(); this.loadProducts(); }
 
   get productAttributeDefinitions(): AttributeDefinition[] {

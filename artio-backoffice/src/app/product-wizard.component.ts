@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, EventEmitter, OnDestroy, OnInit, Output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { firstValueFrom, forkJoin } from 'rxjs';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
@@ -10,7 +11,7 @@ type Attribute = { code: string; label: string; type: string; required: boolean;
 type ImageDraft = { file: File; url: string; alt: string; uploaded: boolean };
 
 @Component({
-  selector: 'artio-product-wizard', standalone: true, imports: [CommonModule, FormsModule],
+  selector: 'artio-product-wizard', standalone: true, imports: [CommonModule, FormsModule, SearchSelectComponent],
   templateUrl: './product-wizard.component.html'
 })
 export class ProductWizardComponent implements OnInit, OnDestroy {
@@ -51,6 +52,8 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
     while (parent && !seen.has(parent.id)) { names.unshift(parent.name); seen.add(parent.id); parent = this.categories.find(x => x.id === parent!.parentId); }
     return names.join(' / ');
   }
+  get categoryOptions():SelectOption[]{return this.categories.map(x=>({value:x.id,label:this.categoryLabel(x)}));}
+  get brandOptions():SelectOption[]{return [{value:'',label:'No brand'},...this.brands.map(x=>({value:x.id,label:x.name}))];}
   get selectedCategories(): string { return this.categories.filter(x => this.draft.categoryIds.includes(x.id)).map(x => this.categoryLabel(x)).join(', '); }
   get brandName(): string { return this.brands.find(x => x.id === this.draft.brandId)?.name ?? 'No brand'; }
   setSku(value: string): void {
