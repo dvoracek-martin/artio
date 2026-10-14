@@ -40,6 +40,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import io.artio.api.error.ApiError;
+import io.artio.api.catalog.media.ProductMediaController;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.io.IOException;
@@ -685,6 +686,79 @@ class CatalogApiIntegrationTests {
         var exported=adminExchange("/api/v1/admin/catalog/products/export",HttpMethod.GET,null,String.class);
         assertThat(exported.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(exported.getBody()).contains("sku,name,description,active","CSV-IMP-001");
+    }
+
+    @Test
+    void productMediaRequiresStaffAndSupportsSafeUploadReplacementOrderingAndDeletion() throws Exception {
+        var product = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Media lamp", "Image workflow", "MEDIA-" + UUID.randomUUID().toString().substring(0, 8)), ProductResponse.class);
+        byte[] firstImage = testPng(3, 2);
+        var anonymousParts = imagePart(firstImage);
+        var anonymousHeaders = new HttpHeaders();
+        anonymousHeaders.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        var anonymous = http.postForEntity("/api/v1/products/{id}/media", new HttpEntity<>(anonymousParts, anonymousHeaders),
+                ProductMediaController.MediaResponse.class, product.getBody().id());
+        assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        var first = uploadProductImage(product.getBody().id(), firstImage, "Front view");
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(first.getBody().width()).isEqualTo(3);
+        assertThat(first.getBody().altText()).isEqualTo("Front view");
+        var downloaded = http.getForEntity(first.getBody().contentUrl(), byte[].class);
+        assertThat(downloaded.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(downloaded.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.IMAGE_PNG);
+
+        var second = uploadProductImage(product.getBody().id(), testPng(4, 1), "Side view");
+        var order = adminExchange("/api/v1/products/{id}/media/order", HttpMethod.PUT,
+                new ProductMediaController.OrderRequest(List.of(second.getBody().id(), first.getBody().id())),
+                ProductMediaController.MediaResponse[].class, product.getBody().id());
+        assertThat(order.getBody()).extracting(ProductMediaController.MediaResponse::id)
+                .containsExactly(second.getBody().id(), first.getBody().id());
+
+        var replacementParts = imagePart(testPng(8, 5));
+        var replacementHeaders = new HttpHeaders();
+        replacementHeaders.setBearerAuth(adminToken);
+        replacementHeaders.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        var replaced = http.exchange("/api/v1/products/{id}/media/{mediaId}?altText=Front%20detail", HttpMethod.PUT,
+                new HttpEntity<>(replacementParts, replacementHeaders), ProductMediaController.MediaResponse.class,
+                product.getBody().id(), first.getBody().id());
+        assertThat(replaced.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(replaced.getBody().id()).isEqualTo(first.getBody().id());
+        assertThat(replaced.getBody().width()).isEqualTo(8);
+        assertThat(replaced.getBody().height()).isEqualTo(5);
+        assertThat(replaced.getBody().altText()).isEqualTo("Front detail");
+
+        var deleted = adminExchange("/api/v1/products/{id}/media/{mediaId}", HttpMethod.DELETE, null,
+                Void.class, product.getBody().id(), second.getBody().id());
+        assertThat(deleted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        var remaining = http.getForEntity("/api/v1/products/{id}/media", ProductMediaController.MediaResponse[].class,
+                product.getBody().id());
+        assertThat(remaining.getBody()).hasSize(1);
+        assertThat(remaining.getBody()[0].id()).isEqualTo(first.getBody().id());
+    }
+
+    private ResponseEntity<ProductMediaController.MediaResponse> uploadProductImage(UUID productId, byte[] bytes, String altText) {
+        var headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+        headers.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        return http.exchange("/api/v1/products/{id}/media?altText={altText}", HttpMethod.POST,
+                new HttpEntity<>(imagePart(bytes), headers), ProductMediaController.MediaResponse.class, productId, altText);
+    }
+
+    private static org.springframework.util.LinkedMultiValueMap<String, Object> imagePart(byte[] bytes) {
+        var parts = new org.springframework.util.LinkedMultiValueMap<String, Object>();
+        parts.add("file", new org.springframework.core.io.ByteArrayResource(bytes) {
+            @Override public String getFilename() { return "image.png"; }
+        });
+        return parts;
+    }
+
+    private static byte[] testPng(int width, int height) throws IOException {
+        var image = new java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        try (var bytes = new java.io.ByteArrayOutputStream()) {
+            javax.imageio.ImageIO.write(image, "png", bytes);
+            return bytes.toByteArray();
+        }
     }
 
     @Test

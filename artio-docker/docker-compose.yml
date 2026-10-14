@@ -113,6 +113,7 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
       ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
       ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
+      ARTIO_CATALOG_MEDIA_STORAGE_PATH: /var/lib/artio/media
       ARTIO_SEARCH_ENABLED: ${ARTIO_SEARCH_ENABLED:-false}
       ARTIO_SEARCH_URL: http://opensearch:9200
       ARTIO_EXTENSION_TRUSTED_REGISTRIES: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-}
@@ -151,6 +152,7 @@ services:
       - extension-control
     volumes:
       - artio-installation-secrets:/run/artio-secrets:ro
+      - artio-catalog-media:/var/lib/artio/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -292,6 +294,7 @@ volumes:
   artio-installation-secrets:
   artio-extension-controller-secrets:
   artio-kafka-data:
+  artio-catalog-media:
 
 networks:
   default: {}

@@ -5,6 +5,10 @@ spring:
     password: ${ARTIO_DATABASE_PASSWORD}
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: ${ARTIO_MEDIA_MAX_FILE_SIZE:10MB}
+      max-request-size: ${ARTIO_MEDIA_MAX_REQUEST_SIZE:11MB}
   data:
     redis:
       host: ${REDIS_HOST:localhost}

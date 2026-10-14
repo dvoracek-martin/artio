@@ -25,6 +25,20 @@ CREATE TABLE catalog_variant (
 
 CREATE INDEX catalog_variant_product_id_idx ON catalog_variant(product_id);
 
+CREATE TABLE catalog_product_media (
+    id UUID PRIMARY KEY,
+    product_id UUID NOT NULL REFERENCES catalog_product(id) ON DELETE CASCADE,
+    storage_key VARCHAR(80) NOT NULL UNIQUE,
+    content_type VARCHAR(32) NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png')),
+    width INTEGER NOT NULL CHECK (width > 0),
+    height INTEGER NOT NULL CHECK (height > 0),
+    alt_text VARCHAR(500) NOT NULL DEFAULT '',
+    position INTEGER NOT NULL CHECK (position >= 0),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+CREATE INDEX catalog_product_media_order_idx ON catalog_product_media(product_id, position, created_at, id);
+
 -- ===== Legacy V2__catalog_taxonomy_and_attributes =====
 CREATE TABLE catalog_category (
     id UUID PRIMARY KEY,

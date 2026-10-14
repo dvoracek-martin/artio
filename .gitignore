@@ -15,6 +15,7 @@ Thumbs.db
 !.env.example
 *.local
 secrets/
+var/artio/media/
 **/.angular/cache/
 __pycache__/
 *.py[cod]
