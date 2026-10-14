@@ -1,5 +1,6 @@
 package io.artio.api.security;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Rewraps persisted application ciphertext using the currently configured active key. No key material is accepted over HTTP. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/system/security/encryption")
 public class EncryptionKeyRotationController {

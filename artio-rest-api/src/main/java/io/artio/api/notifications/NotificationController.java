@@ -1,5 +1,6 @@
 package io.artio.api.notifications;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -8,6 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/notifications")
 public class NotificationController {

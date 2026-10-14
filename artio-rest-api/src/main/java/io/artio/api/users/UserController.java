@@ -1,5 +1,6 @@
 package io.artio.api.users;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.users.Permission;
 import java.time.Instant;
 import java.util.List;
@@ -12,6 +13,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 public class UserController {
     private final JdbcTemplate jdbc;

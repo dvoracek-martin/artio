@@ -50,7 +50,7 @@ write_secret_once extension-controller-token "${ARTIO_EXTENSION_CONTROLLER_TOKEN
 controller_secret_dir=/run/artio-controller-secrets
 mkdir -p "$controller_secret_dir"
 chmod 700 "$controller_secret_dir"
-for name in extension-auth-key extension-controller-token; do
+for name in encryption-key extension-auth-key extension-controller-token; do
     temporary=$(mktemp "$controller_secret_dir/.${name}.XXXXXX")
     cat "$secret_dir/$name" > "$temporary"
     chmod 600 "$temporary"

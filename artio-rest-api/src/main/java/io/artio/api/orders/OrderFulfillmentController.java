@@ -1,5 +1,6 @@
 package io.artio.api.orders;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.api.inventory.InventoryApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.extensions.commerce.ShippingProvider;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/orders")
 public class OrderFulfillmentController {

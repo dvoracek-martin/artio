@@ -1,5 +1,6 @@
 package io.artio.api.orders;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 public class CustomerOrderController {
     private final JdbcTemplate jdbc;

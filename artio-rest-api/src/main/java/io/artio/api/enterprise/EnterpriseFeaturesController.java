@@ -1,5 +1,6 @@
 package io.artio.api.enterprise;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -20,6 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
 /** Commerce extensions for a single independently deployed Artio installation. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 public class EnterpriseFeaturesController {
     private final JdbcTemplate jdbc;

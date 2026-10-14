@@ -1,5 +1,6 @@
 package io.artio.api.enterprise;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Installation-level settings; every operation is restricted to the system owner role. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/system/settings")
 @Transactional

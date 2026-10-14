@@ -1,5 +1,6 @@
 package io.artio.api.orders;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -9,6 +10,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 public class OrderTimelineController {
     private final JdbcTemplate jdbc;

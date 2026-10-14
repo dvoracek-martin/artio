@@ -1,5 +1,6 @@
 package io.artio.api.catalog.media;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/products/{productId}/media")
 public class ProductMediaController {

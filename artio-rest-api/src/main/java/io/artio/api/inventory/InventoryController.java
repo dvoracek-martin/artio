@@ -1,5 +1,7 @@
 package io.artio.api.inventory;
-import java.net.URI; import java.math.BigDecimal; import java.util.List; import java.util.UUID; import org.springframework.http.ResponseEntity; import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken; import org.springframework.web.bind.annotation.*; import org.springframework.web.server.ResponseStatusException; import org.springframework.http.HttpStatus;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;import java.net.URI; import java.math.BigDecimal; import java.util.List; import java.util.UUID; import org.springframework.http.ResponseEntity; import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken; import org.springframework.web.bind.annotation.*; import org.springframework.web.server.ResponseStatusException; import org.springframework.http.HttpStatus;
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController @RequestMapping("/api") public class InventoryController {
     private final InventoryApplicationService inventory; public InventoryController(InventoryApplicationService inventory){this.inventory=inventory;}
     @GetMapping("/warehouses") public List<InventoryApplicationService.WarehouseView> warehouses(){return inventory.warehouses();}

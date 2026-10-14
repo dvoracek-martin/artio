@@ -1,5 +1,7 @@
 package io.artio.api.pricing;
-import java.net.URI; import java.util.List; import java.util.UUID; import org.springframework.http.ResponseEntity; import org.springframework.web.bind.annotation.*;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;import java.net.URI; import java.util.List; import java.util.UUID; import org.springframework.http.ResponseEntity; import org.springframework.web.bind.annotation.*;
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController @RequestMapping("/api") public class PricingController {
     private final PricingApplicationService pricing; public PricingController(PricingApplicationService pricing){this.pricing=pricing;}
     @GetMapping("/prices") public List<PricingApplicationService.PriceView> prices(){return pricing.prices();}

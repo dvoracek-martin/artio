@@ -1,5 +1,6 @@
 package io.artio.api.extensions.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.extensions.ExtensionRuntimePort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
@@ -17,6 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 
 /** Narrow OTLP bridge from Core to the optional observability plugin on the private extension network. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @ConditionalOnProperty(name = "artio.runtime.role", havingValue = "extension-controller")
 @RequestMapping("/internal/v1/telemetry")

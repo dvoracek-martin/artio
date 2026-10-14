@@ -1,5 +1,6 @@
 package io.artio.api.payments;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.api.inventory.InventoryApplicationService;
 import io.artio.api.orders.OrderUpdatePublisher;
 import io.artio.api.orders.OrderTimelineEvents;
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/payments")
 public class PaymentController {

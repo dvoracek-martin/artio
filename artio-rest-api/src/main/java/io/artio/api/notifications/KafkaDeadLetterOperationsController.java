@@ -1,5 +1,6 @@
 package io.artio.api.notifications;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Payload-free administrative view and replay control for Kafka consumer dead letters. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/operations/kafka/dead-letters")
 public class KafkaDeadLetterOperationsController {

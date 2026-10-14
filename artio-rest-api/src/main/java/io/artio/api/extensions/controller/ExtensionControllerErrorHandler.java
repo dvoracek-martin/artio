@@ -1,5 +1,6 @@
 package io.artio.api.extensions.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.extensions.ExtensionRuntimePort;
 import java.util.Map;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -12,6 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestControllerAdvice
 @ConditionalOnProperty(name = "artio.runtime.role", havingValue = "extension-controller")
 final class ExtensionControllerErrorHandler {

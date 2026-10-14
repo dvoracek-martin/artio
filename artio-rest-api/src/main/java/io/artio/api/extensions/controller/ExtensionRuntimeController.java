@@ -1,5 +1,6 @@
 package io.artio.api.extensions.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.PluginManifest;
 import java.time.Duration;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Narrow authenticated service API. It intentionally exposes no raw Docker operations. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @ConditionalOnProperty(name = "artio.runtime.role", havingValue = "extension-controller")
 @RequestMapping("/internal/v1/extensions")

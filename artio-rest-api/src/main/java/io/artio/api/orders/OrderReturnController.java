@@ -1,5 +1,6 @@
 package io.artio.api.orders;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.api.inventory.InventoryApplicationService;
 import java.time.Instant;
 import java.util.List;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Customer return requests and staff-controlled review, receipt and restocking. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 public class OrderReturnController {
     private final JdbcTemplate jdbc;

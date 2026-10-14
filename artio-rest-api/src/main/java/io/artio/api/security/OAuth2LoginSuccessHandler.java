@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.Authentication;
@@ -28,6 +29,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /** Optional OIDC login handler. It requires an identity-provider-asserted verified email. */
 @Component
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final JdbcTemplate jdbc;private final JwtEncoder encoder;private final String storefrontUrl;private final TransactionTemplate transactions;
     private final BCryptPasswordEncoder passwords=new BCryptPasswordEncoder();

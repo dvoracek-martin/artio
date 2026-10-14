@@ -12,6 +12,7 @@ CREATE TABLE catalog_product (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
+ALTER TABLE catalog_product ADD COLUMN archived_at TIMESTAMPTZ;
 ALTER TABLE catalog_product ADD COLUMN scheduled_publish_at TIMESTAMPTZ;
 CREATE INDEX catalog_product_due_publication_idx ON catalog_product(scheduled_publish_at, id)
     WHERE scheduled_publish_at IS NOT NULL AND active = FALSE AND archived_at IS NULL;

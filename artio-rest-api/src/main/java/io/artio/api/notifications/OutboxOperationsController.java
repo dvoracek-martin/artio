@@ -1,5 +1,6 @@
 package io.artio.api.notifications;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Safe operational counts and redrive controls for durable delivery queues. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/operations/outbox")
 public class OutboxOperationsController {

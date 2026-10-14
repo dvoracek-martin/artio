@@ -1,5 +1,6 @@
 package io.artio.api.catalog;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import jakarta.servlet.http.HttpServletRequest;
 import io.artio.api.error.ApiError;
 import io.artio.api.security.ApiVersioningFilter;
@@ -15,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestControllerAdvice
 public class ApiExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);

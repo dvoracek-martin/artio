@@ -1,1 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="120" fill="#26352d"/><path d="M256 86 432 412h-73l-30-58H182l-30 58H79L256 86Zm0 143-42 78h84l-42-78Z" fill="#f3f6f2"/><circle cx="256" cy="333" r="9" fill="#b4c7b1"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Artio">
+  <defs>
+    <linearGradient id="artio" x1=".12" y1=".05" x2=".9" y2=".95">
+      <stop offset="0" stop-color="#06b6d4"/>
+      <stop offset=".48" stop-color="#3568ff"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="118" fill="#0b1728"/>
+  <path d="M255 74 454 438h-96l-34-66H187l-34 66H58L255 74Zm0 155-44 83h88l-44-83Z" fill="url(#artio)"/>
+  <path d="m252 229 44 83h-51c-14 0-25-14-18-28l25-55Z" fill="#0F172A" opacity=".96"/>
+</svg>

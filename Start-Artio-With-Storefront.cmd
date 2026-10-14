@@ -10,6 +10,7 @@ if errorlevel 1 (
 )
 
 echo Starting the Artio platform, Backoffice, and optional Storefront...
+set "ARTIO_API_SPRING_PROFILES_ACTIVE=dev"
 docker compose --profile storefront up --build -d --wait --wait-timeout 300
 if errorlevel 1 (
     echo Artio could not be started. Review the Docker Compose output above.

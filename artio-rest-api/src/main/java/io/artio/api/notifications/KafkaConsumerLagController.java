@@ -1,5 +1,6 @@
 package io.artio.api.notifications;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.util.Map;
 import java.util.Properties;
 import java.util.TreeMap;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Read-only broker-backed consumer lag diagnostics. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/operations/kafka/consumer-lag")
 public class KafkaConsumerLagController {

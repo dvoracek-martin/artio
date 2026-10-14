@@ -1,5 +1,6 @@
 package io.artio.api.catalog;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Bounded, filterable PostgreSQL-backed catalog query for Backoffice. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/catalog/products")
 public class AdminCatalogProductQueryController {

@@ -1,5 +1,6 @@
 package io.artio.api.orders;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Controller
 public class OrderStreamController {
     private final JdbcTemplate jdbc;private final SimpMessagingTemplate messaging;

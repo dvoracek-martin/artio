@@ -1,5 +1,6 @@
 package io.artio.api.catalog;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/admin/catalog/products")
 public class ProductCsvController {

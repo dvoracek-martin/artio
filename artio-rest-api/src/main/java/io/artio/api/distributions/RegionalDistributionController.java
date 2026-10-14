@@ -1,5 +1,6 @@
 package io.artio.api.distributions;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -7,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Public, read-only discovery for the regional defaults shipped with Artio Core. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @RequestMapping("/api/public/distributions")
 public class RegionalDistributionController {

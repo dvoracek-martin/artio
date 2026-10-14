@@ -1,6 +1,8 @@
 package io.artio.api.catalog;
-import java.net.URI; import java.util.List; import java.util.UUID;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;import java.net.URI; import java.util.List; import java.util.UUID;
 import org.springframework.http.ResponseEntity; import org.springframework.web.bind.annotation.*;
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController @RequestMapping("/api")
 public class CatalogMetadataController {
     private final MetadataApplicationService metadata;

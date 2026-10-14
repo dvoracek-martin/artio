@@ -1,5 +1,6 @@
 package io.artio.api.catalog;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.graphql.data.method.annotation.Argument;
@@ -11,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
 /** Read-only GraphQL projection for catalog exploration; mutations remain in the authorized REST API. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Controller
 public class ProductGraphqlController {
     private final JdbcTemplate jdbc;

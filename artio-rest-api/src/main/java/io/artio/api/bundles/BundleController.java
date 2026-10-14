@@ -1,5 +1,7 @@
 package io.artio.api.bundles;
-import io.artio.bundles.BundleQuote; import java.net.URI; import java.util.List; import java.util.UUID; import org.springframework.http.ResponseEntity; import org.springframework.web.bind.annotation.*;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;import io.artio.bundles.BundleQuote; import java.net.URI; import java.util.List; import java.util.UUID; import org.springframework.http.ResponseEntity; import org.springframework.web.bind.annotation.*;
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController @RequestMapping("/api/bundles") public class BundleController {
     private final BundleApplicationService bundles; private final BundleLocalizationApplicationService localizations; public BundleController(BundleApplicationService bundles,BundleLocalizationApplicationService localizations){this.bundles=bundles;this.localizations=localizations;}
     @GetMapping public List<BundleApplicationService.BundleView> findAll(){return bundles.findAll();}

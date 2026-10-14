@@ -1,5 +1,6 @@
 package io.artio.api.extensions.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.extensions.ExtensionRuntimePort;
 import java.util.Base64;
 import java.util.Map;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Authenticated fixed-destination read-only Grafana proxy for the observability bundle. */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
 @ConditionalOnProperty(name = "artio.runtime.role", havingValue = "extension-controller")
 @RequestMapping("/internal/v1/observability")
