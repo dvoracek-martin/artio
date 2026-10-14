@@ -1,0 +1,23 @@
+{
+  "manifestVersion": "1",
+  "id": "payments.paypal",
+  "name": "PayPal Payments",
+  "vendor": "PayPal",
+  "version": "1.0.0",
+  "description": "PayPal hosted checkout, capture, refunds, webhook verification and reconciliation through the Artio payment provider contract.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/paypal-payments@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": ["payment.process"],
+  "configuration": {
+    "clientId": {"type": "secret", "required": true, "secret": true, "label": "PayPal client ID", "description": "REST application client ID.", "format": null, "options": [], "minimumLength": 8, "maximumLength": 512, "minimum": null, "maximum": null},
+    "clientSecret": {"type": "secret", "required": true, "secret": true, "label": "PayPal client secret", "description": "REST application client secret.", "format": null, "options": [], "minimumLength": 8, "maximumLength": 512, "minimum": null, "maximum": null},
+    "webhookId": {"type": "secret", "required": true, "secret": true, "label": "PayPal webhook ID", "description": "Webhook ID configured in the PayPal developer dashboard.", "format": null, "options": [], "minimumLength": 8, "maximumLength": 128, "minimum": null, "maximum": null},
+    "sandboxMode": {"type": "boolean", "required": false, "secret": false, "label": "Use PayPal sandbox", "description": "Defaults to sandbox; disable only for a configured live application.", "format": null, "options": [], "minimumLength": null, "maximumLength": null, "minimum": null, "maximum": null}
+  },
+  "extensionPoints": ["payment.provider.v1"],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {"scope": "GLOBAL", "countries": []}
+}

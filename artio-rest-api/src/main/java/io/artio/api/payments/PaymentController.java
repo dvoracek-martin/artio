@@ -106,7 +106,7 @@ public class PaymentController {
         PaymentProvider.CheckoutResult result;
         try {
             result = extension.createCheckout(new PaymentProvider.CheckoutRequest(orderId.toString(), idempotencyKey,
-                    order.total(), order.currency(), storefrontUrl + "/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+                    order.total(), order.currency(), storefrontUrl + "/checkout?success=true&orderId=" + orderId + "&session_id={CHECKOUT_SESSION_ID}",
                     storefrontUrl + "/orders", Map.of("orderId", orderId.toString(), "expiresAt", expiresAt.toString())));
         } catch (RuntimeException failure) {
             // Provider timeouts may be ambiguous; preserve the reservation and retry with the same key.
@@ -119,6 +119,54 @@ public class PaymentController {
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) VALUES (?,?,?,?,?,'EXTENSION','PENDING',?,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",
                 UUID.randomUUID(), orderId, userId, order.total(), order.currency(), result.providerReference());
         return new CheckoutSession(result.providerReference(), result.checkoutUrl());
+    }
+
+    /** Captures a buyer-approved provider order after a verified ownership and reference check. */
+    @PostMapping("/provider/orders/{orderId}/capture")
+    @Transactional
+    public Map<String, String> captureProviderOrder(@PathVariable UUID orderId,
+            @RequestParam("token") String returnedProviderReference, JwtAuthenticationToken auth) {
+        PaymentProvider extension = provider.getIfAvailable();
+        if (extension == null || returnedProviderReference == null || returnedProviderReference.isBlank()
+                || returnedProviderReference.length() > 128) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider order is unavailable");
+        }
+        UUID userId = UUID.fromString(auth.getToken().getSubject());
+        var references = jdbc.query("SELECT provider_reference,status,amount,currency FROM payments WHERE order_id=? AND user_id=? AND method='EXTENSION'",
+                (rs, row) -> new CapturePayment(rs.getString(1), rs.getString(2), rs.getBigDecimal(3), rs.getString(4).trim()), orderId, userId);
+        if (references.isEmpty() || !java.security.MessageDigest.isEqual(
+                references.getFirst().providerReference().getBytes(StandardCharsets.UTF_8), returnedProviderReference.getBytes(StandardCharsets.UTF_8))) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider order is unavailable");
+        }
+        CapturePayment payment = references.getFirst();
+        String providerReference = payment.providerReference();
+        String orderStatus = jdbc.query("SELECT status FROM orders WHERE id=? AND user_id=? FOR UPDATE",
+                (rs, row) -> rs.getString(1), orderId, userId).stream().findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        if ("CANCELLED".equals(orderStatus)) return Map.of("status", "cancelled");
+        if ("CAPTURED".equals(payment.status()) || "PAID".equals(orderStatus)) return Map.of("status", "captured");
+        if (!"PENDING".equals(orderStatus) || !"PENDING".equals(payment.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Order is not payable");
+        }
+        PaymentProvider.PaymentResult result;
+        try { result = extension.capture(providerReference, "artio-capture-" + orderId); }
+        catch (RuntimeException failure) { throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment capture is being reconciled"); }
+        if (result == null || !providerReference.equals(result.providerReference())) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an invalid capture result");
+        }
+        if (result.state() != PaymentProvider.PaymentState.CAPTURED) return Map.of("status", "pending");
+        if (result.amount() == null || payment.amount().compareTo(result.amount()) != 0
+                || result.currency() == null || !payment.currency().equalsIgnoreCase(result.currency())) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an inconsistent capture amount");
+        }
+        jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now() WHERE provider_reference=? AND status='PENDING'", providerReference);
+        int changed = jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
+        if (changed > 0) {
+            orderUpdates.publish(orderId);
+            jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING", orderId);
+            jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)", UUID.randomUUID(), orderId, orderId);
+        }
+        return Map.of("status", "captured");
     }
 
     @PostMapping(value="/provider/webhook", consumes=MediaType.APPLICATION_JSON_VALUE)
@@ -280,4 +328,5 @@ public class PaymentController {
     public record CheckoutSession(String sessionId,String checkoutUrl){}
     private record RefundRow(String providerReference,String status,BigDecimal amount,String currency,String method){}
     private record OrderRow(BigDecimal total,String currency,String status){}
+    private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency) { }
 }
