@@ -6,6 +6,7 @@ import { FormsModule } from '@angular/forms';
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
 type Brand = { id: string; name: string; description: string; active: boolean };
 type AttributeDefinition = { id: string; code: string; label: string; type: 'TEXT' | 'NUMBER' | 'BOOLEAN'; required: boolean; active: boolean };
+type CatalogProduct = { id: string; name: string; sku: string; brandId: string | null; categoryIds: string[]; attributes: Record<string,string> };
 
 @Component({
   selector: 'artio-catalog-metadata-admin',
@@ -22,6 +23,18 @@ type AttributeDefinition = { id: string; code: string; label: string; type: 'TEX
         </form>
         <div class="row" *ngFor="let category of categories"><span class="row-main"><strong>{{category.name}}</strong><small>{{category.parentId?'Child of '+categoryName(category.parentId):'Top level'}} · {{category.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editCategory(category)">Edit</button><button class="link-button" (click)="toggleCategory(category)">{{category.active?'Deactivate':'Activate'}}</button></div>
         <p *ngIf="!categories.length" class="empty">No categories are configured.</p>
+      </div>
+
+      <div class="panel" *ngIf="products.length">
+        <div class="panel-heading"><div><p class="eyebrow">PRODUCT CLASSIFICATION</p><h2>Assign catalog data</h2></div></div>
+        <label>Product<select [(ngModel)]="selectedProductId" name="metadataProduct" (ngModelChange)="selectProduct($event)"><option value="">Choose a product</option><option *ngFor="let product of products" [value]="product.id">{{product.name}} · {{product.sku}}</option></select></label>
+        <form *ngIf="selectedProduct" (ngSubmit)="saveProductMetadata()">
+          <label>Brand<select [(ngModel)]="productDraft.brandId" name="productBrand"><option value="">No brand</option><option *ngFor="let brand of brands" [value]="brand.id" [disabled]="!brand.active">{{brand.name}}{{brand.active?'':' · inactive'}}</option></select></label>
+          <h3>Categories</h3><label class="row" *ngFor="let category of categories"><span>{{category.name}}{{category.active?'':' · inactive'}}</span><input type="checkbox" [checked]="productDraft.categoryIds.includes(category.id)" [disabled]="!category.active" (change)="toggleProductCategory(category.id,$event)"></label>
+          <h3>Attributes</h3><div *ngFor="let attribute of productAttributeDefinitions"><label>{{attribute.label}} · {{attribute.code}}<small>{{attribute.required?'Required':'Optional'}}{{attribute.active?'':' · inactive, retained read-only'}}</small><select *ngIf="attribute.type==='BOOLEAN'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [disabled]="!attribute.active"><option value="">Unset</option><option value="true">Yes</option><option value="false">No</option></select><input *ngIf="attribute.type!=='BOOLEAN'" [type]="attribute.type==='NUMBER'?'number':'text'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [required]="attribute.required&&attribute.active" [disabled]="!attribute.active"></label></div>
+          <button class="primary">Save product classification</button>
+        </form>
+        <p *ngIf="selectedProduct" class="muted">Inactive categories and definitions cannot be newly assigned. Existing inactive attribute values are preserved until the definition is reactivated.</p>
       </div>
 
       <div class="panel">
@@ -46,18 +59,33 @@ export class CatalogMetadataAdminComponent {
   categories: Category[] = [];
   brands: Brand[] = [];
   attributes: AttributeDefinition[] = [];
+  products: CatalogProduct[] = [];
+  selectedProductId = '';
+  selectedProduct: CatalogProduct | null = null;
+  productDraft = { brandId: '', categoryIds: [] as string[], attributes: {} as Record<string,string> };
   error = '';
   categoryDraft = { name: '', parentId: '' };
   brandDraft = { name: '', description: '' };
   attributeDraft = { code: '', label: '', type: 'TEXT' as AttributeDefinition['type'], required: false };
 
-  constructor() { this.load(); }
+  constructor() { this.load(); this.loadProducts(); }
+
+  get productAttributeDefinitions(): AttributeDefinition[] {
+    const retained=new Set(Object.keys(this.selectedProduct?.attributes??{}));
+    return this.attributes.filter(attribute=>attribute.active||retained.has(attribute.code));
+  }
 
   load(): void {
     this.http.get<Category[]>('/api/v1/categories').subscribe({ next: rows => this.categories = rows, error: e => this.fail(e, 'Could not load categories.') });
     this.http.get<Brand[]>('/api/v1/brands').subscribe({ next: rows => this.brands = rows, error: e => this.fail(e, 'Could not load brands.') });
     this.http.get<AttributeDefinition[]>('/api/v1/attribute-definitions').subscribe({ next: rows => this.attributes = rows, error: e => this.fail(e, 'Could not load attribute definitions.') });
   }
+
+  loadProducts(): void { this.http.get<CatalogProduct[]>('/api/v1/products').subscribe({next:rows=>this.products=rows,error:e=>this.fail(e,'Could not load products for classification.')}); }
+  selectProduct(id:string):void{this.selectedProduct=this.products.find(row=>row.id===id)??null;if(!this.selectedProduct)return;this.productDraft={brandId:this.selectedProduct.brandId??'',categoryIds:[...this.selectedProduct.categoryIds],attributes:{...this.selectedProduct.attributes}};}
+  toggleProductCategory(id:string,event:Event):void{const checked=(event.target as HTMLInputElement).checked;this.productDraft.categoryIds=checked?[...this.productDraft.categoryIds,id]:this.productDraft.categoryIds.filter(value=>value!==id);}
+  setAttribute(code:string,value:string):void{this.productDraft.attributes={...this.productDraft.attributes,[code]:value};}
+  saveProductMetadata():void{if(!this.selectedProduct)return;const attributes=Object.fromEntries(Object.entries(this.productDraft.attributes).map(([key,value])=>[key,value===''?null:value]));this.http.put(`/api/v1/products/${this.selectedProduct.id}/catalog-metadata`,{brandId:this.productDraft.brandId||null,categoryIds:this.productDraft.categoryIds,attributes}).subscribe({next:()=>{this.error='';this.loadProducts();this.selectedProduct=null;this.selectedProductId='';},error:e=>this.fail(e,'Could not save product classification.')});}
 
   categoryName(id: string): string { return this.categories.find(row => row.id === id)?.name ?? 'Unknown parent'; }
   createCategory(): void {

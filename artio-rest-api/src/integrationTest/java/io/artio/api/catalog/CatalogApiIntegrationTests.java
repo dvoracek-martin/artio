@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -197,23 +198,46 @@ class CatalogApiIntegrationTests {
                 new io.artio.api.catalog.MetadataApplicationService.BrandRequest("Artio Lighting","Internal brand",true),
                 io.artio.api.catalog.MetadataApplicationService.BrandView.class);
         assertThat(brand.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        var inactiveBrand=adminExchange("/api/v1/brands/{id}",HttpMethod.PUT,
-                new io.artio.api.catalog.MetadataApplicationService.BrandRequest("Artio Lighting","Internal brand",false),
-                io.artio.api.catalog.MetadataApplicationService.BrandView.class,brand.getBody().id());
-        assertThat(inactiveBrand.getBody()).isNotNull();
-        assertThat(inactiveBrand.getBody().active()).isFalse();
-
         var attribute=adminExchange("/api/v1/attribute-definitions",HttpMethod.POST,
                 new io.artio.api.catalog.MetadataApplicationService.AttributeRequest("MATERIAL","Material",
                         io.artio.catalog.AttributeDefinition.Type.TEXT,false),
                 io.artio.api.catalog.MetadataApplicationService.AttributeView.class);
         assertThat(attribute.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        var product=adminExchange("/api/v1/products",HttpMethod.POST,new ProductRequest("Table lamp","Brass finish","LMP-META"),ProductResponse.class);
+        var assigned=adminExchange("/api/v1/products/{id}/catalog-metadata",HttpMethod.PUT,
+                new io.artio.api.catalog.ProductApplicationService.CatalogMetadataRequest(brand.getBody().id(),
+                        Set.of(root.getBody().id(),child.getBody().id()),Map.of("MATERIAL","brass")),ProductResponse.class,product.getBody().id());
+        assertThat(assigned.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(assigned.getBody().brandId()).isEqualTo(brand.getBody().id());
+        assertThat(assigned.getBody().categoryIds()).contains(root.getBody().id(),child.getBody().id());
+        assertThat(assigned.getBody().attributes()).containsEntry("MATERIAL","brass");
+
+        var inactiveBrand=adminExchange("/api/v1/brands/{id}",HttpMethod.PUT,
+                new io.artio.api.catalog.MetadataApplicationService.BrandRequest("Artio Lighting","Internal brand",false),
+                io.artio.api.catalog.MetadataApplicationService.BrandView.class,brand.getBody().id());
+        assertThat(inactiveBrand.getBody()).isNotNull();
+        assertThat(inactiveBrand.getBody().active()).isFalse();
         var disabledAttribute=adminExchange("/api/v1/attribute-definitions/{id}",HttpMethod.PUT,
                 new io.artio.api.catalog.MetadataApplicationService.AttributeUpdateRequest("Material composition",false),
                 io.artio.api.catalog.MetadataApplicationService.AttributeView.class,attribute.getBody().id());
         assertThat(disabledAttribute.getBody()).isNotNull();
         assertThat(disabledAttribute.getBody().label()).isEqualTo("Material composition");
         assertThat(disabledAttribute.getBody().active()).isFalse();
+        var disabledCategory=adminExchange("/api/v1/categories/{id}",HttpMethod.PUT,
+                new io.artio.api.catalog.MetadataApplicationService.CategoryRequest("Table lamps",root.getBody().id(),false),
+                io.artio.api.catalog.MetadataApplicationService.CategoryView.class,child.getBody().id());
+        assertThat(disabledCategory.getBody()).isNotNull();
+        assertThat(disabledCategory.getBody().active()).isFalse();
+        var updatedWithExistingInactiveMetadata=adminExchange("/api/v1/products/{id}/catalog-metadata",HttpMethod.PUT,
+                new io.artio.api.catalog.ProductApplicationService.CatalogMetadataRequest(brand.getBody().id(),
+                        Set.of(root.getBody().id(),child.getBody().id()),Map.of("MATERIAL","brass")),ProductResponse.class,product.getBody().id());
+        assertThat(updatedWithExistingInactiveMetadata.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updatedWithExistingInactiveMetadata.getBody().categoryIds()).contains(child.getBody().id());
+        var removedInactiveValue=adminExchange("/api/v1/products/{id}/catalog-metadata",HttpMethod.PUT,
+                new io.artio.api.catalog.ProductApplicationService.CatalogMetadataRequest(brand.getBody().id(),
+                        Set.of(root.getBody().id(),child.getBody().id()),Map.of()),ApiError.class,product.getBody().id());
+        assertThat(removedInactiveValue.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test

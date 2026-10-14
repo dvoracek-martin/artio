@@ -135,18 +135,20 @@ public class ProductApplicationService {
         var categoryIds = request.categoryIds().stream().map(CategoryId::new).collect(java.util.stream.Collectors.toSet());
         for (CategoryId categoryId : categoryIds) {
             var category = categories.findById(categoryId).orElseThrow(() -> new CatalogNotFoundException("Category not found: " + categoryId.value()));
-            if (!category.isActive()) throw new IllegalArgumentException("Inactive categories cannot be assigned");
+            if (!category.isActive()&&!product.getCategoryIds().contains(categoryId)) throw new IllegalArgumentException("Inactive categories cannot be newly assigned");
         }
         product.classify(brandId, categoryIds);
         var values = request.attributes() == null ? java.util.Map.<String, String>of() : request.attributes();
         product.getAttributes().keySet().stream().filter(code -> !values.containsKey(code)).toList().forEach(code -> {
             var definition = attributeDefinitions.findAll().stream().filter(candidate -> candidate.getCode().value().equals(code)).findFirst()
                     .orElseThrow(() -> new IllegalStateException("Stored attribute definition is missing: " + code));
+            if(!definition.isActive())throw new IllegalArgumentException("Reactivate attribute before removing its stored value: "+code);
             product.setAttribute(definition, null);
         });
         values.forEach((code, value) -> {
             var definition = attributeDefinitions.findAll().stream().filter(candidate -> candidate.getCode().value().equals(code)).findFirst()
                     .orElseThrow(() -> new CatalogNotFoundException("Attribute definition not found: " + code));
+            if(!definition.isActive()&&java.util.Objects.equals(product.getAttributes().get(code),value))return;
             product.setAttribute(definition, value);
         });
         products.save(product);
