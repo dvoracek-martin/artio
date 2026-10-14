@@ -126,6 +126,31 @@ class PluginManifestValidatorTests {
                 .contains("inverted dependency version range: common.logger");
     }
 
+    @Test
+    void validatesPrimaryAndSidecarEnvironmentBindingsAgainstScalarSettings() {
+        var base = validManifest();
+        var service = new PluginManifest.BundleService("dashboard",
+                "ghcr.io/artio/dashboard@sha256:" + "b".repeat(64), 3000, "/api/health",
+                Map.of("GF_SECURITY_ADMIN_PASSWORD", "apiKey"));
+        var valid = new PluginManifest(base.manifestVersion(), base.id(), base.name(), base.vendor(), base.version(),
+                base.description(), base.minimumCoreVersion(), base.maximumCoreVersion(), base.image(),
+                base.dependencies(), base.permissions(), base.configuration(), base.extensionPoints(), base.healthPath(),
+                base.diagnosticsPath(), base.geographicAvailability(), List.of(service), Map.of());
+        assertThat(validator.validate(valid, "0.1.0", Set.of())).isEmpty();
+
+        var invalid = new PluginManifest(base.manifestVersion(), base.id(), base.name(), base.vendor(), base.version(),
+                base.description(), base.minimumCoreVersion(), base.maximumCoreVersion(), base.image(),
+                base.dependencies(), base.permissions(), base.configuration(), base.extensionPoints(), base.healthPath(),
+                base.diagnosticsPath(), base.geographicAvailability(), List.of(new PluginManifest.BundleService("dashboard",
+                service.image(), 3000, "/api/health", Map.of("admin.password", "missingField"))),
+                Map.of("unsafe-name", "missingField"));
+        assertThat(validator.validate(invalid, "0.1.0", Set.of()))
+                .contains("primary service has an invalid environment variable name",
+                        "primary service environment binding references an unknown configuration field",
+                        "bundle service dashboard has an invalid environment variable name",
+                        "bundle service dashboard environment binding references an unknown configuration field");
+    }
+
     private static PluginManifest validManifest() {
         return new PluginManifest("1", "payments.stripe", "Stripe", "Artio", "1.0.0", "Payment adapter",
                 "0.1.0", "1.0.0", "ghcr.io/artio/stripe@sha256:" + "a".repeat(64), List.of(), List.of("payment.process"),

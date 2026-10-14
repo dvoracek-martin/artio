@@ -3,6 +3,7 @@ package io.artio.api.extensions.controller;
 import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.PluginManifest;
 import java.time.Duration;
+import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -43,9 +44,9 @@ final class ExtensionRuntimeController {
 
     @PostMapping("/enable")
     ResponseEntity<Void> enable(@RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestBody ManifestRequest request) {
+            @RequestBody EnableRequest request) {
         security.authorize(authorization);
-        runtime.enable(request.manifest(), request.credentialGeneration());
+        runtime.enable(request.manifest(), request.credentialGeneration(), request.configuration());
         return ResponseEntity.noContent().build();
     }
 
@@ -69,7 +70,7 @@ final class ExtensionRuntimeController {
     ResponseEntity<Void> rotate(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody RotationRequest request) {
         security.authorize(authorization);
-        runtime.rotateCredentials(request.manifest(), request.credentialGeneration(), request.restartIfEnabled());
+        runtime.rotateCredentials(request.manifest(), request.credentialGeneration(), request.restartIfEnabled(), request.configuration());
         return ResponseEntity.noContent().build();
     }
 
@@ -89,7 +90,13 @@ final class ExtensionRuntimeController {
     }
 
     record ManifestRequest(PluginManifest manifest, int credentialGeneration) { }
-    record RotationRequest(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) { }
+    record EnableRequest(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
+        EnableRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
+    }
+    record RotationRequest(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled,
+                           Map<String, String> configuration) {
+        RotationRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
+    }
     record HealthRequest(String healthPath) { }
     record InvocationRequest(String pluginId, int credentialGeneration, String extensionPoint, String operation,
             String idempotencyKey, String configurationJson, String requestJson, long deadlineMillis) { }

@@ -142,7 +142,7 @@ public class ExtensionManagementController {
                 .body(Map.of("message", "Plugin dependencies are not ready", "errors", dependencyErrors));
         ExtensionRuntimePort runtime = runtime();
         try {
-            runtime.enable(row.manifest(), row.credentialGeneration());
+            runtime.enable(row.manifest(), row.credentialGeneration(), runtimeConfiguration(row));
         } catch (RuntimeException failure) {
             jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", pluginId);
             audit(pluginId, actor, "ENABLE_FAILED", Map.of("errorClass", failure.getClass().getSimpleName()));
@@ -175,7 +175,7 @@ public class ExtensionManagementController {
         int generation = jdbc.queryForObject("UPDATE extension_plugins SET credential_generation=credential_generation+1,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING' RETURNING credential_generation",
                 Integer.class, pluginId);
         try {
-            runtime.rotateCredentials(row.manifest(), generation, wasEnabled);
+            runtime.rotateCredentials(row.manifest(), generation, wasEnabled, runtimeConfiguration(row));
         } catch (RuntimeException failure) {
             jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',rotation_was_enabled=false,rotation_previous_state=NULL,updated_at=now() WHERE plugin_id=? AND lifecycle_state='ROTATING'", pluginId);
             audit(pluginId, actor, "CREDENTIAL_ROTATION_FAILED", Map.of("errorClass", failure.getClass().getSimpleName(), "generation", generation));
@@ -370,6 +370,11 @@ public class ExtensionManagementController {
 
         Map<String, String> updatedSecrets = new HashMap<>(encrypted);
         validation.newSecrets().forEach((key, value) -> updatedSecrets.put(key, encryption.encrypt(value)));
+        try {
+            validateBoundConfigurationSize(row.manifest(), validation.publicValues(), validation.newSecrets(), updatedSecrets);
+        } catch (IllegalArgumentException tooLarge) {
+            return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(List.of(tooLarge.getMessage())));
+        }
         String publicJson = write(validation.publicValues());
         String secretJson = write(updatedSecrets);
         jdbc.update("UPDATE extension_plugins SET public_configuration=?::jsonb,encrypted_secrets=?::jsonb,lifecycle_state='CONFIGURED',configuration_version=configuration_version+1,updated_at=now() WHERE plugin_id=?",
@@ -429,6 +434,48 @@ public class ExtensionManagementController {
     private PluginView view(PluginRow row) {
         return new PluginView(row.manifest(), row.lifecycleState(), row.publicConfiguration(),
                 Set.copyOf(row.encryptedSecrets().keySet()), row.configurationVersion());
+    }
+
+    private Map<String, String> runtimeConfiguration(PluginRow row) {
+        Map<String, String> values = new HashMap<>();
+        Set<String> boundKeys = boundConfigurationKeys(row.manifest());
+        row.publicConfiguration().forEach((key, value) -> {
+            if (boundKeys.contains(key) && value != null) values.put(key, value instanceof String text ? text : String.valueOf(value));
+        });
+        row.encryptedSecrets().forEach((key, ciphertext) -> {
+            if (boundKeys.contains(key)) values.put(key, encryption.decrypt(ciphertext));
+        });
+        long encodedBytes = values.entrySet().stream().mapToLong(entry -> entry.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                + entry.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length).sum();
+        if (values.size() > 100 || encodedBytes > 1_048_576) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Plugin configuration is too large for its runtime");
+        }
+        return Map.copyOf(values);
+    }
+
+    private void validateBoundConfigurationSize(PluginManifest manifest, Map<String, Object> publicValues,
+            Map<String, String> newSecrets, Map<String, String> encryptedSecrets) {
+        Map<String, Object> values = new HashMap<>(publicValues);
+        values.putAll(newSecrets);
+        Set<String> boundKeys = boundConfigurationKeys(manifest);
+        encryptedSecrets.forEach((key, ciphertext) -> {
+            if (boundKeys.contains(key)) values.computeIfAbsent(key, ignored -> encryption.decrypt(ciphertext));
+        });
+        long bytes = java.util.stream.Stream.concat(manifest.configurationBindings().entrySet().stream(),
+                manifest.services().stream().flatMap(service -> service.configurationBindings().entrySet().stream()))
+                .mapToLong(binding -> {
+                    Object value = values.get(binding.getValue());
+                    return value == null ? 0 : binding.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                            + value.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                }).sum();
+        if (bytes > 900_000) throw new IllegalArgumentException("Bound runtime configuration exceeds 900 KiB");
+    }
+
+    private static Set<String> boundConfigurationKeys(PluginManifest manifest) {
+        Set<String> keys = new java.util.HashSet<>(manifest.configurationBindings().values());
+        manifest.services().forEach(service -> keys.addAll(service.configurationBindings().values()));
+        return Set.copyOf(keys);
     }
 
     private void audit(String pluginId, JwtAuthenticationToken actor, String action, Map<String, Object> details) {

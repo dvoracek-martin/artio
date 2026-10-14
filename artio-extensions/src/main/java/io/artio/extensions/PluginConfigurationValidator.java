@@ -46,6 +46,11 @@ public final class PluginConfigurationValidator {
     }
 
     private static boolean validateValue(String key, PluginManifest.ConfigField field, Object value, List<String> errors) {
+        if (value instanceof String text && text.length() > 10_000
+                || value instanceof Number number && number.toString().length() > 10_000) {
+            errors.add("configuration value is too long: " + key);
+            return false;
+        }
         switch (field.type()) {
             case "text" -> {
                 if (!(value instanceof String text)) { errors.add("configuration value must be text: " + key); return false; }

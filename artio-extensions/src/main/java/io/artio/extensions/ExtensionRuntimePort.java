@@ -3,6 +3,7 @@ package io.artio.extensions;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.Map;
 
 /** Core-owned boundary to an isolated extension process; the Docker adapter is outside this module. */
 public interface ExtensionRuntimePort {
@@ -10,6 +11,9 @@ public interface ExtensionRuntimePort {
     default void update(PluginManifest manifest) { install(manifest); }
     void enable(PluginManifest manifest);
     default void enable(PluginManifest manifest, int credentialGeneration) { enable(manifest); }
+    default void enable(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
+        enable(manifest, credentialGeneration);
+    }
     void disable(String pluginId);
     /** Remove the managed runtime for an already stopped plugin. */
     default void uninstall(String pluginId) { disable(pluginId); }
@@ -18,6 +22,10 @@ public interface ExtensionRuntimePort {
             disable(manifest.id());
             enable(manifest, credentialGeneration);
         }
+    }
+    default void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled,
+            Map<String, String> configuration) {
+        rotateCredentials(manifest, credentialGeneration, restartIfEnabled);
     }
     RuntimeHealth health(String pluginId, String healthPath);
     InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,

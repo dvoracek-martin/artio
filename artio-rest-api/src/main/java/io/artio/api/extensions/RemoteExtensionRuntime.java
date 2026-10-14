@@ -9,6 +9,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
@@ -38,7 +39,10 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     @Override public void update(PluginManifest manifest) { post("internal/v1/extensions/update", new ManifestRequest(manifest, 1), Duration.ofSeconds(150), Void.class); }
     @Override public void enable(PluginManifest manifest) { enable(manifest, 1); }
     @Override public void enable(PluginManifest manifest, int generation) {
-        post("internal/v1/extensions/enable", new ManifestRequest(manifest, generation), Duration.ofSeconds(45), Void.class);
+        enable(manifest, generation, Map.of());
+    }
+    @Override public void enable(PluginManifest manifest, int generation, Map<String, String> configuration) {
+        post("internal/v1/extensions/enable", new EnableRequest(manifest, generation, configuration), Duration.ofSeconds(45), Void.class);
     }
     @Override public void disable(String pluginId) {
         post("internal/v1/extensions/" + segment(pluginId) + "/disable", null, Duration.ofSeconds(30), Void.class);
@@ -47,7 +51,11 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
         post("internal/v1/extensions/" + segment(pluginId) + "/uninstall", null, Duration.ofSeconds(30), Void.class);
     }
     @Override public void rotateCredentials(PluginManifest manifest, int generation, boolean restartIfEnabled) {
-        post("internal/v1/extensions/rotate", new RotationRequest(manifest, generation, restartIfEnabled), Duration.ofSeconds(45), Void.class);
+        rotateCredentials(manifest, generation, restartIfEnabled, Map.of());
+    }
+    @Override public void rotateCredentials(PluginManifest manifest, int generation, boolean restartIfEnabled,
+            Map<String, String> configuration) {
+        post("internal/v1/extensions/rotate", new RotationRequest(manifest, generation, restartIfEnabled, configuration), Duration.ofSeconds(45), Void.class);
     }
     @Override public RuntimeHealth health(String pluginId, String healthPath) {
         return post("internal/v1/extensions/" + segment(pluginId) + "/health", new HealthRequest(healthPath), Duration.ofSeconds(10), RuntimeHealth.class);
@@ -109,7 +117,13 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     }
 
     private record ManifestRequest(PluginManifest manifest, int credentialGeneration) { }
-    private record RotationRequest(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) { }
+    private record EnableRequest(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
+        private EnableRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
+    }
+    private record RotationRequest(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled,
+                                   Map<String, String> configuration) {
+        private RotationRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
+    }
     private record HealthRequest(String healthPath) { }
     private record InvocationRequest(String pluginId, int credentialGeneration, String extensionPoint, String operation,
             String idempotencyKey, String configurationJson, String requestJson, long deadlineMillis) { }

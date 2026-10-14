@@ -63,6 +63,7 @@ public final class PluginManifestValidator {
         }
         if (manifest.configuration().size() > 100) errors.add("configuration schema exceeds 100 fields");
         manifest.configuration().forEach((key, field) -> validateField(key, field, errors));
+        validateConfigurationBindings(manifest.configurationBindings(), manifest.configuration(), "primary service", errors);
         validatePath(manifest.healthPath(), "healthPath", errors);
         validatePath(manifest.diagnosticsPath(), "diagnosticsPath", errors);
         if (manifest.services().size() > 8) errors.add("plugin bundle may define at most 8 sidecar services");
@@ -77,6 +78,8 @@ public final class PluginManifestValidator {
             validateImage(service.image(), "bundle service image", errors);
             if (service.port() < 1 || service.port() > 65535) errors.add("bundle service port must be between 1 and 65535");
             validatePath(service.healthPath(), "bundle service healthPath", errors);
+            validateConfigurationBindings(service.configurationBindings(), manifest.configuration(),
+                    "bundle service " + service.id(), errors);
         }
         return List.copyOf(errors);
     }
@@ -132,6 +135,23 @@ public final class PluginManifestValidator {
 
     private static boolean isSemver(String version) {
         return version != null && SEMVER.matcher(version).matches();
+    }
+
+    private static void validateConfigurationBindings(java.util.Map<String, String> bindings,
+            java.util.Map<String, PluginManifest.ConfigField> schema, String service, List<String> errors) {
+        bindings.forEach((environmentName, configurationKey) -> {
+            if (environmentName == null || !environmentName.matches("[A-Z_][A-Z0-9_]{0,127}")) {
+                errors.add(service + " has an invalid environment variable name");
+            }
+            if (configurationKey == null || !schema.containsKey(configurationKey)) {
+                errors.add(service + " environment binding references an unknown configuration field");
+            } else {
+                PluginManifest.ConfigField field = schema.get(configurationKey);
+                if (field == null || field.type() == null || "json".equals(field.type())) {
+                    errors.add(service + " environment bindings require a scalar configuration field");
+                }
+            }
+        });
     }
 
     private static void validatePath(String path, String field, List<String> errors) {

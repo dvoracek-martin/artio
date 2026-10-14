@@ -72,9 +72,14 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     @Override
     public void enable(PluginManifest manifest, int credentialGeneration) {
+        enable(manifest, credentialGeneration, Map.of());
+    }
+
+    @Override
+    public void enable(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
         if (credentialGeneration < 1) throw new IllegalArgumentException("Credential generation must be positive");
         try {
-            for (RuntimeService service : services(manifest)) startService(manifest, service, credentialGeneration);
+            for (RuntimeService service : services(manifest)) startService(manifest, service, credentialGeneration, configuration);
             for (RuntimeService service : services(manifest)) awaitReady(manifest.id(), service.id(), service.healthPath());
         } catch (RuntimeException failure) {
             disable(manifest.id());
@@ -82,13 +87,20 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
     }
 
-    private void startService(PluginManifest manifest, RuntimeService service, int credentialGeneration) {
+    private void startService(PluginManifest manifest, RuntimeService service, int credentialGeneration,
+            Map<String, String> configuration) {
         String name = serviceName(manifest.id(), service.id());
+        var environment = environment(manifest, service, credentialGeneration, configuration);
         try {
             InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
             requireManaged(current, manifest.id());
-            if (!Boolean.TRUE.equals(current.getState().getRunning())) docker.startContainerCmd(name).exec();
-            return;
+            if (Boolean.TRUE.equals(current.getState().getRunning())) return;
+            var existingEnvironment = current.getConfig() == null ? null : current.getConfig().getEnv();
+            if (existingEnvironment != null && java.util.Arrays.equals(existingEnvironment, environment.toArray(String[]::new))) {
+                docker.startContainerCmd(name).exec();
+                return;
+            }
+            docker.removeContainerCmd(current.getId()).withForce(false).exec();
         } catch (NotFoundException ignored) {
             // Create only containers owned by this runtime; no mounts, published ports or caller-supplied options.
         }
@@ -101,10 +113,40 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         var create = docker.createContainerCmd(service.image()).withName(name).withHostConfig(host)
                 .withUser("10001:10001").withExposedPorts(ExposedPort.tcp(service.port()))
                 .withLabels(Map.of("io.artio.extension", manifest.id(), "io.artio.extension.service", service.id(), "io.artio.managed", "true"));
-        if (service.primary()) create.withEnv("ARTIO_EXTENSION_TOKEN=" + credentials.derive(manifest.id(), credentialGeneration),
-                "ARTIO_EXTENSION_API_VERSION=1");
+        create.withEnv(environment);
         create.exec();
         docker.startContainerCmd(name).exec();
+    }
+
+    private java.util.List<String> environment(PluginManifest manifest, RuntimeService service,
+            int credentialGeneration, Map<String, String> configuration) {
+        return resolvedEnvironment(manifest, service.primary(), service.configurationBindings(),
+                credentialGeneration, configuration, credentials);
+    }
+
+    static java.util.List<String> resolvedEnvironment(PluginManifest manifest, boolean primary,
+            Map<String, String> bindings, int credentialGeneration, Map<String, String> configuration,
+            io.artio.api.security.ExtensionCredentialService credentials) {
+        var values = new java.util.TreeMap<String, String>();
+        if (primary) {
+            values.put("ARTIO_EXTENSION_TOKEN", credentials.derive(manifest.id(), credentialGeneration));
+            values.put("ARTIO_EXTENSION_API_VERSION", "1");
+        }
+        for (var binding : bindings.entrySet()) {
+            String value = configuration.get(binding.getValue());
+            PluginManifest.ConfigField field = manifest.configuration().get(binding.getValue());
+            if (value == null) {
+                if (field != null && field.required()) throw new IllegalStateException("Required plugin configuration is missing");
+                continue;
+            }
+            if (value.length() > 10_000) throw new IllegalArgumentException("Plugin configuration value is too large for a container environment");
+            values.put(binding.getKey(), value);
+        }
+        if (values.size() > 100) throw new IllegalArgumentException("Plugin container environment exceeds its limit");
+        long environmentBytes = values.entrySet().stream().mapToLong(entry -> entry.getKey().getBytes(StandardCharsets.UTF_8).length
+                + entry.getValue().getBytes(StandardCharsets.UTF_8).length).sum();
+        if (environmentBytes > 900_000) throw new IllegalArgumentException("Plugin container environment exceeds its size limit");
+        return values.entrySet().stream().map(entry -> entry.getKey() + "=" + entry.getValue()).toList();
     }
 
     static HostConfig restrictedHostConfig(String network) {
@@ -136,6 +178,12 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     @Override
     public void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) {
+        rotateCredentials(manifest, credentialGeneration, restartIfEnabled, Map.of());
+    }
+
+    @Override
+    public void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled,
+            Map<String, String> configuration) {
         var containers = managedContainers(manifest.id());
         for (InspectContainerResponse current : containers) requireManaged(current, manifest.id());
         for (InspectContainerResponse current : containers) {
@@ -145,7 +193,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             requireManaged(current, manifest.id());
             docker.removeContainerCmd(current.getId()).withForce(true).exec();
         }
-        if (restartIfEnabled) enable(manifest, credentialGeneration);
+        if (restartIfEnabled) enable(manifest, credentialGeneration, configuration);
     }
 
     private void removeStoppedManagedContainer(String pluginId) {
@@ -344,8 +392,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     private java.util.List<RuntimeService> services(PluginManifest manifest) {
         var result = new java.util.ArrayList<RuntimeService>();
-        result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true));
-        for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(), false));
+        result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true, manifest.configurationBindings()));
+        for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(), false, service.configurationBindings()));
         return java.util.List.copyOf(result);
     }
 
@@ -356,7 +404,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         return "artio-svc-" + primary.substring(primary.length() - 12) + "-" + serviceId;
     }
 
-    private record RuntimeService(String id, String image, int port, String healthPath, boolean primary) { }
+    private record RuntimeService(String id, String image, int port, String healthPath, boolean primary,
+                                  Map<String, String> configurationBindings) { }
 
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");

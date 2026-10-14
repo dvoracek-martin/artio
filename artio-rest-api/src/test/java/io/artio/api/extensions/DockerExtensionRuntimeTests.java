@@ -60,6 +60,31 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void resolvesOnlyDeclaredConfigurationBindingsIntoBoundedContainerEnvironment() {
+        var secretField = new io.artio.extensions.PluginManifest.ConfigField("secret", true, true,
+                "Password", "Plugin password", null, java.util.List.of(), null, null, null, null);
+        var manifest = new io.artio.extensions.PluginManifest("1", "metrics.example", "Metrics", "Artio", "1.0.0",
+                "Metrics extension", "0.1.0", "1.0.0", "ghcr.io/artio/metrics@sha256:" + "a".repeat(64),
+                java.util.List.of(), java.util.List.of(), Map.of("password", secretField), java.util.List.of(),
+                "/health", "/diagnostics");
+        var credentials = new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes");
+
+        var primary = DockerExtensionRuntime.resolvedEnvironment(manifest, true,
+                Map.of("GF_SECURITY_ADMIN_PASSWORD", "password"), 1,
+                Map.of("password", "a-private-password"), credentials);
+        var sidecar = DockerExtensionRuntime.resolvedEnvironment(manifest, false,
+                Map.of("GF_SECURITY_ADMIN_PASSWORD", "password"), 1,
+                Map.of("password", "a-private-password"), credentials);
+
+        assertThat(primary).contains("GF_SECURITY_ADMIN_PASSWORD=a-private-password",
+                "ARTIO_EXTENSION_TOKEN=" + credentials.derive(manifest.id(), 1), "ARTIO_EXTENSION_API_VERSION=1");
+        assertThat(sidecar).containsExactly("GF_SECURITY_ADMIN_PASSWORD=a-private-password");
+        assertThatThrownBy(() -> DockerExtensionRuntime.resolvedEnvironment(manifest, false,
+                Map.of("GF_SECURITY_ADMIN_PASSWORD", "password"), 1, Map.of(), credentials))
+                .isInstanceOf(IllegalStateException.class).hasMessage("Required plugin configuration is missing");
+    }
+
+    @Test
     void enablesBundleOnlyAfterEveryServicePassesItsHealthCheck() throws Exception {
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         var healthCalls = new java.util.concurrent.CopyOnWriteArrayList<String>();
