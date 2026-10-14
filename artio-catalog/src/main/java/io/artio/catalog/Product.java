@@ -19,6 +19,7 @@ public final class Product extends Aggregate<ProductId> {
     private BrandId brandId;
     private final Set<CategoryId> categoryIds = new LinkedHashSet<>();
     private final Map<String, String> attributes = new LinkedHashMap<>();
+    private ProductSeoMetadata seoMetadata;
 
     private Product(ProductId id, ProductName name, ProductDescription description, Sku sku,
                     boolean active, Instant createdAt, Instant updatedAt) {
@@ -52,6 +53,23 @@ public final class Product extends Aggregate<ProductId> {
         product.categoryIds.addAll(categoryIds);
         product.attributes.putAll(attributes);
         return product;
+    }
+
+    public static Product reconstitute(ProductId id, ProductName name, ProductDescription description, Sku sku,
+                                       boolean active, Instant createdAt, Instant updatedAt, BrandId brandId,
+                                       Set<CategoryId> categoryIds, Map<String, String> attributes, ProductSeoMetadata seoMetadata) {
+        var product = reconstitute(id, name, description, sku, active, createdAt, updatedAt, brandId, categoryIds, attributes);
+        product.seoMetadata = seoMetadata;
+        return product;
+    }
+
+    public void updateSeoMetadata(ProductSeoMetadata metadata) {
+        Objects.requireNonNull(metadata, "SEO metadata is required");
+        if (metadata.equals(seoMetadata)) return;
+        var previous = seoMetadata;
+        seoMetadata = metadata;
+        updatedAt = Instant.now();
+        recordEvent(new ProductSeoMetadataUpdated(getId(), previous, metadata));
     }
 
     public void classify(BrandId brand, Set<CategoryId> categories) {
@@ -123,4 +141,5 @@ public final class Product extends Aggregate<ProductId> {
     public BrandId getBrandId() { return brandId; }
     public Set<CategoryId> getCategoryIds() { return Set.copyOf(categoryIds); }
     public Map<String, String> getAttributes() { return Map.copyOf(attributes); }
+    public ProductSeoMetadata getSeoMetadata() { return seoMetadata; }
 }

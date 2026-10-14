@@ -67,4 +67,9 @@ public class ProductController {
             @RequestBody ProductApplicationService.CatalogMetadataRequest request) {
         return products.updateCatalogMetadata(id, request);
     }
+
+    @PutMapping("/{id}/seo")
+    public ProductResponse updateSeo(@PathVariable UUID id, @RequestBody ProductApplicationService.SeoMetadataRequest request) {
+        return products.updateSeo(id, request);
+    }
 }

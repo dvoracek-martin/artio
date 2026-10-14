@@ -8,13 +8,16 @@ import java.util.Map;
 
 public record ProductResponse(UUID id, String name, String description, String sku,
                               boolean active, Instant createdAt, Instant updatedAt,
-                              UUID brandId, Set<UUID> categoryIds, Map<String, String> attributes) implements java.io.Serializable {
+                              UUID brandId, Set<UUID> categoryIds, Map<String, String> attributes,
+                              String seoSlug, String seoTitle, String seoDescription) implements java.io.Serializable {
     public static ProductResponse from(Product product) {
         return new ProductResponse(product.getId().value(), product.getName().value(),
                 product.getDescription().value(), product.getSku().value(), product.isActive(),
                 product.getCreatedAt(), product.getUpdatedAt(),
                 product.getBrandId() == null ? null : product.getBrandId().value(),
                 product.getCategoryIds().stream().map(id -> id.value()).collect(java.util.stream.Collectors.toUnmodifiableSet()),
-                product.getAttributes());
+                product.getAttributes(), product.getSeoMetadata() == null ? null : product.getSeoMetadata().slug(),
+                product.getSeoMetadata() == null ? null : product.getSeoMetadata().title(),
+                product.getSeoMetadata() == null ? null : product.getSeoMetadata().description());
     }
 }

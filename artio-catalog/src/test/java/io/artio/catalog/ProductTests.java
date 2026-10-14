@@ -7,6 +7,25 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class ProductTests {
+    @Test void seoMetadataRequiresCanonicalSlugAndBoundsOptionalCopy() {
+        var seo = new ProductSeoMetadata("brass-desk-lamp", "Brass Desk Lamp", "A crafted brass reading light.");
+        assertThat(seo.slug()).isEqualTo("brass-desk-lamp");
+        assertThatThrownBy(() -> new ProductSeoMetadata("Brass Desk Lamp", null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ProductSeoMetadata("lamp", "x".repeat(181), null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ProductSeoMetadata("lamp", null, "x".repeat(321)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void seoMetadataChangesAreRecordedAsProductDomainEvents() {
+        var product = product();
+        var metadata = new ProductSeoMetadata("workstation", "Workstation", "A reliable computer.");
+        product.updateSeoMetadata(metadata);
+        assertThat(product.getSeoMetadata()).isEqualTo(metadata);
+        assertThat(product.getDomainEvents()).last().isEqualTo(new ProductSeoMetadataUpdated(product.getId(), null, metadata));
+    }
+
     @Test
     void createsAnActiveProductAndRecordsCreationEvent() {
         var id = new ProductId(UUID.randomUUID());

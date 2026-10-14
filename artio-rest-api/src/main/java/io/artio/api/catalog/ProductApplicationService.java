@@ -156,12 +156,23 @@ public class ProductApplicationService {
         return ProductResponse.from(product);
     }
 
+    @CacheEvict(cacheNames = "catalog-products", allEntries = true)
+    public ProductResponse updateSeo(UUID id, SeoMetadataRequest request) {
+        searchIndexLock.lockCatalogWrite();
+        var product = findProduct(id);
+        product.updateSeoMetadata(new io.artio.catalog.ProductSeoMetadata(request.slug(), request.title(), request.description()));
+        products.save(product);
+        index(product);
+        return ProductResponse.from(product);
+    }
+
     public record CatalogMetadataRequest(UUID brandId, java.util.Set<UUID> categoryIds,
                                          java.util.Map<String, String> attributes) {
         public CatalogMetadataRequest {
             categoryIds = categoryIds == null ? java.util.Set.of() : java.util.Set.copyOf(categoryIds);
         }
     }
+    public record SeoMetadataRequest(String slug, String title, String description) { }
 
     private Product findProduct(UUID id) {
         return products.findById(new ProductId(id))

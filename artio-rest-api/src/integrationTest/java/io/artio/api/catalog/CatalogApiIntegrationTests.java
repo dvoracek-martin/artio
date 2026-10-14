@@ -617,6 +617,21 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void productSeoMetadataIsAdminManagedAndReturnedByPublicCatalogReads() {
+        var product=adminExchange("/api/v1/products",HttpMethod.POST,
+                new ProductRequest("SEO test lamp","Brass lamp","SEO-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(java.util.Locale.ROOT)),ProductResponse.class);
+        String slug="brass-lamp-"+UUID.randomUUID().toString().substring(0,8);
+        var updated=adminExchange("/api/v1/products/{id}/seo",HttpMethod.PUT,
+                new ProductApplicationService.SeoMetadataRequest(slug,"Brass lamp | Artio","A durable brass desk lamp."),ProductResponse.class,product.getBody().id());
+        assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updated.getBody().seoSlug()).isEqualTo(slug);
+        assertThat(updated.getBody().seoTitle()).isEqualTo("Brass lamp | Artio");
+        var publicRead=http.getForEntity("/api/v1/products/{id}",ProductResponse.class,product.getBody().id());
+        assertThat(publicRead.getBody()).isNotNull();
+        assertThat(publicRead.getBody().seoDescription()).isEqualTo("A durable brass desk lamp.");
+    }
+
+    @Test
     void rejectedCheckoutCompensationCancelsOrderAndReleasesStockAtomically() {
         UUID orderId = UUID.randomUUID();
         UUID sellableId = UUID.randomUUID();
