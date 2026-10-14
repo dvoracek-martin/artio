@@ -13,6 +13,10 @@ public interface PaymentProvider {
     PaymentResult cancel(String providerReference, String idempotencyKey);
     PaymentResult refund(RefundRequest request);
     WebhookResult verifyWebhook(String signature, byte[] rawBody);
+    /** Provider-specific signed headers, restricted by Core to its allowlisted webhook header set. */
+    default WebhookResult verifyWebhook(Map<String, String> headers, byte[] rawBody) {
+        return verifyWebhook(headers == null ? null : headers.get("provider-signature"), rawBody);
+    }
     Optional<PaymentResult> reconcile(String providerReference, String idempotencyKey);
 
     record PaymentCapabilities(boolean hostedCheckout, boolean authorization, boolean capture,

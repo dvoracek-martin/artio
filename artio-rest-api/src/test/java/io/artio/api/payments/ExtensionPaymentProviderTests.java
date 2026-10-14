@@ -12,6 +12,7 @@ import io.artio.extensions.commerce.PaymentProvider.CheckoutRequest;
 import java.math.BigDecimal;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Base64;
 import org.junit.jupiter.api.Test;
 
 class ExtensionPaymentProviderTests {
@@ -44,5 +45,23 @@ class ExtensionPaymentProviderTests {
         assertThat(capabilities.hostedCheckout()).isTrue();
         assertThat(capabilities.refunds()).isTrue();
         assertThat(capabilities.maximumCheckoutExpiry()).contains(java.time.Duration.ofSeconds(1800));
+    }
+
+    @Test
+    void forwardsOnlyProviderHeaderBagAndOriginalWebhookBody() throws Exception {
+        byte[] body = "{\"id\":\"evt-1\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        when(invoker.invoke(eq("payments.example"), eq("payment.provider.v1"), eq("verifyWebhook"),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new ObjectMapper().readTree("{\"providerEventId\":\"evt-1\",\"eventType\":\"test\",\"providerReference\":\"ref-1\",\"state\":\"PENDING\",\"verified\":true}"));
+
+        var result = provider.verifyWebhook(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1"), body);
+
+        assertThat(result.verified()).isTrue();
+        org.mockito.ArgumentCaptor<Object> payload = org.mockito.ArgumentCaptor.forClass(Object.class);
+        verify(invoker).invoke(eq("payments.example"), eq("payment.provider.v1"), eq("verifyWebhook"),
+                org.mockito.ArgumentMatchers.anyString(), payload.capture());
+        @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) payload.getValue();
+        assertThat(map.get("headers")).isEqualTo(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1"));
+        assertThat(map.get("rawBodyBase64")).isEqualTo(Base64.getEncoder().encodeToString(body));
     }
 }

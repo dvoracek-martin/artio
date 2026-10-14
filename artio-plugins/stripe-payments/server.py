@@ -166,7 +166,8 @@ def operation(configuration, name, payload, envelope):
             body = base64.b64decode(payload.get("rawBodyBase64", ""), validate=True)
         except (ValueError, TypeError):
             raise ProviderError(400, "Invalid webhook payload")
-        signature = payload.get("signature")
+        headers = payload.get("headers") or {}
+        signature = headers.get("stripe-signature") or headers.get("provider-signature") or payload.get("signature")
         if not verify_stripe_signature(configuration.get("webhookSecret", ""), signature, body):
             raise ProviderError(400, "Invalid webhook signature")
         try:

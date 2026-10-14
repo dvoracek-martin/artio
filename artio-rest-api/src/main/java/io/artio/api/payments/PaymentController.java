@@ -124,12 +124,18 @@ public class PaymentController {
     @PostMapping(value="/provider/webhook", consumes=MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.OK)
     @Transactional
-    public Map<String,String> providerWebhook(@RequestHeader(value="Provider-Signature", required=false) String signature,
+    public Map<String,String> providerWebhook(@RequestHeader org.springframework.http.HttpHeaders requestHeaders,
             @RequestBody byte[] body) {
         PaymentProvider extension = provider.getIfAvailable();
         if (extension == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider webhook is unavailable");
         PaymentProvider.WebhookResult event;
-        try { event = extension.verifyWebhook(signature, body); }
+        Map<String, String> signedHeaders = new java.util.HashMap<>();
+        for (String name : java.util.List.of("provider-signature", "stripe-signature", "paypal-transmission-id",
+                "paypal-transmission-time", "paypal-transmission-sig", "paypal-cert-url", "paypal-auth-algo")) {
+            String value = requestHeaders.getFirst(name);
+            if (value != null && value.length() <= 4096) signedHeaders.put(name, value);
+        }
+        try { event = extension.verifyWebhook(Map.copyOf(signedHeaders), body); }
         catch (RuntimeException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid webhook signature"); }
         if (event == null || !event.verified() || event.providerEventId() == null || event.providerEventId().isBlank()
                 || event.eventType() == null || event.eventType().isBlank()) {

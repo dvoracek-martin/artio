@@ -44,7 +44,7 @@ class StripeExtensionTests(unittest.TestCase):
         self.assertFalse(server.verify_stripe_signature(secret, header, body, now=int(timestamp) + 400))
 
         result = server.operation({"webhookSecret": secret}, "verifyWebhook", {
-            "signature": header, "rawBodyBase64": base64.b64encode(body).decode(),
+            "headers": {"stripe-signature": header}, "rawBodyBase64": base64.b64encode(body).decode(),
         }, {})
         self.assertEqual({"providerEventId": "evt_123", "eventType": "checkout.session.completed",
                           "providerReference": "cs_123", "state": "CAPTURED", "verified": True}, result)

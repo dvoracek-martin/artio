@@ -64,7 +64,11 @@ public class ExtensionPaymentProvider implements PaymentProvider {
     }
 
     @Override public WebhookResult verifyWebhook(String signature, byte[] rawBody) {
-        return read(invoke("verifyWebhook", Map.of("signature", signature == null ? "" : signature,
+        return verifyWebhook(Map.of("provider-signature", signature == null ? "" : signature), rawBody);
+    }
+
+    @Override public WebhookResult verifyWebhook(Map<String, String> headers, byte[] rawBody) {
+        return read(invoke("verifyWebhook", Map.of("headers", headers == null ? Map.of() : headers,
                 "rawBodyBase64", Base64.getEncoder().encodeToString(rawBody)), UUID.randomUUID().toString()), WebhookResult.class);
     }
 
