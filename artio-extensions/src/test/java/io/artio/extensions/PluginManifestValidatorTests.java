@@ -17,6 +17,24 @@ class PluginManifestValidatorTests {
     }
 
     @Test
+    void validatesPersistentPathsOnPrimaryPluginImage() {
+        var manifest = validManifest();
+        var persistent = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(), manifest.extensionPoints(),
+                manifest.healthPath(), manifest.diagnosticsPath(), manifest.geographicAvailability(), List.of(),
+                List.of("/data/state"), Map.of());
+        assertThat(validator.validate(persistent, "0.1.0", Set.of())).isEmpty();
+        var invalid = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),
+                manifest.version(), manifest.description(), manifest.minimumCoreVersion(), manifest.maximumCoreVersion(),
+                manifest.image(), manifest.dependencies(), manifest.permissions(), manifest.configuration(), manifest.extensionPoints(),
+                manifest.healthPath(), manifest.diagnosticsPath(), manifest.geographicAvailability(), List.of(),
+                List.of("/etc/secrets"), Map.of());
+        assertThat(validator.validate(invalid, "0.1.0", Set.of()))
+                .contains("primary plugin persistent path must be under /data, /var/lib, or equal /prometheus");
+    }
+
+    @Test
     void acceptsVersionedCatalogSearchExtensionPoint() {
         var manifest = validManifest();
         var search = new PluginManifest(manifest.manifestVersion(), manifest.id(), manifest.name(), manifest.vendor(),

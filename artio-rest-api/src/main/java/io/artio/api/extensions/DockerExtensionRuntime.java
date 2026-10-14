@@ -524,7 +524,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private java.util.List<RuntimeService> services(PluginManifest manifest) {
         var result = new java.util.ArrayList<RuntimeService>();
         result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true,
-                manifest.configurationBindings(), List.of(), List.of(), 0));
+                manifest.configurationBindings(), manifest.persistentPaths(), List.of(), 0));
         for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(),
                 service.healthPath(), false, service.configurationBindings(), service.persistentPaths(), service.internalPorts(), 0));
         return java.util.List.copyOf(result);

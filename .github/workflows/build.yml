@@ -24,6 +24,14 @@ jobs:
             artio-storefront/package-lock.json
             artio-backoffice/package-lock.json
       - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test Docker plugin source packages
+        run: |
+          for plugin in stripe-payments paypal-payments brevo-email observability swiss-post; do
+            python -m unittest discover -s "artio-plugins/$plugin" -p 'test_*.py' -v
+          done
       - name: Require Docker for PostgreSQL integration tests
         run: docker info
       - name: Build, run tests and generate coverage
@@ -34,17 +42,5 @@ jobs:
         run: docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-storefront --build-arg APP_NAME=storefront -t artio/storefront:${GITHUB_SHA} .
       - name: Build backoffice container
         run: docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-backoffice --build-arg APP_NAME=backoffice -t artio/backoffice:${GITHUB_SHA} .
-      - name: Publish images on main when registry credentials exist
-        if: github.ref == 'refs/heads/main'
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then
-            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-            docker push artio/api:${GITHUB_SHA}
-            docker push artio/storefront:${GITHUB_SHA}
-            docker push artio/backoffice:${GITHUB_SHA}
-          else
-            echo "Registry credentials are not configured; image publishing is skipped."
-          fi
+      - name: Build Swiss Post plugin container
+        run: docker build -f artio-plugins/swiss-post/Dockerfile -t artio/plugin-swiss-post:${GITHUB_SHA} artio-plugins/swiss-post

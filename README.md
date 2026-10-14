@@ -39,6 +39,8 @@ Grafana, Prometheus, and Jaeger are bound to localhost on ports 3000, 9090, and 
 
 Set Stripe test credentials and forward Stripe's `checkout.session.completed` and `checkout.session.expired` events to `POST /api/v1/payments/stripe/webhook` to exercise payment confirmation and reservation release. SMTP is optional; set `ARTIO_SMTP_HOST`, `ARTIO_SMTP_PORT`, credentials, and TLS options to send order email. In-app notifications are persisted even without SMTP.
 
+The Swiss Post shipping plugin source is under `artio-plugins/swiss-post`. It supports domestic service quotes using merchant-configured CHF rates and label generation through the official Barcode API. Swiss Post client registration, the merchant franking licence and API entitlement are required; the plugin image has not been published and its digest is intentionally a template. See its [setup and capability notes](artio-plugins/swiss-post/README.md).
+
 ## Build and verification
 
 The Gradle wrapper builds Java modules and both locked Angular applications:
@@ -50,7 +52,7 @@ The Gradle wrapper builds Java modules and both locked Angular applications:
 
 The API, domain unit tests, JaCoCo reports, and production Angular builds run as part of `build`. PostgreSQL integration tests use Testcontainers; a working Docker daemon is required for those tests. Frontend applications can also be built separately with `npm ci && npm run build` in `artio-storefront` and `artio-backoffice`.
 
-Gradle plugins and Java dependencies resolve from Maven Central. npm dependencies are pinned through each Angular application's checked-in lockfile. GitHub Actions builds and verifies all modules, then builds the API and frontend container images. Publishing on `main` is enabled when `DOCKER_USERNAME` and `DOCKER_PASSWORD` repository secrets are configured.
+Gradle plugins and Java dependencies resolve from Maven Central. npm dependencies are pinned through each Angular application's checked-in lockfile. GitHub Actions builds and verifies all modules and plugin source tests, then builds the API, frontends and Swiss Post plugin container locally in the runner. The workflow does not publish images or source artifacts.
 
 ## Modules
 

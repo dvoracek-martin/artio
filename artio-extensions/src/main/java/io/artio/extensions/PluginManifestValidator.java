@@ -66,6 +66,7 @@ public final class PluginManifestValidator {
         validateConfigurationBindings(manifest.configurationBindings(), manifest.configuration(), "primary service", errors);
         validatePath(manifest.healthPath(), "healthPath", errors);
         validatePath(manifest.diagnosticsPath(), "diagnosticsPath", errors);
+        validatePersistentPaths(manifest.persistentPaths(), "primary plugin", errors);
         if (manifest.services().size() > 8) errors.add("plugin bundle may define at most 8 sidecar services");
         Set<String> serviceIds = new HashSet<>();
         for (var service : manifest.services()) {
@@ -80,20 +81,7 @@ public final class PluginManifestValidator {
             validatePath(service.healthPath(), "bundle service healthPath", errors);
             validateConfigurationBindings(service.configurationBindings(), manifest.configuration(),
                     "bundle service " + service.id(), errors);
-            if (service.persistentPaths().size() > 4) errors.add("bundle service may declare at most 4 persistent paths");
-            Set<String> persistentPaths = new HashSet<>();
-            for (String path : service.persistentPaths()) {
-                if (path == null || !(path.matches("/data(?:/[A-Za-z0-9._-]+)+")
-                        || path.matches("/var/lib(?:/[A-Za-z0-9._-]+)+") || path.equals("/prometheus"))
-                        || path.contains("..")) errors.add("bundle persistent path must be under /data, /var/lib, or equal /prometheus");
-                else {
-                    if (!persistentPaths.add(path)) errors.add("bundle service has a duplicate persistent path");
-                    if (persistentPaths.stream().anyMatch(existing -> !existing.equals(path)
-                            && (existing.startsWith(path + "/") || path.startsWith(existing + "/")))) {
-                        errors.add("bundle persistent paths must not overlap");
-                    }
-                }
-            }
+            validatePersistentPaths(service.persistentPaths(), "bundle service " + service.id(), errors);
             if (service.internalPorts().size() > 8) errors.add("bundle service may declare at most 8 additional private ports");
             Set<Integer> ports = new HashSet<>();
             for (Integer additionalPort : service.internalPorts()) {
@@ -121,6 +109,26 @@ public final class PluginManifestValidator {
         }
         if (hasServiceDependencyCycle(manifest.services())) errors.add("bundle service startup dependencies contain a cycle");
         return List.copyOf(errors);
+    }
+
+    private static void validatePersistentPaths(List<String> paths, String owner, List<String> errors) {
+        if (paths.size() > 4) errors.add(owner + " may declare at most 4 persistent paths");
+        Set<String> unique = new HashSet<>();
+        for (String path : paths) {
+            if (path == null || !(path.matches("/data(?:/[A-Za-z0-9._-]+)+")
+                    || path.matches("/var/lib(?:/[A-Za-z0-9._-]+)+") || path.equals("/prometheus"))
+                    || path.contains("..")) errors.add(owner.startsWith("bundle service")
+                            ? "bundle persistent path must be under /data, /var/lib, or equal /prometheus"
+                            : "primary plugin persistent path must be under /data, /var/lib, or equal /prometheus");
+            else {
+                if (!unique.add(path)) errors.add(owner + " has a duplicate persistent path");
+                if (unique.stream().anyMatch(existing -> !existing.equals(path)
+                        && (existing.startsWith(path + "/") || path.startsWith(existing + "/")))) {
+                    errors.add(owner.startsWith("bundle service")
+                            ? "bundle persistent paths must not overlap" : "primary plugin persistent paths must not overlap");
+                }
+            }
+        }
     }
 
     private static boolean hasServiceDependencyCycle(List<PluginManifest.BundleService> services) {

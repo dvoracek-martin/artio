@@ -23,6 +23,7 @@ public record PluginManifest(
         String diagnosticsPath,
         GeographicAvailability geographicAvailability,
         List<BundleService> services,
+        List<String> persistentPaths,
         Map<String, String> configurationBindings) {
 
     public PluginManifest {
@@ -40,7 +41,20 @@ public record PluginManifest(
         configuration = immutableNullableMap(configuration);
         extensionPoints = immutableNullableList(extensionPoints);
         services = immutableNullableList(services);
+        persistentPaths = immutableNullableList(persistentPaths);
         configurationBindings = immutableNullableMap(configurationBindings);
+    }
+
+    /** Source-compatible constructor for manifests created before primary-container persistent paths. */
+    public PluginManifest(String manifestVersion, String id, String name, String vendor, String version,
+            String description, String minimumCoreVersion, String maximumCoreVersion, String image,
+            List<Dependency> dependencies, List<String> permissions, Map<String, ConfigField> configuration,
+            List<String> extensionPoints, String healthPath, String diagnosticsPath,
+            GeographicAvailability geographicAvailability, List<BundleService> services,
+            Map<String, String> configurationBindings) {
+        this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
+                image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
+                geographicAvailability, services, List.of(), configurationBindings);
     }
 
     private static <T> List<T> immutableNullableList(List<T> values) {
@@ -59,7 +73,7 @@ public record PluginManifest(
             GeographicAvailability geographicAvailability, List<BundleService> services) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                geographicAvailability, services, Map.of());
+                geographicAvailability, services, List.of(), Map.of());
     }
 
     /** Source-compatible constructor for manifests created before geographic metadata was added. */
@@ -69,7 +83,7 @@ public record PluginManifest(
             List<String> extensionPoints, String healthPath, String diagnosticsPath) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                GeographicAvailability.global(), List.of(), Map.of());
+                GeographicAvailability.global(), List.of(), List.of(), Map.of());
     }
 
     /** Source-compatible constructor for v1 manifests with geographic metadata. */
@@ -80,7 +94,7 @@ public record PluginManifest(
             GeographicAvailability geographicAvailability) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                geographicAvailability, List.of(), Map.of());
+                geographicAvailability, List.of(), List.of(), Map.of());
     }
 
     public record Dependency(String id, String minimumVersion, String maximumVersion) { }
