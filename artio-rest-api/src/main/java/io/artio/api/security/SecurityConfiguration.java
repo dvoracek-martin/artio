@@ -16,6 +16,8 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -84,7 +86,8 @@ public class SecurityConfiguration {
                 .requestMatchers("/graphql").permitAll()
                 .requestMatchers("/ws/**").permitAll()
                 .anyRequest().authenticated())
-            .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(converter)))
+            .oauth2ResourceServer(oauth -> oauth.bearerTokenResolver(observabilitySessionBearerTokenResolver())
+                    .jwt(jwt -> jwt.jwtAuthenticationConverter(converter)))
             .exceptionHandling(exceptions -> exceptions
                 .authenticationEntryPoint((request, response, exception) ->
                     ApiErrorWriter.write(objectMapper, request, response, org.springframework.http.HttpStatus.UNAUTHORIZED,
@@ -101,6 +104,22 @@ public class SecurityConfiguration {
     @Bean
     ApiVersioningFilter apiVersioningFilter() {
         return new ApiVersioningFilter();
+    }
+
+    @Bean
+    BearerTokenResolver observabilitySessionBearerTokenResolver() {
+        var standard = new DefaultBearerTokenResolver();
+        return request -> {
+            String bearer = standard.resolve(request);
+            if (bearer != null) return bearer;
+            String path = request.getRequestURI();
+            if (path == null || !(path.startsWith("/api/v1/admin/extensions/observability.artio/ui/")
+                    || path.equals("/api/v1/admin/extensions/observability.artio/ui"))) return null;
+            var cookies = request.getCookies();
+            if (cookies == null) return null;
+            for (var cookie : cookies) if ("artio_observability_session".equals(cookie.getName())) return cookie.getValue();
+            return null;
+        };
     }
 
     @Bean

@@ -25,6 +25,13 @@ All routes are under `/internal/v1/extensions`, accept JSON, and require the bea
 | `POST /{pluginId}/health` | Return bounded health state and a coarse status code. |
 | `POST /invoke` | Send the versioned, size/deadline-bounded plugin invocation and return its response. |
 
+The isolated controller also exposes these fixed observability operations; both require the same controller bearer:
+
+| Method and route | Operation |
+|---|---|
+| `POST /internal/v1/telemetry/{pluginId}/{signal}` | Forward only bounded protobuf metrics/traces for `observability.artio` to the managed collector on its declared private port. |
+| `POST /internal/v1/observability/grafana` | Proxy a read-only GET/HEAD request to the managed Grafana service. Plugin identity, method, relative path and query are validated; no caller-selected host, port, request headers, cookies or Artio credentials are forwarded. The response body is limited to 8 MiB. |
+
 There is no arbitrary command, shell, mount, host-port, network, or raw Docker API route. The controller exposes neither GraphQL nor OpenAPI, and only the management health/info actuator endpoints are enabled. The Core validates registered manifests, lifecycle transitions, user authorization, configuration schemas, and invocation contracts before making a controller call. The controller independently enforces digest pinning, deterministic container names, Artio ownership labels, resource policy, and stopped-state rules before Docker operations.
 
 ## Error contract

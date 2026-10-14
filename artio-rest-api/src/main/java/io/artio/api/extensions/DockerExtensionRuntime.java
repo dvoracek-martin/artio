@@ -361,6 +361,50 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     @Override
+    public ExtensionRuntimePort.UiProxyResponse proxyObservability(String pluginId, String method, String path, String query) {
+        if (!"observability.artio".equals(pluginId) || !("GET".equals(method) || "HEAD".equals(method))) {
+            throw new IllegalArgumentException("Unsupported observability proxy request");
+        }
+        if (path == null || path.length() > 1024 || !path.matches("/[A-Za-z0-9_./-]*") || path.contains("..")
+                || query != null && query.length() > 4096) {
+            throw new IllegalArgumentException("Invalid observability proxy path");
+        }
+        try {
+            InspectContainerResponse container = docker.inspectContainerCmd(serviceName(pluginId, "grafana")).exec();
+            requireManaged(container, pluginId);
+            var labels = container.getConfig().getLabels();
+            if (!"grafana".equals(labels.get("io.artio.extension.service"))
+                    || !Boolean.TRUE.equals(container.getState().getRunning())) {
+                return new ExtensionRuntimePort.UiProxyResponse(503, "application/json", Map.of(), new byte[0]);
+            }
+            URI target = endpoint(container, "/plugins/observability" + (path.equals("/") ? "/" : path), 3000);
+            if (target == null) return new ExtensionRuntimePort.UiProxyResponse(503, "application/json", Map.of(), new byte[0]);
+            if (query != null && !query.isBlank()) target = URI.create(target.toString() + "?" + query);
+            var builder = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(10))
+                    .header("Accept", "text/html,application/json,*/*");
+            HttpRequest request = "HEAD".equals(method)
+                    ? builder.method("HEAD", HttpRequest.BodyPublishers.noBody()).build() : builder.GET().build();
+            HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] body;
+            try (InputStream input = response.body()) { body = input.readNBytes(8_388_609); }
+            if (body.length > 8_388_608) return new ExtensionRuntimePort.UiProxyResponse(502, "application/json", Map.of(), new byte[0]);
+            var headers = new java.util.LinkedHashMap<String, String>();
+            response.headers().firstValue("Cache-Control").ifPresent(value -> headers.put("Cache-Control", value));
+            response.headers().firstValue("ETag").ifPresent(value -> headers.put("ETag", value));
+            response.headers().firstValue("Last-Modified").ifPresent(value -> headers.put("Last-Modified", value));
+            return new ExtensionRuntimePort.UiProxyResponse(response.statusCode(),
+                    response.headers().firstValue("Content-Type").orElse("application/octet-stream"), headers, body);
+        } catch (NotFoundException missing) {
+            return new ExtensionRuntimePort.UiProxyResponse(503, "application/json", Map.of(), new byte[0]);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new ExtensionRuntimePort.UiProxyResponse(503, "application/json", Map.of(), new byte[0]);
+        } catch (java.io.IOException failure) {
+            return new ExtensionRuntimePort.UiProxyResponse(503, "application/json", Map.of(), new byte[0]);
+        }
+    }
+
+    @Override
     public ExtensionRuntimePort.InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                                    String configurationJson, String requestJson, Duration deadline) {
         return invoke(pluginId, 1, extensionPoint, operation, idempotencyKey, configurationJson, requestJson, deadline);

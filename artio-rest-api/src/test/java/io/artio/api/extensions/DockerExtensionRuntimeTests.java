@@ -42,6 +42,15 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void observabilityProxyRejectsOtherPluginsMethodsAndTraversalBeforeDockerAccess() {
+        var runtime = new DockerExtensionRuntime(null, "artio-extensions", 8080,
+                new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
+        assertThatIllegalArgumentException().isThrownBy(() -> runtime.proxyObservability("payments.stripe", "GET", "/", null));
+        assertThatIllegalArgumentException().isThrownBy(() -> runtime.proxyObservability("observability.artio", "POST", "/", null));
+        assertThatIllegalArgumentException().isThrownBy(() -> runtime.proxyObservability("observability.artio", "GET", "/../admin", null));
+    }
+
+    @Test
     void invocationPayloadMustFitWithinOneMiB() {
         io.artio.extensions.ExtensionRuntimePort.validateInvocation("payment.provider.v1", "authorize",
                 "00000000-0000-0000-0000-000000000001", "{}", "small", Duration.ofSeconds(1));

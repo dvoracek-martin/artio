@@ -32,6 +32,9 @@ public interface ExtensionRuntimePort {
     default TelemetryResponse forwardOtlp(String pluginId, String signal, byte[] payload) {
         throw new ExtensionUnavailableException("OTLP receiver is unavailable");
     }
+    default UiProxyResponse proxyObservability(String pluginId, String method, String path, String query) {
+        throw new ExtensionUnavailableException("Observability UI is unavailable");
+    }
     InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                             String configurationJson, String requestJson, Duration deadline);
     default InvocationResult invoke(String pluginId, int credentialGeneration, String extensionPoint, String operation,
@@ -68,6 +71,13 @@ public interface ExtensionRuntimePort {
     }
     record TelemetryResponse(int statusCode, String contentType, byte[] body) {
         public TelemetryResponse { body = body == null ? new byte[0] : body.clone(); }
+        @Override public byte[] body() { return body.clone(); }
+    }
+    record UiProxyResponse(int statusCode, String contentType, Map<String, String> headers, byte[] body) {
+        public UiProxyResponse {
+            headers = headers == null ? Map.of() : Map.copyOf(headers);
+            body = body == null ? new byte[0] : body.clone();
+        }
         @Override public byte[] body() { return body.clone(); }
     }
     record InvocationResult(int statusCode, String responseJson) { }

@@ -40,6 +40,9 @@ class ExtensionControllerApplicationTests {
         var telemetry = http.postForEntity("/internal/v1/telemetry/observability.artio/metrics",
                 new HttpEntity<>(new byte[] {1}, headers), String.class);
         assertThat(telemetry.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        var grafana = http.postForEntity("/internal/v1/observability/grafana",
+                new HttpEntity<>("{\"method\":\"GET\",\"path\":\"/\",\"query\":null}", jsonHeaders()), String.class);
+        assertThat(grafana.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -49,4 +52,10 @@ class ExtensionControllerApplicationTests {
     }
 
     private record ManifestHealthRequest(Object manifest) { }
+
+    private static HttpHeaders jsonHeaders() {
+        var headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
+    }
 }
