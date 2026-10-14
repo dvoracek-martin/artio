@@ -17,6 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 @ConditionalOnProperty(prefix = "artio.events.kafka", name = "consumer-enabled", havingValue = "true", matchIfMissing = true)
 public class OrderCreatedNotificationConsumer {
     private static final String CONSUMER_NAME = "order-notification-v1";
+    private static final java.util.Set<String> SUPPORTED_ORDER_EVENTS = java.util.Set.of(
+            "ORDER_CREATED", "ORDER_CANCELLED", "ORDER_PAID", "ORDER_SHIPPED", "ORDER_DELIVERED",
+            "ORDER_RETURN_REQUESTED", "ORDER_RETURN_COMPLETED", "PAYMENT_REFUNDED", "SHIPMENT_TRACKING_UPDATED");
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -35,21 +38,29 @@ public class OrderCreatedNotificationConsumer {
             JsonNode event = mapper.readTree(record.value());
             UUID eventId = UUID.fromString(event.path("eventId").asText());
             UUID orderId = UUID.fromString(event.path("orderId").asText());
-            UUID userId = UUID.fromString(event.path("userId").asText());
             int schemaVersion = event.path("schemaVersion").asInt(-1);
             String eventType = event.path("type").asText();
-            String locale = event.path("locale").asText();
             java.time.Instant.parse(event.path("occurredAt").asText());
 
             if (!event.isObject() || !event.path("schemaVersion").isIntegralNumber() || schemaVersion != 1
-                    || !event.path("type").isTextual() || !event.path("locale").isTextual()
-                    || !event.path("occurredAt").isTextual() || !"ORDER_CREATED".equals(eventType)
+                    || !event.path("type").isTextual() || !SUPPORTED_ORDER_EVENTS.contains(eventType)
+                    || !event.path("occurredAt").isTextual()
                     || !eventId.toString().equals(requiredHeader(record, "event-id"))
                     || !eventType.equals(requiredHeader(record, "event-type"))
                     || !"1".equals(requiredHeader(record, "schema-version"))
-                    || !locale.matches("[a-z]{2}(-[A-Z]{2})?")
                     || !orderId.toString().equals(record.key())) {
                 throw new IllegalArgumentException("Order event envelope is invalid or unsupported");
+            }
+
+            UUID userId = null;
+            String locale = null;
+            if ("ORDER_CREATED".equals(eventType)) {
+                userId = UUID.fromString(event.path("userId").asText());
+                locale = event.path("locale").asText();
+                if (!event.path("userId").isTextual() || !event.path("locale").isTextual()
+                        || !locale.matches("[a-z]{2}(-[A-Z]{2})?")) {
+                    throw new IllegalArgumentException("Order-created notification data is invalid");
+                }
             }
 
             int received = jdbc.update("""
@@ -57,6 +68,10 @@ public class OrderCreatedNotificationConsumer {
                     VALUES (?,?,?,?,?) ON CONFLICT (consumer_name,event_id) DO NOTHING
                     """, CONSUMER_NAME, eventId, eventType, schemaVersion, orderId.toString());
             if (received == 0) return;
+
+            // This consumer group only owns order-confirmation email. Other known business events are
+            // durably deduplicated here and remain available on the topic to their own consumer groups.
+            if (!"ORDER_CREATED".equals(eventType)) return;
 
             Boolean canEmail = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND active=true AND email NOT LIKE '%@privacy.artio.invalid')",
                     Boolean.class, userId);

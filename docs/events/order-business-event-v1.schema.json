@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:artio:events:order-business:1",
+  "title": "Artio order business event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "type", "occurredAt", "orderId"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "type": {
+      "enum": [
+        "ORDER_CANCELLED",
+        "ORDER_PAID",
+        "ORDER_SHIPPED",
+        "ORDER_DELIVERED",
+        "ORDER_RETURN_REQUESTED",
+        "ORDER_RETURN_COMPLETED",
+        "PAYMENT_REFUNDED",
+        "SHIPMENT_TRACKING_UPDATED"
+      ]
+    },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "orderId": { "type": "string", "format": "uuid" }
+  }
+}

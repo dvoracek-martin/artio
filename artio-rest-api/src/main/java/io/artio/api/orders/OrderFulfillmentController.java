@@ -55,6 +55,7 @@ public class OrderFulfillmentController {
     }
 
     @PostMapping("/{id}/deliver")
+    @Transactional
     public FulfillmentView deliver(@PathVariable UUID id){
         if(!"SHIPPED".equals(status(id)))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only shipped orders can be delivered");
         jdbc.update("UPDATE orders SET status='DELIVERED' WHERE id=?",id);
