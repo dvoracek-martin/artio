@@ -89,6 +89,13 @@ public class ExtensionManagementController {
                 .toList();
     }
 
+    @GetMapping("/catalog")
+    @Transactional(readOnly = true)
+    public List<DistributionPluginProvisioningService.CatalogItem> catalog(
+            @RequestParam(required = false) String country) {
+        return provisioning.catalog(country);
+    }
+
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody PluginManifest manifest, JwtAuthenticationToken actor) {
         if (exists(manifest.id())) return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin is already registered"));
@@ -322,6 +329,21 @@ public class ExtensionManagementController {
         refreshProvisioning(pluginId);
         audit(pluginId, actor, "UNINSTALL", Map.of("configurationPurged", true));
         return ResponseEntity.ok(Map.of("pluginId", pluginId, "lifecycleState", "UNINSTALLED"));
+    }
+
+    @PostMapping("/{pluginId}/restore")
+    public ResponseEntity<?> restoreRegistration(@PathVariable String pluginId, JwtAuthenticationToken actor) {
+        PluginRow row = findPlugin(pluginId);
+        if (!"UNINSTALLED".equals(row.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Only an uninstalled plugin can be restored"));
+        }
+        List<String> errors = manifestValidator.validate(row.manifest(), coreVersion, registeredPluginIds());
+        if (!errors.isEmpty()) return ResponseEntity.badRequest().body(new ManifestValidationResponse(false, coreVersion, errors));
+        jdbc.update("UPDATE extension_plugins SET public_configuration='{}'::jsonb,encrypted_secrets='{}'::jsonb,lifecycle_state='VALIDATED',updated_at=now() WHERE plugin_id=?",
+                pluginId);
+        refreshProvisioning(pluginId);
+        audit(pluginId, actor, "RESTORE_REGISTRATION", Map.of("version", row.manifest().version(), "configurationPurged", true));
+        return ResponseEntity.ok(new PluginView(row.manifest(), "VALIDATED", Map.of(), Set.of(), 0));
     }
 
     @GetMapping("/{pluginId}/health")

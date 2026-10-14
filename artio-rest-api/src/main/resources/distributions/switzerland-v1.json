@@ -11,16 +11,25 @@
   "pluginRecommendations": [
     {
       "pluginId": "payments.stripe",
+      "name": "Stripe payments",
+      "description": "Hosted card and wallet checkout, signed payment events and refunds.",
+      "extensionPoints": ["payment.provider.v1"],
       "reason": "Optional online payments. Add a published, digest-pinned provider manifest before enabling.",
       "optional": true
     },
     {
       "pluginId": "payments.twint",
+      "name": "TWINT payments",
+      "description": "TWINT checkout through a merchant-authorized Stripe account.",
+      "extensionPoints": ["payment.provider.v1"],
       "reason": "Optional TWINT checkout through an activated PSP account. Add a published, digest-pinned provider manifest before enabling.",
       "optional": true
     },
     {
       "pluginId": "shipping.swiss-post",
+      "name": "Swiss Post shipping",
+      "description": "Swiss domestic delivery quotes and parcel label creation.",
+      "extensionPoints": ["shipping.provider.v1"],
       "reason": "Optional Swiss carrier integration. Add a published, digest-pinned provider manifest before enabling.",
       "optional": true
     }

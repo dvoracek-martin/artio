@@ -74,7 +74,11 @@ public class RegionalDistributionCatalog {
             if (recommendation == null || recommendation.pluginId() == null
                     || !recommendation.pluginId().matches("[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*")
                     || !pluginIds.add(recommendation.pluginId()) || recommendation.reason() == null
-                    || recommendation.reason().isBlank() || recommendation.reason().length() > 500) {
+                    || recommendation.reason().isBlank() || recommendation.reason().length() > 500
+                    || recommendation.name() == null || recommendation.name().isBlank() || recommendation.name().length() > 120
+                    || recommendation.description() == null || recommendation.description().isBlank() || recommendation.description().length() > 1000
+                    || recommendation.extensionPoints().size() > 20
+                    || recommendation.extensionPoints().stream().anyMatch(point -> point == null || !point.matches("[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*"))) {
                 throw new IllegalStateException("Invalid regional plugin recommendation");
             }
         }

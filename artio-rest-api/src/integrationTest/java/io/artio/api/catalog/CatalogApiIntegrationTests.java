@@ -403,6 +403,15 @@ class CatalogApiIntegrationTests {
                 .isEqualTo("UNINSTALLED");
         assertThat(adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, Map[].class).getBody())
                 .noneMatch(plugin -> manifest.id().equals(plugin.get("id")));
+
+        var restored = adminExchange("/api/v1/admin/extensions/{id}/restore", HttpMethod.POST, Map.of(),
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class, manifest.id());
+        assertThat(restored.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(restored.getBody()).isNotNull();
+        assertThat(restored.getBody().lifecycleState()).isEqualTo("VALIDATED");
+        assertThat(restored.getBody().configuredSecrets()).isEmpty();
+        assertThat(adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, Map[].class).getBody())
+                .anyMatch(plugin -> manifest.id().equals(plugin.get("id")));
     }
 
     @Test
@@ -425,6 +434,18 @@ class CatalogApiIntegrationTests {
         var de = adminExchange("/api/v1/admin/extensions?country=DE", HttpMethod.GET, null, Map[].class).getBody();
         assertThat(ch).extracting(plugin -> plugin.get("id")).contains("shipping.swiss-post", "observability.prometheus");
         assertThat(de).extracting(plugin -> plugin.get("id")).doesNotContain("shipping.swiss-post").contains("observability.prometheus");
+
+        var catalog = adminExchange("/api/v1/admin/extensions/catalog?country=CH", HttpMethod.GET, null, Map[].class).getBody();
+        assertThat(catalog).extracting(plugin -> plugin.get("pluginId"))
+                .contains("payments.stripe", "payments.twint", "shipping.swiss-post");
+        var registeredRecommendation = java.util.Arrays.stream(catalog)
+                .filter(plugin -> "shipping.swiss-post".equals(plugin.get("pluginId"))).findFirst().orElseThrow();
+        assertThat(registeredRecommendation.get("releaseRegistered")).isEqualTo(true);
+        assertThat(registeredRecommendation.get("status")).isEqualTo("CONFIGURATION_REQUIRED");
+        var unavailableRecommendation = java.util.Arrays.stream(catalog)
+                .filter(plugin -> "payments.stripe".equals(plugin.get("pluginId"))).findFirst().orElseThrow();
+        assertThat(unavailableRecommendation.get("releaseRegistered")).isEqualTo(false);
+        assertThat(unavailableRecommendation.get("status")).isEqualTo("WAITING_FOR_RELEASE");
 
         var invalid = adminExchange("/api/v1/admin/extensions?country=XX", HttpMethod.GET, null, ApiError.class);
         assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);

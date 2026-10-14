@@ -11,5 +11,10 @@ public record RegionalDistribution(String manifestVersion, String id, String nam
         pluginRecommendations = pluginRecommendations == null ? List.of() : List.copyOf(pluginRecommendations);
     }
 
-    public record PluginRecommendation(String pluginId, String reason, boolean optional) { }
+    public record PluginRecommendation(String pluginId, String name, String description,
+            List<String> extensionPoints, String reason, boolean optional) {
+        public PluginRecommendation {
+            extensionPoints = extensionPoints == null ? List.of() : List.copyOf(extensionPoints);
+        }
+    }
 }

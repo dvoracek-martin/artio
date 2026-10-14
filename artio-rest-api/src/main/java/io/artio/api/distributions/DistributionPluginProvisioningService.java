@@ -2,6 +2,8 @@ package io.artio.api.distributions;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +35,31 @@ public class DistributionPluginProvisioningService {
     public List<ProvisioningItem> reconcile(String distributionId) {
         RegionalDistribution distribution = catalog.find(distributionId);
         return distribution.pluginRecommendations().stream().map(recommendation -> record(distribution, recommendation)).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<CatalogItem> catalog(String countryCode) {
+        if (countryCode != null && (!countryCode.matches("[A-Z]{2}")
+                || !Set.of(Locale.getISOCountries()).contains(countryCode))) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "country must be an ISO 3166-1 alpha-2 code");
+        }
+        return catalog.findAll().stream()
+                .filter(distribution -> countryCode == null || distribution.countryCode().equals(countryCode))
+                .flatMap(distribution -> distribution.pluginRecommendations().stream().map(recommendation -> {
+                    List<RegisteredPlugin> registered = jdbc.query(
+                            "SELECT manifest->>'name',manifest->>'version',lifecycle_state FROM extension_plugins WHERE plugin_id=?",
+                            (rs, row) -> new RegisteredPlugin(rs.getString(1), rs.getString(2), rs.getString(3)),
+                            recommendation.pluginId());
+                    RegisteredPlugin plugin = registered.isEmpty() ? null : registered.getFirst();
+                    return new CatalogItem(distribution.id(), distribution.countryCode(), recommendation.pluginId(),
+                            plugin == null ? recommendation.name() : plugin.name(), recommendation.description(),
+                            recommendation.extensionPoints(), recommendation.optional(), recommendation.reason(),
+                            plugin != null, plugin == null ? null : plugin.version(),
+                            plugin == null ? null : plugin.lifecycleState(),
+                            plugin == null ? "WAITING_FOR_RELEASE" : statusFor(plugin.lifecycleState()));
+                }))
+                .toList();
     }
 
     @Transactional
@@ -73,4 +100,8 @@ public class DistributionPluginProvisioningService {
 
     public record ProvisioningItem(String distributionId, String pluginId, boolean optional, String reason,
                                   String status, String lifecycleState, Instant lastCheckedAt) { }
+    public record CatalogItem(String distributionId, String countryCode, String pluginId, String name,
+            String description, List<String> extensionPoints, boolean optional, String reason,
+            boolean releaseRegistered, String version, String lifecycleState, String status) { }
+    private record RegisteredPlugin(String name, String version, String lifecycleState) { }
 }

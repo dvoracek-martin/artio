@@ -20,6 +20,13 @@ class RegionalDistributionCatalogTests {
         assertThat(switzerland.pluginRecommendations()).extracting(RegionalDistribution.PluginRecommendation::pluginId)
                 .containsExactly("payments.stripe", "payments.twint", "shipping.swiss-post");
         assertThat(switzerland.pluginRecommendations()).allMatch(RegionalDistribution.PluginRecommendation::optional);
+        assertThat(switzerland.pluginRecommendations()).allSatisfy(recommendation -> {
+            assertThat(recommendation.name()).isNotBlank();
+            assertThat(recommendation.description()).isNotBlank();
+            assertThat(recommendation.extensionPoints()).isNotEmpty();
+        });
+        assertThat(switzerland.pluginRecommendations().getFirst().extensionPoints())
+                .containsExactly("payment.provider.v1");
         assertThat(catalog.findAll()).containsExactly(switzerland);
     }
 
