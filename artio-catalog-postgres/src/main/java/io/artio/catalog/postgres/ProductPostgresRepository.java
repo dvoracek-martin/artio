@@ -41,6 +41,11 @@ public class ProductPostgresRepository implements ProductRepository {
     }
 
     @Override
+    public Optional<Product> findBySku(Sku sku) {
+        return jdbc.query("SELECT * FROM catalog_product WHERE sku = ?", PRODUCT_ROW, sku.value()).stream().findFirst().map(this::hydrate);
+    }
+
+    @Override
     public List<Product> findAll() {
         return jdbc.query("SELECT * FROM catalog_product ORDER BY created_at DESC, id", PRODUCT_ROW)
                 .stream().map(this::hydrate).toList();

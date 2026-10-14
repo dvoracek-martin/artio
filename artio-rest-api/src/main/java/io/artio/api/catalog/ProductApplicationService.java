@@ -102,6 +102,11 @@ public class ProductApplicationService {
         return ProductResponse.from(findProduct(id));
     }
 
+    @Transactional(readOnly = true)
+    public java.util.Optional<ProductResponse> findBySku(String sku) {
+        return products.findBySku(new Sku(sku)).map(ProductResponse::from);
+    }
+
     @CacheEvict(cacheNames = "catalog-products", allEntries = true)
     public ProductResponse update(UUID id, UpdateProductRequest request) {
         searchIndexLock.lockCatalogWrite();

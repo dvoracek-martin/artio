@@ -668,6 +668,26 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void csvImportReportsRowErrorsUpsertsBySkuAndExportsCsv() {
+        String csv="sku,name,description,active\r\nCSV-IMP-001,\"Lamp, small\",First,true\r\nCSV-IMP-001,\"Lamp, updated\",Second,false\r\nlower-sku,Invalid,Rejected,true\r\n";
+        var parts=new org.springframework.util.LinkedMultiValueMap<String,Object>();
+        parts.add("file",new org.springframework.core.io.ByteArrayResource(csv.getBytes(StandardCharsets.UTF_8)){
+            @Override public String getFilename(){return "products.csv";}
+        });
+        var headers=new HttpHeaders();headers.setBearerAuth(adminToken);headers.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        var imported=http.exchange("/api/v1/admin/catalog/products/import",HttpMethod.POST,new HttpEntity<>(parts,headers),ProductCsvImportService.ImportReport.class);
+        assertThat(imported.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(imported.getBody()).isNotNull();
+        assertThat(imported.getBody().rows()).isEqualTo(3);
+        assertThat(imported.getBody().created()).isEqualTo(1);
+        assertThat(imported.getBody().updated()).isEqualTo(1);
+        assertThat(imported.getBody().failed()).isEqualTo(1);
+        var exported=adminExchange("/api/v1/admin/catalog/products/export",HttpMethod.GET,null,String.class);
+        assertThat(exported.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(exported.getBody()).contains("sku,name,description,active","CSV-IMP-001");
+    }
+
+    @Test
     void rejectedCheckoutCompensationCancelsOrderAndReleasesStockAtomically() {
         UUID orderId = UUID.randomUUID();
         UUID sellableId = UUID.randomUUID();

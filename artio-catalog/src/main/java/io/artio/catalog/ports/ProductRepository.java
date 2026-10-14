@@ -2,6 +2,7 @@ package io.artio.catalog.ports;
 
 import io.artio.catalog.Product;
 import io.artio.catalog.ProductId;
+import io.artio.catalog.Sku;
 import java.util.List;
 import java.util.Optional;
 
@@ -9,7 +10,10 @@ import java.util.Optional;
 public interface ProductRepository {
     Optional<Product> findById(ProductId id);
 
+    Optional<Product> findBySku(Sku sku);
+
     List<Product> findAll();
+
 
     void save(Product product);
 }
