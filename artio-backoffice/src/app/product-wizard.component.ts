@@ -17,6 +17,7 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   @Output() cancel = new EventEmitter<void>();
   @Output() created = new EventEmitter<string>();
   private http = inject(HttpClient);
+  private destroyed = false;
   steps = ['The essentials', 'Organization', 'Product images', 'Review & create'];
   step = 0;
   loading = true;
@@ -34,7 +35,7 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   creatingCategory = false;
 
   ngOnInit(): void { this.loadOptions(); }
-  ngOnDestroy(): void { this.images.forEach(image => URL.revokeObjectURL(image.url)); }
+  ngOnDestroy(): void { this.destroyed = true; this.images.forEach(image => URL.revokeObjectURL(image.url)); }
   loadOptions(): void {
     this.loading = true;
     this.error = '';
@@ -120,19 +121,21 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
         this.productId = product.id;
       }
       for (const [index, image] of this.images.entries()) {
+        if (this.destroyed) return;
         if (image.uploaded) continue;
         this.progress = `Uploading image ${index + 1} of ${this.images.length}…`;
         const body = new FormData(); body.append('file', image.file, image.file.name);
         await firstValueFrom(this.http.post(`/api/v1/products/${this.productId}/media`, body, { params: { altText: image.alt } }));
         image.uploaded = true;
       }
+      if (this.destroyed) return;
       if (this.publish) {
         this.progress = 'Activating your product…';
         await firstValueFrom(this.http.put(`/api/v1/products/${this.productId}/active`, { active: true }));
       }
-      this.created.emit(this.productId);
+      if (!this.destroyed) this.created.emit(this.productId);
     } catch (e) {
-      this.error = this.message(e, 'Could not save the product. Please try again.') + (this.productId ? ' Your product is saved as a draft. Retry to finish the remaining uploads or activation.' : ' No product was created. Check the details and try again.');
+      this.error = this.message(e, 'Could not save the product. Please try again.') + (this.productId ? ' Your product is saved as a draft. Retry to finish, or remove a rejected image below.' : ' Check the details before retrying. If your connection was interrupted, check the product list first.');
     } finally { this.busy = false; this.progress = ''; }
   }
   private message(error: unknown, fallback: string): string { return error instanceof HttpErrorResponse ? error.error?.message ?? error.error?.detail ?? fallback : fallback; }

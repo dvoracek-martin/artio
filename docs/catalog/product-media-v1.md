@@ -40,6 +40,10 @@ Image bytes are stored before a metadata insert and cleaned up if that transacti
 
 Backoffice Products has a per-product media manager for upload, replacement, alt text, order and deletion. Storefront product cards show the first ordered public image and its alt text; products without images use the initials illustration. Public product media URLs do not contain secrets. Do not store private customer documents as catalog media.
 
+The [product creation wizard](backoffice-product-wizard.md) also supports selecting multiple images, local previews, alternative text and ordering before creation. Images upload after the atomic product draft is saved; failed uploads can be retried or replaced without recreating the product. The standalone media manager keeps its required file input populated until upload succeeds so native browser validation does not block submission.
+
 ## Verification and limits
+
+Current Backoffice/draft/media checks and the distinction between unit-tested S3 requests and external-provider acceptance are recorded in [Backoffice product wizard verification](backoffice-product-wizard.md#verification-2026-10-14).
 
 `gradlew.bat :artio-rest-api:integrationTest --tests io.artio.api.catalog.CatalogApiIntegrationTests.productMediaRequiresStaffAndSupportsSafeUploadReplacementOrderingAndDeletion --no-daemon` exited 0; the scenario was **skipped** because Docker Engine was unavailable, while the API unit suite passed and integration sources compiled. `ProductMediaServiceTests` passed image decode/re-encode, format rejection, dimension limit and filesystem key/read/delete checks. `npm run build` in `artio-backoffice` and `docker compose --env-file .env.example -f artio-docker/docker-compose.yml config --quiet` passed. The mounted-volume runtime and shared object-storage adapter are not deployment-tested here.
