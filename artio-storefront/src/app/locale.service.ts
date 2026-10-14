@@ -1,15 +1,85 @@
 import { Injectable } from '@angular/core';
 
-type Locale = 'en' | 'cs' | 'de';
-const MESSAGES: Record<Locale, Record<string,string>> = {
-  en: { shop:'Shop', bundles:'Build a bundle', cart:'Cart', orders:'My orders', signIn:'Sign in', signOut:'Sign out', search:'Search products', consentTitle:'Your privacy matters', consentBody:'Essential storage keeps Artio working. Optional analytics and marketing stay off unless you choose them.', essential:'Essential', analytics:'Analytics', marketing:'Marketing', accept:'Save preferences', reject:'Reject optional', manage:'Privacy choices', mfa:'Authenticator code or backup code' },
-  cs: { shop:'Obchod', bundles:'Sestavit balíček', cart:'Košík', orders:'Moje objednávky', signIn:'Přihlásit se', signOut:'Odhlásit se', search:'Hledat produkty', consentTitle:'Vaše soukromí je důležité', consentBody:'Nezbytné úložiště zajišťuje fungování Artio. Analytika a marketing zůstávají vypnuté, dokud je nepovolíte.', essential:'Nezbytné', analytics:'Analytika', marketing:'Marketing', accept:'Uložit nastavení', reject:'Odmítnout volitelné', manage:'Nastavení soukromí', mfa:'Kód z autentizační aplikace nebo záložní kód' },
-  de: { shop:'Shop', bundles:'Bundle zusammenstellen', cart:'Warenkorb', orders:'Meine Bestellungen', signIn:'Anmelden', signOut:'Abmelden', search:'Produkte suchen', consentTitle:'Ihre Privatsphäre ist wichtig', consentBody:'Notwendiger Speicher hält Artio funktionsfähig. Analyse und Marketing bleiben deaktiviert, bis Sie zustimmen.', essential:'Notwendig', analytics:'Analyse', marketing:'Marketing', accept:'Einstellungen speichern', reject:'Optionale ablehnen', manage:'Datenschutzeinstellungen', mfa:'Authenticator- oder Ersatzcode' }
+export type StoreLocale = 'en' | 'de' | 'fr' | 'it';
+const SUPPORTED: readonly StoreLocale[] = ['en', 'de', 'fr', 'it'];
+
+const MESSAGES: Record<StoreLocale, Record<string, string>> = {
+  en: {
+    shop:'Shop', bundles:'Build a bundle', cart:'Cart', orders:'My orders', signIn:'Sign in', signOut:'Sign out', bag:'Bag',
+    heroEyebrow:'A little more considered', heroTitle:'Good things.', heroTitleSecond:'Better together.', heroBody:'Discover thoughtfully chosen essentials and build a set that feels like yours.', explore:'Explore the collection',
+    collection:'The collection', shopHeading:'Find your everyday', search:'Search products', chooseOption:'Choose product option', add:'Add to bag', collectionEmpty:'Your collection is taking shape. Products will appear here as they are added.',
+    madePersonal:'Made personal', bundleIntro:'Choose a combination made for your routine. Every quote uses current component prices.', chooseOptions:'Choose options', chooseRange:'Choose', options:'options', getPrice:'Get current bundle price', forConfiguration:'for this configuration', addConfigured:'Add configured bundle to bag', bundleCardCopy:'Bring your favourites together in one considered set.', bundlesEmpty:'No bundles are available yet. Check back soon.',
+    selection:'Your selection', bagTitle:'Your bag', signInToContinue:'Sign in to keep your bag and continue to checkout.', bundleComponent:'Bundle component', partOfBundle:'Part of bundle', quantity:'Qty', remove:'Remove', continueCheckout:'Continue to checkout',
+    welcome:'Welcome to Artio', goodToSee:'Good to see you.', createAccount:'Create your account.', firstName:'First name', lastName:'Last name', email:'Email address', password:'Password', continueGoogle:'Continue with Google', newHere:'New here? Create an account', existingAccount:'Already have an account? Sign in',
+    account:'Your account', orderHistory:'Order history', order:'Order', payNow:'Pay now', cancelOrder:'Cancel order', returnsHistory:'Returns & history', requestReturn:'Request a return', ordersEmpty:'Your orders will be listed here.',
+    checkoutEyebrow:'One last thing', checkoutTitle:'Where should it go?', recipient:'Recipient name', street:'Street and house number', postal:'Postal code', city:'City', billing:'Billing address (optional)', country:'Country', switzerland:'Switzerland', unitedStates:'United States', germany:'Germany', czechia:'Czechia', parcelWeight:'Parcel weight (kg)', deliveryMethod:'Delivery method', delivery:'Delivery', shippingPrompt:'Enter a complete delivery address to see available shipping services.', giftCard:'Gift card code (optional)', giftCardPlaceholder:'Enter gift card code', continuePayment:'Continue to payment', priceCheck:'Prices, discounts, taxes and availability are checked again before the order is placed.',
+    successEyebrow:'All set', thankYou:'Thank you for your order.', viewOrders:'View your orders',
+    privacyNotice:'Privacy notice', consentTitle:'Your privacy matters', consentBody:'Essential storage keeps Artio working. Optional analytics and marketing stay off unless you choose them.', essential:'Essential', analytics:'Analytics', marketing:'Marketing', accept:'Save preferences', reject:'Reject optional', manage:'Privacy choices', mfa:'Authenticator code or backup code',
+    footer:'Objects with intention. Made for living.',
+  },
+  de: {
+    shop:'Shop', bundles:'Bundle zusammenstellen', cart:'Warenkorb', orders:'Meine Bestellungen', signIn:'Anmelden', signOut:'Abmelden', bag:'Tasche',
+    heroEyebrow:'Mit Bedacht ausgewählt', heroTitle:'Gute Dinge.', heroTitleSecond:'Zusammen noch besser.', heroBody:'Entdecken Sie sorgfältig ausgewählte Essentials und stellen Sie Ihr persönliches Set zusammen.', explore:'Kollektion entdecken',
+    collection:'Die Kollektion', shopHeading:'Finden Sie Ihre Alltagsbegleiter', search:'Produkte suchen', chooseOption:'Produktoption wählen', add:'In den Warenkorb', collectionEmpty:'Ihre Kollektion entsteht gerade. Neue Produkte erscheinen hier, sobald sie verfügbar sind.',
+    madePersonal:'Persönlich zusammengestellt', bundleIntro:'Wählen Sie eine passende Kombination. Jeder Preis basiert auf aktuellen Komponentenpreisen.', chooseOptions:'Optionen wählen', chooseRange:'Wählen Sie', options:'Optionen', getPrice:'Aktuellen Bundlepreis berechnen', forConfiguration:'für diese Zusammenstellung', addConfigured:'Bundle in den Warenkorb', bundleCardCopy:'Kombinieren Sie Ihre Favoriten zu einem persönlichen Set.', bundlesEmpty:'Noch sind keine Bundles verfügbar. Schauen Sie bald wieder vorbei.',
+    selection:'Ihre Auswahl', bagTitle:'Ihr Warenkorb', signInToContinue:'Melden Sie sich an, um Ihren Warenkorb zu speichern und fortzufahren.', bundleComponent:'Bundle-Komponente', partOfBundle:'Teil des Bundles', quantity:'Menge', remove:'Entfernen', continueCheckout:'Weiter zur Kasse',
+    welcome:'Willkommen bei Artio', goodToSee:'Schön, dass Sie da sind.', createAccount:'Konto erstellen.', firstName:'Vorname', lastName:'Nachname', email:'E-Mail-Adresse', password:'Passwort', continueGoogle:'Mit Google fortfahren', newHere:'Neu hier? Konto erstellen', existingAccount:'Schon ein Konto? Anmelden',
+    account:'Ihr Konto', orderHistory:'Bestellverlauf', order:'Bestellung', payNow:'Jetzt bezahlen', cancelOrder:'Bestellung stornieren', returnsHistory:'Retouren & Verlauf', requestReturn:'Retoure anfragen', ordersEmpty:'Ihre Bestellungen erscheinen hier.',
+    checkoutEyebrow:'Nur noch ein Schritt', checkoutTitle:'Wohin dürfen wir liefern?', recipient:'Name des Empfängers', street:'Strasse und Hausnummer', postal:'Postleitzahl', city:'Ort', billing:'Rechnungsadresse (optional)', country:'Land', switzerland:'Schweiz', unitedStates:'Vereinigte Staaten', germany:'Deutschland', czechia:'Tschechien', parcelWeight:'Paketgewicht (kg)', deliveryMethod:'Versandart', delivery:'Lieferung', shippingPrompt:'Geben Sie eine vollständige Lieferadresse ein, um Versandoptionen zu sehen.', giftCard:'Geschenkkartencode (optional)', giftCardPlaceholder:'Code eingeben', continuePayment:'Weiter zur Zahlung', priceCheck:'Preise, Rabatte, Steuern und Verfügbarkeit werden vor der Bestellung erneut geprüft.',
+    successEyebrow:'Geschafft', thankYou:'Vielen Dank für Ihre Bestellung.', viewOrders:'Bestellungen ansehen',
+    privacyNotice:'Datenschutzhinweis', consentTitle:'Ihre Privatsphäre ist wichtig', consentBody:'Notwendiger Speicher hält Artio funktionsfähig. Analyse und Marketing bleiben deaktiviert, bis Sie zustimmen.', essential:'Notwendig', analytics:'Analyse', marketing:'Marketing', accept:'Einstellungen speichern', reject:'Optionale ablehnen', manage:'Datenschutzeinstellungen', mfa:'Authenticator- oder Ersatzcode',
+    footer:'Dinge mit Haltung. Für den Alltag gemacht.',
+  },
+  fr: {
+    shop:'Boutique', bundles:'Composer un ensemble', cart:'Panier', orders:'Mes commandes', signIn:'Connexion', signOut:'Déconnexion', bag:'Panier',
+    heroEyebrow:'Choisi avec attention', heroTitle:'De belles choses.', heroTitleSecond:'Encore mieux ensemble.', heroBody:'Découvrez des essentiels soigneusement sélectionnés et créez un ensemble qui vous ressemble.', explore:'Découvrir la collection',
+    collection:'La collection', shopHeading:'Pour votre quotidien', search:'Rechercher des produits', chooseOption:'Choisir une option', add:'Ajouter au panier', collectionEmpty:'Votre collection prend forme. Les produits apparaîtront ici dès leur ajout.',
+    madePersonal:'À votre image', bundleIntro:'Choisissez une combinaison adaptée à vos habitudes. Chaque prix utilise les tarifs actuels des composants.', chooseOptions:'Choisir les options', chooseRange:'Choisissez', options:'options', getPrice:'Calculer le prix actuel', forConfiguration:'pour cette configuration', addConfigured:'Ajouter la configuration au panier', bundleCardCopy:'Réunissez vos favoris dans un ensemble soigneusement composé.', bundlesEmpty:'Aucun ensemble disponible pour le moment. Revenez bientôt.',
+    selection:'Votre sélection', bagTitle:'Votre panier', signInToContinue:'Connectez-vous pour conserver votre panier et continuer.', bundleComponent:'Composant de l’ensemble', partOfBundle:'Inclus dans l’ensemble', quantity:'Qté', remove:'Retirer', continueCheckout:'Continuer vers le paiement',
+    welcome:'Bienvenue chez Artio', goodToSee:'Ravi de vous revoir.', createAccount:'Créer votre compte.', firstName:'Prénom', lastName:'Nom', email:'Adresse e-mail', password:'Mot de passe', continueGoogle:'Continuer avec Google', newHere:'Nouveau chez nous ? Créer un compte', existingAccount:'Vous avez déjà un compte ? Connexion',
+    account:'Votre compte', orderHistory:'Historique des commandes', order:'Commande', payNow:'Payer', cancelOrder:'Annuler la commande', returnsHistory:'Retours et historique', requestReturn:'Demander un retour', ordersEmpty:'Vos commandes apparaîtront ici.',
+    checkoutEyebrow:'Dernière étape', checkoutTitle:'Où livrer votre commande ?', recipient:'Nom du destinataire', street:'Rue et numéro', postal:'Code postal', city:'Ville', billing:'Adresse de facturation (facultatif)', country:'Pays', switzerland:'Suisse', unitedStates:'États-Unis', germany:'Allemagne', czechia:'Tchéquie', parcelWeight:'Poids du colis (kg)', deliveryMethod:'Mode de livraison', delivery:'Livraison', shippingPrompt:'Saisissez une adresse complète pour voir les options de livraison.', giftCard:'Code de carte cadeau (facultatif)', giftCardPlaceholder:'Saisir le code', continuePayment:'Continuer vers le paiement', priceCheck:'Les prix, remises, taxes et disponibilités seront vérifiés avant la commande.',
+    successEyebrow:'C’est prêt', thankYou:'Merci pour votre commande.', viewOrders:'Voir vos commandes',
+    privacyNotice:'Avis de confidentialité', consentTitle:'Votre vie privée compte', consentBody:'Le stockage essentiel assure le fonctionnement d’Artio. Les analyses et le marketing restent désactivés sans votre accord.', essential:'Essentiel', analytics:'Analyse', marketing:'Marketing', accept:'Enregistrer mes choix', reject:'Refuser les options', manage:'Choix de confidentialité', mfa:'Code d’authentification ou code de secours',
+    footer:'Des objets pensés pour la vie quotidienne.',
+  },
+  it: {
+    shop:'Negozio', bundles:'Crea un set', cart:'Carrello', orders:'I miei ordini', signIn:'Accedi', signOut:'Esci', bag:'Carrello',
+    heroEyebrow:'Scelto con cura', heroTitle:'Belle cose.', heroTitleSecond:'Ancora meglio insieme.', heroBody:'Scopri elementi essenziali selezionati con cura e crea un set che ti rappresenta.', explore:'Esplora la collezione',
+    collection:'La collezione', shopHeading:'Per ogni giorno', search:'Cerca prodotti', chooseOption:'Scegli un’opzione', add:'Aggiungi al carrello', collectionEmpty:'La collezione sta prendendo forma. I prodotti appariranno qui appena disponibili.',
+    madePersonal:'Su misura per te', bundleIntro:'Scegli una combinazione adatta alla tua routine. Ogni preventivo usa i prezzi aggiornati dei componenti.', chooseOptions:'Scegli le opzioni', chooseRange:'Scegli', options:'opzioni', getPrice:'Calcola il prezzo aggiornato', forConfiguration:'per questa configurazione', addConfigured:'Aggiungi il set al carrello', bundleCardCopy:'Riunisci i tuoi preferiti in un set curato.', bundlesEmpty:'Nessun set è disponibile al momento. Torna presto.',
+    selection:'La tua selezione', bagTitle:'Il tuo carrello', signInToContinue:'Accedi per conservare il carrello e continuare.', bundleComponent:'Componente del set', partOfBundle:'Parte del set', quantity:'Qtà', remove:'Rimuovi', continueCheckout:'Continua al pagamento',
+    welcome:'Benvenuto in Artio', goodToSee:'È un piacere rivederti.', createAccount:'Crea il tuo account.', firstName:'Nome', lastName:'Cognome', email:'Indirizzo e-mail', password:'Password', continueGoogle:'Continua con Google', newHere:'È la prima volta? Crea un account', existingAccount:'Hai già un account? Accedi',
+    account:'Il tuo account', orderHistory:'Cronologia ordini', order:'Ordine', payNow:'Paga ora', cancelOrder:'Annulla ordine', returnsHistory:'Resi e cronologia', requestReturn:'Richiedi un reso', ordersEmpty:'I tuoi ordini appariranno qui.',
+    checkoutEyebrow:'Ultimo passaggio', checkoutTitle:'Dove lo spediamo?', recipient:'Nome del destinatario', street:'Via e numero civico', postal:'Codice postale', city:'Città', billing:'Indirizzo di fatturazione (facoltativo)', country:'Paese', switzerland:'Svizzera', unitedStates:'Stati Uniti', germany:'Germania', czechia:'Cechia', parcelWeight:'Peso del pacco (kg)', deliveryMethod:'Metodo di consegna', delivery:'Consegna', shippingPrompt:'Inserisci un indirizzo completo per vedere i servizi di spedizione.', giftCard:'Codice regalo (facoltativo)', giftCardPlaceholder:'Inserisci il codice', continuePayment:'Continua al pagamento', priceCheck:'Prezzi, sconti, imposte e disponibilità saranno verificati prima dell’ordine.',
+    successEyebrow:'Fatto', thankYou:'Grazie per il tuo ordine.', viewOrders:'Visualizza i tuoi ordini',
+    privacyNotice:'Informativa sulla privacy', consentTitle:'La tua privacy è importante', consentBody:'La memoria essenziale mantiene Artio operativo. Analisi e marketing restano disattivati senza il tuo consenso.', essential:'Essenziale', analytics:'Analisi', marketing:'Marketing', accept:'Salva le preferenze', reject:'Rifiuta le opzioni', manage:'Scelte sulla privacy', mfa:'Codice autenticatore o di recupero',
+    footer:'Oggetti pensati per la vita di ogni giorno.',
+  },
 };
 
-@Injectable({providedIn:'root'})
+@Injectable({ providedIn: 'root' })
 export class LocaleService {
-  current(): Locale { const saved=typeof localStorage==='undefined'?null:localStorage.getItem('artio-locale'); return saved==='cs'||saved==='de'?saved:'en'; }
-  set(locale: Locale): void { if(typeof localStorage!=='undefined') localStorage.setItem('artio-locale',locale); }
-  translate(key:string,locale:Locale=this.current()):string { return MESSAGES[locale][key]??MESSAGES.en[key]??key; }
+  current(): StoreLocale {
+    const saved = typeof localStorage === 'undefined' ? null : localStorage.getItem('artio-locale');
+    const normalized = saved?.toLowerCase();
+    return this.isSupported(normalized) ? normalized : 'en';
+  }
+
+  isSupported(value: unknown): value is StoreLocale {
+    return typeof value === 'string' && (SUPPORTED as readonly string[]).includes(value.toLowerCase());
+  }
+
+  normalize(value: string | null | undefined): StoreLocale {
+    const normalized = value?.toLowerCase().split(/[-_]/)[0];
+    return this.isSupported(normalized) ? normalized : 'en';
+  }
+
+  set(locale: StoreLocale): void {
+    if (typeof localStorage !== 'undefined') localStorage.setItem('artio-locale', locale);
+  }
+
+  translate(key: string, locale: StoreLocale = this.current()): string {
+    return MESSAGES[locale][key] ?? MESSAGES.en[key] ?? key;
+  }
 }
