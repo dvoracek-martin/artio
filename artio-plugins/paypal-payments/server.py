@@ -138,7 +138,7 @@ def operation(configuration, name, payload, envelope):
                                 {"amount": {"value": amount, "currency_code": str(payload.get("currency")).upper()}},
                                 envelope.get("idempotencyKey"))
         state = "REFUNDED" if result.get("status") == "COMPLETED" else "PENDING"
-        return {"providerReference": reference, "state": state, "amount": amount,
+        return {"providerReference": result.get("id"), "state": state, "amount": amount,
                 "currency": str(payload.get("currency")).upper(), "failureCode": None}
     if name == "reconcile":
         reference = str(payload.get("providerReference", ""))

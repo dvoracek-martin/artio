@@ -152,10 +152,12 @@ def operation(configuration, name, payload, envelope):
         intent = session.get("payment_intent")
         if not isinstance(intent, str) or not intent.startswith("pi_"):
             raise ProviderError(409, "Checkout session has no refundable payment")
-        refund = stripe_request(configuration, "/v1/refunds", "POST", {"payment_intent": intent},
+        refund_form = {"payment_intent": intent,
+                       "amount": minor_units(payload.get("amount"), payload.get("currency"))}
+        refund = stripe_request(configuration, "/v1/refunds", "POST", refund_form,
                                 envelope.get("idempotencyKey"))
         state = "REFUNDED" if refund.get("status") == "succeeded" else "PENDING"
-        return {"providerReference": reference, "state": state, "amount": payload.get("amount"),
+        return {"providerReference": refund.get("id"), "state": state, "amount": payload.get("amount"),
                 "currency": payload.get("currency"), "failureCode": refund.get("failure_reason")}
     if name == "reconcile":
         reference = payload.get("providerReference")

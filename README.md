@@ -112,7 +112,7 @@ Administrators can store DE/IT/FR/EN bundle names and option-group labels with `
 
 The storefront includes responsive catalog browsing, search, bundle configuration, account registration/login, cart, Stripe checkout, order history and order-status views. The backoffice includes product/variant management, bundle setup, price management, customer activation/email-verification, reporting summaries and shipment updates. Both are strict-mode Angular applications with responsive layouts and dark-mode support.
 
-Backoffice order search, detail, fulfillment and CSV export use the secured APIs documented in [admin order management v1](docs/orders/admin-order-management-v1.md). Refund and return workflows remain under implementation.
+Backoffice order search, detail, fulfillment and CSV export use the secured APIs documented in [admin order management v1](docs/orders/admin-order-management-v1.md). ADMIN/SUPERADMIN can issue idempotent partial or full payment refunds from order detail; the contract is in [payment refunds v1](docs/payments/refunds-v1.md). Physical merchandise returns remain a separate workflow.
 
 The default Compose stack starts PostgreSQL, Apache Kafka, the REST API and Backoffice. Redis, OpenSearch and the optional Storefront use opt-in profiles; observability is available as an optional Compose overlay and as an unpublished plugin source pack. Docker Compose is the supported deployment path.
 

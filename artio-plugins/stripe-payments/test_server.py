@@ -10,6 +10,19 @@ import server
 
 
 class StripeExtensionTests(unittest.TestCase):
+    def test_refund_sends_requested_partial_amount_with_stable_idempotency(self):
+        session = {"payment_intent": "pi_test_123"}
+        refund = {"id": "re_test_123", "status": "succeeded", "failure_reason": None}
+        with patch.object(server, "stripe_request", side_effect=[session, refund]) as request:
+            result = server.operation({"stripeSecretKey": "sk_test_secret"}, "refund", {
+                "providerReference": "cs_test_123", "amount": "12.34", "currency": "CHF",
+            }, {"idempotencyKey": "refund-stable-123"})
+
+        self.assertEqual("REFUNDED", result["state"])
+        self.assertEqual("re_test_123", result["providerReference"])
+        self.assertEqual({"payment_intent": "pi_test_123", "amount": 1234}, request.call_args_list[1].args[3])
+        self.assertEqual("refund-stable-123", request.call_args_list[1].args[4])
+
     def test_checkout_uses_core_identity_and_stripe_idempotency_key(self):
         response = {"id": "cs_test_123", "url": "https://checkout.stripe.test/session"}
         with patch.object(server, "stripe_request", return_value=response) as request:

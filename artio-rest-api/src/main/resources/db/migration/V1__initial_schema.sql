@@ -204,6 +204,7 @@ CREATE TABLE payments (
   order_id UUID NOT NULL REFERENCES orders(id),
   user_id UUID NOT NULL REFERENCES users(id),
   amount NUMERIC(19,4) NOT NULL CHECK (amount >= 0),
+  refunded_amount NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0 AND refunded_amount <= amount),
   currency CHAR(3) NOT NULL,
   method VARCHAR(32) NOT NULL,
   status VARCHAR(32) NOT NULL,
@@ -213,6 +214,19 @@ CREATE TABLE payments (
 );
 CREATE UNIQUE INDEX uq_payments_provider_reference ON payments(provider_reference);
 CREATE INDEX idx_payments_order ON payments(order_id);
+CREATE TABLE payment_refunds (
+  id UUID PRIMARY KEY,
+  payment_id UUID NOT NULL REFERENCES payments(id),
+  idempotency_key VARCHAR(128) NOT NULL,
+  amount NUMERIC(19,4) NOT NULL CHECK (amount > 0),
+  currency CHAR(3) NOT NULL,
+  status VARCHAR(16) NOT NULL CHECK (status IN ('PROCESSING','COMPLETED','FAILED')),
+  provider_reference VARCHAR(255),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(payment_id,idempotency_key)
+);
+CREATE INDEX idx_payment_refunds_payment ON payment_refunds(payment_id,created_at);
 CREATE TABLE notifications (
   id UUID PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

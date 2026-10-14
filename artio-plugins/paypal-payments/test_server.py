@@ -32,6 +32,21 @@ class PayPalTests(unittest.TestCase):
         with self.assertRaises(server.ProviderError):
             server.amount_text("10.001", "CHF")
 
+    def test_refund_uses_requested_amount_and_stable_provider_key(self):
+        details = {"purchase_units": [{"payments": {"captures": [{"id": "CAPTURE-12345678"}]}}]}
+        refund = {"id": "REFUND-12345678", "status": "COMPLETED"}
+        envelope = {"idempotencyKey": "stable-refund-key"}
+        with patch.object(server, "paypal_request", side_effect=[details, refund]) as request:
+            result = server.operation(self.config, "refund", {
+                "providerReference": "ORDER-12345678", "amount": "7.25", "currency": "CHF",
+            }, envelope)
+
+        self.assertEqual("REFUND-12345678", result["providerReference"])
+        self.assertEqual("REFUNDED", result["state"])
+        self.assertEqual("POST", request.call_args_list[1].args[2])
+        self.assertEqual({"amount": {"value": "7.25", "currency_code": "CHF"}}, request.call_args_list[1].args[3])
+        self.assertEqual("stable-refund-key", request.call_args_list[1].args[4])
+
     @patch("server.urlopen", side_effect=[
         FakeResponse({"access_token": "access-token"}),
         FakeResponse({"id": "ORDER-12345678", "links": [{"rel": "payer-action", "href": "https://www.paypal.com/checkout?token=ORDER-12345678"}]})

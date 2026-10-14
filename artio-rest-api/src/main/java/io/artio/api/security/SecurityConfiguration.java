@@ -82,6 +82,7 @@ public class SecurityConfiguration {
                 .requestMatchers("/oauth2/**","/login/oauth2/**").permitAll()
                 .requestMatchers("/v3/api-docs/**").permitAll()
                 .requestMatchers("/api/admin/system/**", "/api/v1/admin/system/**").hasRole("SUPERADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/payments/*/refund", "/api/v1/payments/*/refund").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers("/api/admin/**", "/api/v1/admin/**").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers("/graphql").permitAll()
                 .requestMatchers("/ws/**").permitAll()

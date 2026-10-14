@@ -98,9 +98,9 @@ public class AdminOrderQueryController {
         List<OrderLine> lines = jdbc.query("SELECT id,variant_id,bundle_id,quantity,unit_price,currency FROM order_items WHERE order_id=? ORDER BY id",
                 (rs, row) -> new OrderLine(rs.getObject("id", UUID.class), rs.getObject("variant_id", UUID.class),
                         rs.getObject("bundle_id", UUID.class), rs.getInt("quantity"), rs.getBigDecimal("unit_price"), rs.getString("currency").trim()), id);
-        List<PaymentSummary> payments = jdbc.query("SELECT id,method,status,amount,currency,provider_reference,created_at,updated_at FROM payments WHERE order_id=? ORDER BY created_at",
+        List<PaymentSummary> payments = jdbc.query("SELECT id,method,status,amount,refunded_amount,currency,provider_reference,created_at,updated_at FROM payments WHERE order_id=? ORDER BY created_at",
                 (rs, row) -> new PaymentSummary(rs.getObject("id", UUID.class), rs.getString("method"), rs.getString("status"),
-                        rs.getBigDecimal("amount"), rs.getString("currency").trim(), rs.getString("provider_reference"),
+                        rs.getBigDecimal("amount"), rs.getBigDecimal("refunded_amount"), rs.getString("currency").trim(), rs.getString("provider_reference"),
                         rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), id);
         return order.with(lines, payments);
     }
@@ -149,6 +149,6 @@ public class AdminOrderQueryController {
         }
     }
     public record OrderLine(UUID id, UUID variantId, UUID bundleId, int quantity, java.math.BigDecimal unitPrice, String currency) { }
-    public record PaymentSummary(UUID id, String method, String status, java.math.BigDecimal amount, String currency,
+    public record PaymentSummary(UUID id, String method, String status, java.math.BigDecimal amount, java.math.BigDecimal refundedAmount, String currency,
             String providerReference, Instant createdAt, Instant updatedAt) { }
 }

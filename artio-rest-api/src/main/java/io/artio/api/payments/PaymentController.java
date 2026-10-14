@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.Currency;
+import java.util.Set;
 import java.util.UUID;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.util.LinkedMultiValueMap;
@@ -293,27 +296,81 @@ public class PaymentController {
     }
 
     @PostMapping("/{paymentId}/refund")
-    public Map<?,?> refund(@PathVariable UUID paymentId,JwtAuthenticationToken auth) {
-        if(!auth.getToken().getClaimAsString("role").equals("ADMIN")&&!auth.getToken().getClaimAsString("role").equals("SUPERADMIN")) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        var rows=jdbc.query("SELECT provider_reference,status,amount,currency,method FROM payments WHERE id=?",(rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getString(4).trim(),rs.getString(5)),paymentId);
-        if(rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
-        RefundRow payment=rows.getFirst();
-        if(!"CAPTURED".equals(payment.status())) throw new ResponseStatusException(HttpStatus.CONFLICT,"Only captured payments can be refunded");
-        PaymentProvider extension=provider.getIfAvailable();
-        if(extension!=null) {
-            if(!extension.capabilities().refunds()) throw new ResponseStatusException(HttpStatus.CONFLICT,"Payment provider does not support refunds");
-            PaymentProvider.PaymentResult refunded=extension.refund(new PaymentProvider.RefundRequest(payment.providerReference(),"artio-refund-"+paymentId,payment.amount(),payment.currency()));
-            if(refunded==null||refunded.state()!=PaymentProvider.PaymentState.REFUNDED) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Payment provider did not confirm the refund");
-            jdbc.update("UPDATE payments SET status='REFUNDED',updated_at=now() WHERE id=? AND status='CAPTURED'",paymentId);
-            jdbc.update("UPDATE orders SET status='RETURNED' WHERE id=(SELECT order_id FROM payments WHERE id=?)",paymentId);
-            return Map.of("providerReference",refunded.providerReference(),"state",refunded.state());
+    @Transactional
+    public ResponseEntity<RefundView> refund(@PathVariable UUID paymentId, JwtAuthenticationToken auth,
+            @RequestHeader("Idempotency-Key") String idempotencyKey, @RequestBody RefundCommand command) {
+        String role = auth.getToken().getClaimAsString("role");
+        if (role == null || !Set.of("ADMIN", "SUPERADMIN").contains(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Idempotency-Key header is required");
+        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method FROM payments WHERE id=? FOR UPDATE",
+                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6)),paymentId);
+        if (payments.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
+        RefundRow payment = payments.getFirst();
+        var priorRows = jdbc.query("SELECT id,amount,status,provider_reference FROM payment_refunds WHERE payment_id=? AND idempotency_key=?",
+                (rs,n)->new RefundRecord(rs.getObject("id",UUID.class),rs.getBigDecimal("amount"),rs.getString("status"),rs.getString("provider_reference")),paymentId,idempotencyKey);
+        RefundRecord prior = priorRows.isEmpty() ? null : priorRows.getFirst();
+        BigDecimal remaining = payment.amount().subtract(payment.refundedAmount());
+        if (prior != null && prior.status().equals("COMPLETED")) {
+            if (command != null && command.amount() != null && prior.amount().compareTo(command.amount()) != 0)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"This idempotency key was already used for a different refund amount");
+            return ResponseEntity.ok(new RefundView(prior.id(), paymentId, prior.amount(), payment.currency(), payment.refundedAmount(), remaining,
+                    prior.providerReference(), "COMPLETED"));
         }
-        String intent=String.valueOf(stripe.get().uri("https://api.stripe.com/v1/checkout/sessions/{id}",payment.providerReference()).headers(h->h.setBearerAuth(stripeKey)).retrieve().body(Map.class).get("payment_intent"));
-        MultiValueMap<String,String> form=new LinkedMultiValueMap<>();form.add("payment_intent",intent);
-        Map<?,?> response=stripe.post().uri("https://api.stripe.com/v1/refunds").headers(h->h.setBearerAuth(stripeKey)).contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(Map.class);
-        jdbc.update("UPDATE payments SET status='REFUNDED',updated_at=now() WHERE id=?",paymentId);
-        jdbc.update("UPDATE orders SET status='RETURNED' WHERE id=(SELECT order_id FROM payments WHERE id=?)",paymentId);
-        return response;
+        if (!Set.of("CAPTURED", "PARTIALLY_REFUNDED").contains(payment.status()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Only captured payments can be refunded");
+        BigDecimal refundAmount = command == null || command.amount() == null ? remaining : command.amount();
+        int fractionDigits = Currency.getInstance(payment.currency()).getDefaultFractionDigits();
+        if (fractionDigits < 0 || refundAmount.signum() <= 0 || refundAmount.compareTo(remaining) > 0 || refundAmount.stripTrailingZeros().scale() > fractionDigits)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Refund amount must be positive, use the currency's minor unit, and not exceed the remaining captured amount");
+        if (prior != null && prior.amount().compareTo(refundAmount) != 0)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"This idempotency key was already used for a different refund amount");
+        UUID refundId = prior == null ? UUID.nameUUIDFromBytes((paymentId + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8)) : prior.id();
+        if (prior == null) jdbc.update("INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,currency,status) VALUES (?,?,?,?,?,'PROCESSING')",
+                refundId,paymentId,idempotencyKey,refundAmount,payment.currency());
+        else if (prior.status().equals("PROCESSING")) throw new ResponseStatusException(HttpStatus.CONFLICT,"This refund is already processing");
+        else jdbc.update("UPDATE payment_refunds SET status='PROCESSING',updated_at=now() WHERE id=? AND status='FAILED'",refundId);
+
+        String providerReference;
+        try {
+            PaymentProvider extension = provider.getIfAvailable();
+            if (extension != null) {
+                if (!extension.capabilities().refunds()) throw new IllegalStateException("Provider does not support refunds");
+                PaymentProvider.PaymentResult result = extension.refund(new PaymentProvider.RefundRequest(payment.providerReference(),
+                        "artio-refund-" + refundId, refundAmount, payment.currency()));
+                if (result == null || result.state() != PaymentProvider.PaymentState.REFUNDED
+                        || result.amount() == null || result.amount().compareTo(refundAmount) != 0
+                        || !payment.currency().equalsIgnoreCase(result.currency())
+                        || result.providerReference() == null || result.providerReference().isBlank())
+                    throw new IllegalStateException("Payment provider did not confirm the requested refund");
+                providerReference = result.providerReference();
+            } else {
+                if (stripeKey.isBlank()) throw new IllegalStateException("No payment provider is configured");
+                Map<?,?> session = stripe.get().uri("https://api.stripe.com/v1/checkout/sessions/{id}",payment.providerReference())
+                        .headers(h->h.setBearerAuth(stripeKey)).retrieve().body(Map.class);
+                Object intentValue = session == null ? null : session.get("payment_intent");
+                if (!(intentValue instanceof String intent) || !intent.startsWith("pi_")) throw new IllegalStateException("Payment has no refundable intent");
+                MultiValueMap<String,String> form=new LinkedMultiValueMap<>();
+                form.add("payment_intent",intent);
+                long minor = refundAmount.movePointRight(fractionDigits).longValueExact();
+                form.add("amount",Long.toString(minor));
+                Map<?,?> result=stripe.post().uri("https://api.stripe.com/v1/refunds")
+                        .headers(h->{h.setBearerAuth(stripeKey);h.set("Idempotency-Key","artio-refund-"+refundId);})
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(Map.class);
+                if (result == null || !"succeeded".equals(result.get("status")) || !(result.get("id") instanceof String reference))
+                    throw new IllegalStateException("Stripe did not confirm the requested refund");
+                providerReference = reference;
+            }
+        } catch (RuntimeException failure) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Payment provider did not confirm the refund; retry with the same Idempotency-Key");
+        }
+        BigDecimal totalRefunded = payment.refundedAmount().add(refundAmount);
+        String paymentStatus = totalRefunded.compareTo(payment.amount()) == 0 ? "REFUNDED" : "PARTIALLY_REFUNDED";
+        jdbc.update("UPDATE payments SET refunded_amount=?,status=?,updated_at=now() WHERE id=?",totalRefunded,paymentStatus,paymentId);
+        jdbc.update("UPDATE payment_refunds SET status='COMPLETED',provider_reference=?,updated_at=now() WHERE id=?",providerReference,refundId);
+        return ResponseEntity.ok(new RefundView(refundId,paymentId,refundAmount,payment.currency(),totalRefunded,
+                payment.amount().subtract(totalRefunded),providerReference,"COMPLETED"));
     }
 
     private boolean verifySignature(String body,String header) {
@@ -326,7 +383,11 @@ public class PaymentController {
         }catch(Exception e){return false;}
     }
     public record CheckoutSession(String sessionId,String checkoutUrl){}
-    private record RefundRow(String providerReference,String status,BigDecimal amount,String currency,String method){}
+    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method){}
+    private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference){}
+    public record RefundCommand(BigDecimal amount){}
+    public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,
+                             BigDecimal remainingAmount,String providerReference,String status){}
     private record OrderRow(BigDecimal total,String currency,String status){}
     private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency) { }
 }
