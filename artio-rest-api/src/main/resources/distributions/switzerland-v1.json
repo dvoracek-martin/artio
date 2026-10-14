@@ -1,0 +1,23 @@
+{
+  "manifestVersion": "1",
+  "id": "switzerland-v1",
+  "name": "Switzerland",
+  "description": "Swiss store defaults for currency, languages and local time.",
+  "countryCode": "CH",
+  "currencyCode": "CHF",
+  "defaultLocale": "de-CH",
+  "availableLanguages": ["de", "fr", "it", "en"],
+  "timezone": "Europe/Zurich",
+  "pluginRecommendations": [
+    {
+      "pluginId": "payments.stripe",
+      "reason": "Optional online payments. Add a published, digest-pinned provider manifest before enabling.",
+      "optional": true
+    },
+    {
+      "pluginId": "shipping.swiss-post",
+      "reason": "Optional Swiss carrier integration. Add a published, digest-pinned provider manifest before enabling.",
+      "optional": true
+    }
+  ]
+}
