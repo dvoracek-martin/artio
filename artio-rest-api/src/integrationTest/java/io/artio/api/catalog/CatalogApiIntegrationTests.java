@@ -927,6 +927,34 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void kafkaDeadLettersAreAdminOnlyPayloadFreeAndReplayable() {
+        UUID deadLetterId = UUID.randomUUID();
+        String eventId = UUID.randomUUID().toString();
+        String sensitivePayload = "private-kafka-payload-" + UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO kafka_consumer_dead_letters(id,source_topic,source_partition,source_offset,event_id,event_type,
+                    record_key,encrypted_payload,payload_is_null,schema_version,error_class)
+                VALUES (?,?,0,?,?,?,?,?,false,'1','IllegalArgumentException')
+                """, deadLetterId, "artio.order.events", 100L, eventId, "ORDER_CREATED", "order-" + eventId,
+                encryption.encrypt(sensitivePayload));
+
+        var anonymous = http.getForEntity("/api/v1/admin/operations/kafka/dead-letters/items", String.class);
+        assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        String items = adminExchange("/api/v1/admin/operations/kafka/dead-letters/items", HttpMethod.GET, null, String.class).getBody();
+        assertThat(items).contains(eventId).doesNotContain(sensitivePayload).doesNotContain("encryptedPayload");
+
+        var replay = adminExchange("/api/v1/admin/operations/kafka/dead-letters/{id}/replay", HttpMethod.POST, null,
+                io.artio.api.notifications.KafkaDeadLetterOperationsController.ReplayAccepted.class, deadLetterId);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM kafka_consumer_dead_letters WHERE id=?", String.class, deadLetterId))
+                .isEqualTo("REPLAY_REQUESTED");
+        var duplicateReplay = adminExchange("/api/v1/admin/operations/kafka/dead-letters/{id}/replay", HttpMethod.POST,
+                null, ApiError.class, deadLetterId);
+        assertThat(duplicateReplay.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
     void reconciliationMarksLostPaidWebhookAsCapturedAndPaid() {
         UUID orderId = createStaleStripeOrder("cs_reconcile_paid_" + UUID.randomUUID());
         STRIPE_RESPONSE.set("{\"status\":\"complete\",\"payment_status\":\"paid\"}");
