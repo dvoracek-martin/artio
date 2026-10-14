@@ -883,6 +883,10 @@ class CatalogApiIntegrationTests {
 
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM order_timeline_events WHERE order_id=? AND event_type='ORDER_CANCELLED' AND customer_visible", Integer.class, orderId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CANCELLED'", Integer.class, orderId.toString())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE user_id=? AND dedupe_key=?", Integer.class,
+                adminUserId, "order-cancelled:" + orderId)).isEqualTo(1);
         assertThat(inventory.reservationsByOrder(orderId)).singleElement()
                 .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
                 .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
