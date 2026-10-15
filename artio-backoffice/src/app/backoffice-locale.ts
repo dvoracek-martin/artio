@@ -3,6 +3,8 @@ export type BackofficeLocale = 'de' | 'it' | 'fr' | 'en';
 const COPY = {
   en: {
     language: 'Language',
+    shellSkip: 'Skip to main content', shellNavigation: 'Workspace navigation', shellWorkspace: 'WORKSPACE', shellOpenMenu: 'Open menu', shellCloseMenu: 'Close menu', shellAdministrator: 'Administrator', shellSignOut: 'Sign out', shellViewStorefront: 'View storefront', shellWorkspaceBadge: 'Artio workspace',
+    navOverview: 'Overview', navProducts: 'Products', navNewProduct: 'New product', navCatalogData: 'Catalog data', navBundles: 'Bundles', navExtensions: 'Extensions', navPricing: 'Pricing', navInventory: 'Inventory', navOrders: 'Orders', navCustomers: 'Customers', navReports: 'Reports', navGiftCards: 'Gift cards', navOperations: 'Operations', navSystemSettings: 'System Settings',
     kafkaConsumerHealth: 'Consumer health', kafkaMessagesBehind: 'messages behind', kafkaPartition: 'PARTITION', kafkaCommitted: 'COMMITTED', kafkaEnd: 'END', kafkaLag: 'LAG', kafkaLagUnavailable: 'Consumer lag unavailable; verify Kafka broker and topic.',
     reportsEyebrow: 'OPERATIONAL REPORTS', reportsTitle: 'Store performance', period: 'Period', periodLast: 'Last {days} days',
     reportActivityHelp: 'Order activity follows the order creation date. Each monetary figure stays in its recorded currency.',
@@ -83,6 +85,8 @@ const COPY = {
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
+    shellSkip: 'Zum Hauptinhalt springen', shellNavigation: 'Arbeitsbereich-Navigation', shellWorkspace: 'ARBEITSBEREICH', shellOpenMenu: 'Menü öffnen', shellCloseMenu: 'Menü schließen', shellAdministrator: 'Administrator', shellSignOut: 'Abmelden', shellViewStorefront: 'Storefront ansehen', shellWorkspaceBadge: 'Artio-Arbeitsbereich',
+    navOverview: 'Übersicht', navProducts: 'Produkte', navNewProduct: 'Neues Produkt', navCatalogData: 'Katalogdaten', navBundles: 'Bundles', navExtensions: 'Erweiterungen', navPricing: 'Preise', navInventory: 'Lagerbestand', navOrders: 'Bestellungen', navCustomers: 'Kunden', navReports: 'Berichte', navGiftCards: 'Geschenkkarten', navOperations: 'Betrieb', navSystemSettings: 'Systemeinstellungen',
     kafkaConsumerHealth: 'Zustand des Consumers', kafkaMessagesBehind: 'Nachrichten Rückstand', kafkaPartition: 'PARTITION', kafkaCommitted: 'BESTÄTIGT', kafkaEnd: 'ENDE', kafkaLag: 'RÜCKSTAND', kafkaLagUnavailable: 'Consumer-Lag nicht verfügbar; Kafka-Broker und Topic prüfen.',
     reportActivityHelp: 'Bestellaktivität richtet sich nach dem Erstellungsdatum. Jeder Geldbetrag bleibt in seiner Währung.', ordersCreated: 'Erstellte Bestellungen', selectedPeriod: 'Gewählter Zeitraum', customersActive: 'Aktive Kunden', withOrder: 'Mit einer Bestellung in diesem Zeitraum',
     capturedRefunded: 'Eingezogen und erstattet nach Währung', currency: 'WÄHRUNG', orders: 'BESTELLUNGEN', customers: 'KUNDEN', captured: 'EINGEZOGEN', refunded: 'ERSTATTET', netCaptured: 'NETTO EINGEZOGEN',
@@ -151,6 +155,8 @@ const COPY = {
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
+    shellSkip: 'Vai al contenuto principale', shellNavigation: 'Navigazione dello spazio di lavoro', shellWorkspace: 'SPAZIO DI LAVORO', shellOpenMenu: 'Apri menu', shellCloseMenu: 'Chiudi menu', shellAdministrator: 'Amministratore', shellSignOut: 'Esci', shellViewStorefront: 'Visualizza il negozio', shellWorkspaceBadge: 'Spazio di lavoro Artio',
+    navOverview: 'Panoramica', navProducts: 'Prodotti', navNewProduct: 'Nuovo prodotto', navCatalogData: 'Dati catalogo', navBundles: 'Bundle', navExtensions: 'Estensioni', navPricing: 'Prezzi', navInventory: 'Inventario', navOrders: 'Ordini', navCustomers: 'Clienti', navReports: 'Report', navGiftCards: 'Carte regalo', navOperations: 'Operazioni', navSystemSettings: 'Impostazioni di sistema',
     kafkaConsumerHealth: 'Stato del consumer', kafkaMessagesBehind: 'messaggi in ritardo', kafkaPartition: 'PARTIZIONE', kafkaCommitted: 'CONFERMATO', kafkaEnd: 'FINE', kafkaLag: 'RITARDO', kafkaLagUnavailable: 'Lag del consumer non disponibile; verificare il broker Kafka e il topic.',
     reportActivityHelp: 'L’attività degli ordini segue la data di creazione. Ogni importo resta nella valuta registrata.', ordersCreated: 'Ordini creati', selectedPeriod: 'Periodo selezionato', customersActive: 'Clienti attivi', withOrder: 'Con un ordine nel periodo',
     capturedRefunded: 'Incassato e rimborsato per valuta', currency: 'VALUTA', orders: 'ORDINI', customers: 'CLIENTI', captured: 'INCASSATO', refunded: 'RIMBORSATO', netCaptured: 'INCASSATO NETTO',
@@ -219,6 +225,8 @@ const COPY = {
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
+    shellSkip: 'Aller au contenu principal', shellNavigation: 'Navigation de l’espace de travail', shellWorkspace: 'ESPACE DE TRAVAIL', shellOpenMenu: 'Ouvrir le menu', shellCloseMenu: 'Fermer le menu', shellAdministrator: 'Administrateur', shellSignOut: 'Se déconnecter', shellViewStorefront: 'Voir la boutique', shellWorkspaceBadge: 'Espace de travail Artio',
+    navOverview: 'Vue d’ensemble', navProducts: 'Produits', navNewProduct: 'Nouveau produit', navCatalogData: 'Données du catalogue', navBundles: 'Lots', navExtensions: 'Extensions', navPricing: 'Tarification', navInventory: 'Stock', navOrders: 'Commandes', navCustomers: 'Clients', navReports: 'Rapports', navGiftCards: 'Cartes cadeaux', navOperations: 'Opérations', navSystemSettings: 'Paramètres système',
     kafkaConsumerHealth: 'État du consommateur', kafkaMessagesBehind: 'messages de retard', kafkaPartition: 'PARTITION', kafkaCommitted: 'VALIDÉ', kafkaEnd: 'FIN', kafkaLag: 'RETARD', kafkaLagUnavailable: 'Lag du consommateur indisponible ; vérifier le broker Kafka et le topic.',
     reportActivityHelp: 'L’activité suit la date de création de la commande. Chaque montant conserve sa devise enregistrée.', ordersCreated: 'Commandes créées', selectedPeriod: 'Période choisie', customersActive: 'Clients actifs', withOrder: 'Avec une commande pendant la période',
     capturedRefunded: 'Encaissé et remboursé par devise', currency: 'DEVISE', orders: 'COMMANDES', customers: 'CLIENTS', captured: 'ENCAISSÉ', refunded: 'REMBOURSÉ', netCaptured: 'ENCAISSÉ NET',
