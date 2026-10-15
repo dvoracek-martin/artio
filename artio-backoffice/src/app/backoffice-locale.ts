@@ -41,7 +41,11 @@ const COPY = {
     shippingDialogEyebrow: 'ORDER FULFILLMENT', shippingDialogTitle: 'Ship order',
     shippingLabelDescription: 'Create a carrier label and ship this order.', shippingManualDescription: 'Enter the tracking number to mark this order as shipped.',
     shippingTrackingNumber: 'Tracking number', shippingDialogBusy: 'Shipping order…', shippingDialogConfirm: 'Confirm shipment',
-    shippingTrackingRequired: 'Enter a tracking number.', shippingDialogFailure: 'Could not ship this order.'
+    shippingTrackingRequired: 'Enter a tracking number.', shippingDialogFailure: 'Could not ship this order.',
+    replayDialogEyebrow: 'EVENT DELIVERY', replayDialogTitle: 'Replay event',
+    replayKafkaDescription: 'Replay this Kafka event. Consumers must deduplicate its stable event ID.',
+    replayOutboxDescription: 'Replay this outbox event. Consumers must deduplicate its stable event ID.',
+    replayDialogBusy: 'Submitting replay…', replayDialogConfirm: 'Replay event', replayDialogFailure: 'Could not replay this event.'
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -71,7 +75,11 @@ const COPY = {
     shippingDialogEyebrow: 'BESTELLABWICKLUNG', shippingDialogTitle: 'Bestellung versenden',
     shippingLabelDescription: 'Ein Versandetikett erstellen und die Bestellung versenden.', shippingManualDescription: 'Trackingnummer eingeben, um die Bestellung als versendet zu markieren.',
     shippingTrackingNumber: 'Trackingnummer', shippingDialogBusy: 'Bestellung wird versendet…', shippingDialogConfirm: 'Versand bestätigen',
-    shippingTrackingRequired: 'Trackingnummer eingeben.', shippingDialogFailure: 'Bestellung konnte nicht versendet werden.'
+    shippingTrackingRequired: 'Trackingnummer eingeben.', shippingDialogFailure: 'Bestellung konnte nicht versendet werden.',
+    replayDialogEyebrow: 'EREIGNISZUSTELLUNG', replayDialogTitle: 'Ereignis erneut senden',
+    replayKafkaDescription: 'Dieses Kafka-Ereignis erneut senden. Consumers müssen die stabile Ereignis-ID deduplizieren.',
+    replayOutboxDescription: 'Dieses Outbox-Ereignis erneut senden. Consumers müssen die stabile Ereignis-ID deduplizieren.',
+    replayDialogBusy: 'Wird erneut gesendet…', replayDialogConfirm: 'Ereignis erneut senden', replayDialogFailure: 'Ereignis konnte nicht erneut gesendet werden.'
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -101,7 +109,11 @@ const COPY = {
     shippingDialogEyebrow: 'EVASIONE ORDINI', shippingDialogTitle: 'Spedisci l’ordine',
     shippingLabelDescription: 'Crea un’etichetta del corriere e spedisci l’ordine.', shippingManualDescription: 'Inserisci il numero di tracciamento per contrassegnare l’ordine come spedito.',
     shippingTrackingNumber: 'Numero di tracciamento', shippingDialogBusy: 'Spedizione dell’ordine…', shippingDialogConfirm: 'Conferma spedizione',
-    shippingTrackingRequired: 'Inserisci un numero di tracciamento.', shippingDialogFailure: 'Impossibile spedire l’ordine.'
+    shippingTrackingRequired: 'Inserisci un numero di tracciamento.', shippingDialogFailure: 'Impossibile spedire l’ordine.',
+    replayDialogEyebrow: 'CONSEGNA EVENTI', replayDialogTitle: 'Ripeti l’evento',
+    replayKafkaDescription: 'Ripeti questo evento Kafka. I consumer devono deduplicare l’ID evento stabile.',
+    replayOutboxDescription: 'Ripeti questo evento outbox. I consumer devono deduplicare l’ID evento stabile.',
+    replayDialogBusy: 'Invio della ripetizione…', replayDialogConfirm: 'Ripeti evento', replayDialogFailure: 'Impossibile ripetere l’evento.'
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -131,7 +143,11 @@ const COPY = {
     shippingDialogEyebrow: 'TRAITEMENT DE COMMANDE', shippingDialogTitle: 'Expédier la commande',
     shippingLabelDescription: 'Créer une étiquette transporteur et expédier cette commande.', shippingManualDescription: 'Saisissez le numéro de suivi pour marquer cette commande comme expédiée.',
     shippingTrackingNumber: 'Numéro de suivi', shippingDialogBusy: 'Expédition de la commande…', shippingDialogConfirm: 'Confirmer l’expédition',
-    shippingTrackingRequired: 'Saisissez un numéro de suivi.', shippingDialogFailure: 'Impossible d’expédier cette commande.'
+    shippingTrackingRequired: 'Saisissez un numéro de suivi.', shippingDialogFailure: 'Impossible d’expédier cette commande.',
+    replayDialogEyebrow: 'LIVRAISON DES ÉVÉNEMENTS', replayDialogTitle: 'Relancer l’événement',
+    replayKafkaDescription: 'Relancez cet événement Kafka. Les consommateurs doivent dédupliquer son identifiant stable.',
+    replayOutboxDescription: 'Relancez cet événement outbox. Les consommateurs doivent dédupliquer son identifiant stable.',
+    replayDialogBusy: 'Nouvel envoi…', replayDialogConfirm: 'Relancer l’événement', replayDialogFailure: 'Impossible de relancer cet événement.'
   }
 } as const;
 
