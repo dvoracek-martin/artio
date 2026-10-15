@@ -11,7 +11,7 @@ python -m unittest discover -s artio-plugins/paypal-payments -p "test_*.py" -v
 docker build -f artio-plugins/paypal-payments/Dockerfile -t artio/paypal-payments:1.0.0 .
 ```
 
-The tests mock PayPal HTTP and do not claim a sandbox transaction, Docker runtime test or installable image. The manifest remains a template until a digest-pinned image is published.
+The tests mock PayPal HTTP and do not claim a sandbox transaction. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-payment-provider-containers.ps1` from the repository root to build and run the Stripe and PayPal images with no network, a read-only root filesystem, dropped Linux capabilities, and bounded resources. The acceptance checks health, diagnostics, authenticated contract handling, capabilities, validation, and credential-free failure behavior. The manifest remains a template until a digest-pinned image is published.
 
 ## References
 
