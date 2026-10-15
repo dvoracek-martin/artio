@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, ChangeDetectionStrategy, ElementRef, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
+import { productMediaText, ProductMediaLocaleKey } from './product-media-locale';
 
 type ProductMedia = { id: string; altText: string; position: number; contentUrl: string; width: number; height: number };
 
@@ -13,14 +14,15 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
     template: `
     <section class="panel" aria-labelledby="product-media-heading">
       <div class="panel-heading">
-        <div><p class="eyebrow">CATALOG MEDIA</p><h2 id="product-media-heading">{{productName}} images</h2></div>
-        <button type="button" class="link-button" (click)="close.emit()">Close</button>
+        <div><p class="eyebrow">{{m('eyebrow')}}</p><h2 id="product-media-heading">{{productName}} {{m('titleSuffix')}}</h2></div>
+        <button type="button" class="link-button" (click)="close.emit()">{{m('close')}}</button>
       </div>
       <form class="create-form" (ngSubmit)="upload(uploadInput)">
-        <label>Image file<input #uploadInput type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" (change)="selectFile($event)" required></label>
-        <label>Alternative text<input [(ngModel)]="altText" name="altText" maxlength="500" placeholder="Describe the image"></label>
-        <button class="primary" [disabled]="!file || busy">{{busy?'Uploading…':'Upload image'}}</button>
+        <label>{{m('imageFile')}}<input #uploadInput type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" (change)="selectFile($event)" required></label>
+        <label>{{m('alternativeText')}}<input [(ngModel)]="altText" name="altText" maxlength="500" [placeholder]="m('alternativeTextPlaceholder')"></label>
+        <button class="primary" [disabled]="!file || busy">{{busy?m('uploading'):m('upload')}}</button>
       </form>
+      @if (loading) { <p class="muted" role="status">{{m('loading')}}</p> }
       @if (error) {
         <p class="error" role="alert">{{error}}</p>
       }
@@ -29,19 +31,19 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
           @for (item of items; track item; let index = $index) {
             <article class="product-media-card">
               <img [src]="item.contentUrl" [alt]="item.altText" width="240" height="180" loading="lazy">
-              <p>{{item.altText || 'No alternative text'}} · {{item.width}}×{{item.height}}</p>
+            <p>{{item.altText || m('noAlternativeText')}} · {{item.width}}×{{item.height}}</p>
               <div class="row">
-                <label class="link-button">Replace<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden (change)="replace(item,$event)"></label>
-                <button type="button" class="link-button" [disabled]="index===0" [attr.aria-label]="'Move image '+(index+1)+' earlier'" (click)="move(index,-1)">← Earlier</button>
-                <button type="button" class="link-button" [disabled]="index===items.length-1" [attr.aria-label]="'Move image '+(index+1)+' later'" (click)="move(index,1)">Later →</button>
-                <button type="button" class="link-button danger" [attr.aria-label]="'Delete image '+(index+1)" (click)="remove(item)">Delete</button>
+                <label class="link-button">{{m('replace')}}<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden (change)="replace(item,$event)"></label>
+                <button type="button" class="link-button" [disabled]="index===0" [attr.aria-label]="m('moveEarlier',{index:(index+1).toString()})" (click)="move(index,-1)">{{m('earlier')}}</button>
+                <button type="button" class="link-button" [disabled]="index===items.length-1" [attr.aria-label]="m('moveLater',{index:(index+1).toString()})" (click)="move(index,1)">{{m('later')}}</button>
+                <button type="button" class="link-button danger" [attr.aria-label]="m('deleteImage',{index:(index+1).toString()})" (click)="remove(item)">{{m('delete')}}</button>
               </div>
             </article>
           }
         </div>
       }
-      @if (!items.length) {
-        <p class="empty">No product images yet.</p>
+      @if (!loading && !error && !items.length) {
+        <p class="empty">{{m('empty')}}</p>
       }
       @if (deleteTarget) {
         <dialog #deleteDialog class="refund-dialog" aria-labelledby="delete-media-title" (cancel)="cancelDeleteDialog($event)" (close)="deleteDialogClosed()">
@@ -64,6 +66,7 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
 export class ProductMediaAdminComponent implements OnChanges {
   @ViewChild('deleteDialog') private deleteDialogRef?:ElementRef<HTMLDialogElement>;
   t(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
+  m(key:ProductMediaLocaleKey,values:Record<string,string>={}):string{return productMediaText(currentBackofficeLocale(),key,values)}
   @Input({required:true}) productId='';
   @Input() productName='';
   @Output() close = new EventEmitter<void>();
@@ -72,6 +75,7 @@ export class ProductMediaAdminComponent implements OnChanges {
   file:File|null=null;
   altText='';
   error='';
+  loading=false;
   busy=false;
   deleteTarget:ProductMedia|null=null;
   deleteBusy=false;
@@ -79,30 +83,30 @@ export class ProductMediaAdminComponent implements OnChanges {
 
   ngOnChanges(changes:SimpleChanges):void { if(changes['productId']&&this.productId)this.load(); }
   selectFile(event:Event):void { const input=event.target as HTMLInputElement; this.file=input.files?.[0]??null; this.error=''; }
-  load():void { this.http.get<ProductMedia[]>(`/api/v1/products/${this.productId}/media`).subscribe({next:items=>this.items=items,error:e=>this.error=e.error?.message??e.error?.detail??'Could not load product images.'}); }
+  load():void { this.loading=true;this.error='';this.http.get<ProductMedia[]>(`/api/v1/products/${this.productId}/media`).subscribe({next:items=>{this.items=items;this.loading=false},error:e=>{this.loading=false;this.error=e.error?.message??e.error?.detail??this.m('loadFailure')}}); }
   upload(input:HTMLInputElement):void {
     if(this.busy)return;
     if(!this.file)return;
-    if(this.file.size>10*1024*1024){this.error='Image uploads are limited to 10 MiB.';return;}
-    if(!this.isSupported(this.file)){this.error='Choose a JPEG or PNG image.';return;}
+    if(this.file.size>10*1024*1024){this.error=this.m('uploadLimit');return;}
+    if(!this.isSupported(this.file)){this.error=this.m('unsupported');return;}
     const form=new FormData();form.append('file',this.file,this.file.name);
     this.busy=true;
     this.http.post<ProductMedia>(`/api/v1/products/${this.productId}/media?altText=${encodeURIComponent(this.altText)}`,form).subscribe({
       next:()=>{this.busy=false;this.file=null;input.value='';this.altText='';this.error='';this.load()},
-      error:e=>{this.busy=false;this.error=e.error?.message??e.error?.detail??'Could not upload the image.'}
+      error:e=>{this.busy=false;this.error=e.error?.message??e.error?.detail??this.m('uploadFailure')}
     });
   }
   replace(item:ProductMedia,event:Event):void {
     const input=event.target as HTMLInputElement;const file=input.files?.[0];input.value='';if(!file)return;
-    if(file.size>10*1024*1024){this.error='Image uploads are limited to 10 MiB.';return;}
-    if(!this.isSupported(file)){this.error='Choose a JPEG or PNG image.';return;}
+    if(file.size>10*1024*1024){this.error=this.m('uploadLimit');return;}
+    if(!this.isSupported(file)){this.error=this.m('unsupported');return;}
     const form=new FormData();form.append('file',file,file.name);
-    this.http.put<ProductMedia>(`/api/v1/products/${this.productId}/media/${item.id}?altText=${encodeURIComponent(item.altText)}`,form).subscribe({next:()=>this.load(),error:e=>this.error=e.error?.message??e.error?.detail??'Could not replace the image.'});
+    this.http.put<ProductMedia>(`/api/v1/products/${this.productId}/media/${item.id}?altText=${encodeURIComponent(item.altText)}`,form).subscribe({next:()=>this.load(),error:e=>this.error=e.error?.message??e.error?.detail??this.m('replaceFailure')});
   }
   private isSupported(file:File):boolean { return ['image/jpeg','image/png'].includes(file.type)||/\.(jpe?g|png)$/i.test(file.name); }
   move(index:number,delta:-1|1):void {
     const reordered=[...this.items];const target=index+delta;[reordered[index],reordered[target]]=[reordered[target],reordered[index]];
-    this.http.put<ProductMedia[]>(`/api/v1/products/${this.productId}/media/order`,{mediaIds:reordered.map(item=>item.id)}).subscribe({next:items=>this.items=items,error:e=>this.error=e.error?.message??e.error?.detail??'Could not reorder images.'});
+    this.http.put<ProductMedia[]>(`/api/v1/products/${this.productId}/media/order`,{mediaIds:reordered.map(item=>item.id)}).subscribe({next:items=>this.items=items,error:e=>this.error=e.error?.message??e.error?.detail??this.m('reorderFailure')});
   }
   remove(item:ProductMedia):void {
     this.deleteTarget=item;this.deleteBusy=false;this.deleteError='';setTimeout(()=>{const dialog=this.deleteDialogRef?.nativeElement;if(this.deleteTarget?.id===item.id&&dialog&&!dialog.open)dialog.showModal()},0);
