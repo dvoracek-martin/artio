@@ -277,15 +277,15 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
 }</small>@if (item.staffNote) {
 <small>Staff note: {{item.staffNote}}</small>
 }</span>@if (item.status==='REQUESTED') {
-<button class="link-button" (click)="reviewReturn(item,true)">Approve</button>
+<button type="button" class="link-button" (click)="openReturnAction(item,'review',true)">Approve</button>
 }@if (item.status==='REQUESTED') {
-<button class="link-button" (click)="reviewReturn(item,false)">Reject</button>
+<button type="button" class="link-button" (click)="openReturnAction(item,'review',false)">Reject</button>
 }@if (item.status==='APPROVED') {
 @if (orderWarehouses.length) {
   <label>Restock warehouse<artio-search-select [(ngModel)]="item.receiveWarehouseId" [name]="'return-warehouse-'+item.id" [options]="warehouseOptions" label="Restocking warehouse" placeholder="No restocking"></artio-search-select></label>
   }@if (orderWarehouses.length) {
-  <button class="link-button" [disabled]="!item.receiveWarehouseId" (click)="receiveReturn(item,true)">Receive &amp; restock</button>
-  }<button class="link-button" (click)="receiveReturn(item,false)">Receive without restocking</button>
+  <button class="link-button" [disabled]="!item.receiveWarehouseId" (click)="openReturnAction(item,'receive',true)">Receive &amp; restock</button>
+  }<button class="link-button" (click)="openReturnAction(item,'receive',false)">Receive without restocking</button>
 }</div>
 }@if (!selectedReturns.length) {
 <p class="muted">No return requests for this order.</p>
@@ -370,16 +370,40 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
     </div>
   </form>
 </dialog>
+}@if (returnDialogAction) {
+<dialog #returnDialog class="refund-dialog" aria-labelledby="return-dialog-title" (cancel)="cancelReturnDialog($event)" (close)="returnDialogClosed()">
+  <form class="refund-dialog-content" (ngSubmit)="submitReturnAction()">
+    <p class="eyebrow">{{t('returnDialogEyebrow')}}</p>
+    @if (returnDialogAction.kind==='review') {
+      <h2 id="return-dialog-title">{{returnDialogAction.approve?t('returnApproveTitle'):t('returnRejectTitle')}}</h2>
+    } @else {
+      <h2 id="return-dialog-title">{{returnDialogAction.restock?t('returnRestockTitle'):t('returnReceiveTitle')}}</h2>
+    }
+    @if (returnDialogAction.item.reason) { <p class="refund-payment-summary"><strong>{{t('returnCustomerReason')}}:</strong> <span>{{returnDialogAction.item.reason}}</span></p> }
+    @if (returnDialogAction.kind==='receive' && returnDialogAction.restock) {
+      <p class="refund-payment-summary"><strong>{{t('returnDialogWarehouse')}}:</strong> <span>{{warehouseName(returnDialogAction.item.receiveWarehouseId)}}</span></p>
+    }
+    <label for="return-staff-note">{{t('returnDialogNote')}}</label>
+    <textarea id="return-staff-note" name="returnStaffNote" rows="4" maxlength="2000" [(ngModel)]="returnDialogNote" [disabled]="returnDialogBusy" autofocus></textarea>
+    @if (returnDialogError) { <p class="error" role="alert">{{returnDialogError}}</p> }
+    @if (returnDialogBusy) { <p class="muted" role="status">{{t('returnDialogBusy')}}</p> }
+    <div class="refund-dialog-actions">
+      <button type="button" class="secondary" [disabled]="returnDialogBusy" (click)="closeReturnDialog()">{{t('refundCancel')}}</button>
+      <button type="submit" class="primary" [disabled]="returnDialogBusy || (returnDialogAction.restock && !returnDialogAction.item.receiveWarehouseId)">{{t('returnDialogConfirm')}}</button>
+    </div>
+  </form>
+</dialog>
 }</main></div>
 }`
 })
 export class AdminComponent {
  @ViewChild('refundDialog') private refundDialogRef?:ElementRef<HTMLDialogElement>;
+ @ViewChild('returnDialog') private returnDialogRef?:ElementRef<HTMLDialogElement>;
  distributionPlugins:any[]=[];extensionCatalog:any[]=[];
  systemSettings:any={storeName:"Artio Store",countryCode:"CH",currencyCode:"CHF",locale:"de-CH",timezone:"Europe/Zurich",externalBaseUrl:"",distributionId:"switzerland-v1"};systemLanguages="de,fr,it,en";systemSelectedLanguages=["de","fr","it","en"];storeLanguageOptions=LANGUAGE_OPTIONS;countryOptions=COUNTRY_OPTIONS;currencyOptions=CURRENCY_OPTIONS;localeOptions=LOCALE_OPTIONS;timezoneOptions=TIMEZONE_OPTIONS;systemSettingsAudit:any[]=[];outboxDiagnostics:any=null;outboxDeadEvents:any[]=[];kafkaDeadLetters:any={dead:0,replayPending:0,replayed:0};kafkaDeadLetterItems:any[]=[];kafkaConsumerLag:any=null;setupChecked=false;setupRequired=false;developerMode=false;
  bundleTranslationBundle:any=null;bundleTranslationLocale='de';bundleTranslationDraft:any={name:'',optionGroupNames:{}};bundleGroups:any[]=[{code:'choices',name:'Choose your items',minimumSelections:1,maximumSelections:1,sellables:[]}];
  productImportReport:any=null;mediaProduct:Product|null=null;private ordersRequestVersion=0;private router=inject(Router);today=new Date();success='';navOpen=false;overviewProducts:Product[]=[];overviewProductTotal=0;overviewOrderTotal=0;private http=inject(HttpClient); token=localStorage.getItem('artio-admin-token'); email=localStorage.getItem('artio-admin-email')??'';password='';error='';extensionHealth='';searchIndexStatus='';tab='overview';query='';products:Product[]=[];ordersLoading=false;orderDetailLoading=false;ordersError='';catalogPage=0;catalogSize=25;catalogTotal=0;catalogState='ALL';catalogSort='updatedAt';catalogDirection='desc';catalogBrandId='';catalogCategoryId='';catalogBrands:any[]=[];catalogCategories:any[]=[];bundles:any[]=[];extensions:any[]=[];extensionAudit:any[]=[];extensionAuditFor:string|null=null;extensionInvocation={extensionPoint:'',operation:'health',payloadJson:'{}'};extensionInvocationResult:any=null;selectedExtension:any=null;extensionConfig:Record<string,any>={};extensionManifestJson='';prices:any[]=[];taxRules:any[]=[];sellableTaxCategories:any[]=[];taxAssignment={sellableId:'',category:'STANDARD'};orders:any[]=[];orderPage=0;orderSize=25;orderTotal=0;orderPages=0;ordersQuery='';ordersStatus='';orderStatuses=['PENDING','CONFIRMED','PAID','PARTIALLY_SHIPPED','SHIPPED','DELIVERED','CANCELLED','RETURNED'];selectedOrder:any=null;selectedReturns:any[]=[];orderWarehouses:any[]=[];selectedTimeline:any[]=[];orderNote='';selectedLoyalty:any=null;enterpriseFeatures:string[]=[];users:any[]=[];accessUser:any=null;accessRole='CUSTOMER';accessPermissions:string[]=[];permissionOptions=['PRODUCT_CREATE','PRODUCT_EDIT','PRODUCT_DELETE','CATEGORY_MANAGE','PRICING_MANAGE','INVENTORY_MANAGE','ORDER_FULFILL','USER_MANAGE','REPORTS_VIEW','ANALYTICS_VIEW'];usersQuery='';usersActivity='ALL';showBundle=false;showExtensionRegistration=false;showPrice=false;translationProduct:Product|null=null;translationLocale='de';translationDraft={name:'',description:'',seoSlug:'',seoTitle:'',seoDescription:''};bundleDraft:any={name:'',sku:'',type:'CONFIGURABLE',pricingMode:'COMPONENT_SUM',fixedAmount:0,currency:'CHF',discountPercentage:10};bundleMarketPrices:any[]=[];priceDraft:any={sellableId:'',amount:0,currency:'USD',market:'US',channel:'WEB',pricesIncludeTax:false};
- selectedShipments:any[]=[];shipmentTrackingNumber='';refundDialogPayment:any=null;refundDialogAmount='';refundDialogError='';refundSubmitting=false;mfaCode='';mfaSetupRequired=false;mfaEnrollment:any=null;mfaQrCode='';mfaCopied=false;mfaBackupCodes:string[]=[];
+ selectedShipments:any[]=[];shipmentTrackingNumber='';refundDialogPayment:any=null;refundDialogAmount='';refundDialogError='';refundSubmitting=false;returnDialogAction:any=null;returnDialogNote='';returnDialogError='';returnDialogBusy=false;mfaCode='';mfaSetupRequired=false;mfaEnrollment:any=null;mfaQrCode='';mfaCopied=false;mfaBackupCodes:string[]=[];
  get isSuperadmin():boolean{try{const payload=JSON.parse(atob((this.token??"").split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));return payload.role==="SUPERADMIN"}catch{return false}} get title():string{return ({system:"System Settings",reports:'Reports',overview:'Overview',products:'Products',productNew:'New product',catalogData:'Catalog data',bundles:'Bundles',extensions:'Extensions',pricing:'Pricing',inventory:'Inventory',orders:'Orders',users:'Customers',giftCards:'Gift cards',operations:'Operations'} as Record<string,string>)[this.tab]??'Overview'}
  navigateTo(tab:string):void{this.navOpen=false;this.router.navigateByUrl(tab==='productNew'?'/products/new':'/'+tab)}
  private syncRoute():void{const path=this.router.url.split('?')[0];const tab=path==='/products/new'?'productNew':path.slice(1);if(['overview','products','productNew','catalogData','bundles','extensions','pricing','inventory','orders','users','giftCards','operations','system','reports'].includes(tab))this.tab=tab;this.error='';this.success='';if(this.token&&!this.mfaSetupRequired){switch(this.tab){case 'overview':this.loadDashboard();break;case 'products':this.loadProducts();break;case 'bundles':this.loadBundles();break;case 'extensions':this.loadExtensions();break;case 'pricing':this.loadPrices();break;case 'orders':this.loadOrders();break;case 'users':this.loadUsers();break;case 'operations':this.loadOutbox();break;case 'system':if(this.isSuperadmin)this.loadSystemSettings();break;case 'reports':break;}}}
@@ -419,8 +443,12 @@ export class AdminComponent {
  createShipment():void{if(!this.selectedOrder)return;const items=(this.selectedOrder.lines??[]).filter((line:any)=>Number(line.shipQuantity)>0).map((line:any)=>({orderItemId:line.id,quantity:Number(line.shipQuantity)}));if(!this.shipmentTrackingNumber.trim()||items.length===0){this.error='Enter a tracking number and a quantity for at least one order line.';return}this.http.post<any>(`/api/v1/admin/orders/${this.selectedOrder.id}/shipments`,{trackingNumber:this.shipmentTrackingNumber.trim(),items}).subscribe({next:()=>{this.error='';this.viewOrder({id:this.selectedOrder.id});this.loadOrders()},error:e=>this.error=e.error?.message??e.error?.detail??e.error?.message??'Could not create shipment.'})}
  loadOrderTimeline(orderId:string):void{this.http.get<any[]>('/api/v1/admin/orders/'+orderId+'/timeline').subscribe({next:events=>this.selectedTimeline=events,error:e=>this.error=e.error?.message??e.error?.detail??'Could not load order timeline.'})}
  addOrderNote():void{if(!this.selectedOrder||!this.orderNote.trim())return;this.http.post<any>(`/api/v1/admin/orders/${this.selectedOrder.id}/notes`,{message:this.orderNote.trim()}).subscribe({next:()=>{this.orderNote='';this.loadOrderTimeline(this.selectedOrder.id)},error:e=>this.error=e.error?.message??e.error?.detail??'Could not add staff note.'})}
- reviewReturn(item:any,approve:boolean):void{const note=prompt(approve?'Optional approval note':'Reason for rejecting this return');if(note===null)return;this.http.post<any>(`/api/v1/admin/orders/${item.orderId}/returns/${item.id}/review`,{approve,note}).subscribe({next:()=>this.viewOrder({id:item.orderId}),error:e=>this.error=e.error?.message??e.error?.detail??'Could not review return.'})}
- receiveReturn(item:any,restock:boolean):void{if(!this.selectedOrder)return;let note=prompt(restock?'Optional receiving note':'Optional note');if(note===null)return;const warehouseId=restock?item.receiveWarehouseId:null;if(restock&&!warehouseId){this.error='Choose a warehouse before restocking.';return}this.http.post<any>(`/api/v1/admin/orders/${item.orderId}/returns/${item.id}/receive`,{restock,warehouseId,note}).subscribe({next:()=>this.viewOrder({id:this.selectedOrder.id}),error:e=>this.error=e.error?.message??e.error?.detail??'Could not receive return.'})}
+ openReturnAction(item:any,kind:'review'|'receive',value:boolean):void{this.returnDialogAction={item,kind,approve:kind==='review'?value:false,restock:kind==='receive'?value:false};this.returnDialogNote='';this.returnDialogError='';this.returnDialogBusy=false;setTimeout(()=>{const dialog=this.returnDialogRef?.nativeElement;if(this.returnDialogAction?.item?.id===item.id&&dialog&&!dialog.open)dialog.showModal()},0)}
+ cancelReturnDialog(event:Event):void{if(this.returnDialogBusy)event.preventDefault()}
+ returnDialogClosed():void{if(this.returnDialogBusy)return;this.returnDialogAction=null;this.returnDialogNote='';this.returnDialogError=''}
+ closeReturnDialog():void{if(!this.returnDialogBusy)this.returnDialogRef?.nativeElement.close()}
+ warehouseName(id:string|null|undefined):string{return this.orderWarehouses.find(warehouse=>warehouse.id===id)?.name??'—'}
+ submitReturnAction():void{const action=this.returnDialogAction;if(!action||this.returnDialogBusy)return;const item=action.item;const note=this.returnDialogNote.trim()||null;const receiving=action.kind==='receive';const warehouseId=action.restock?item.receiveWarehouseId:null;if(receiving&&action.restock&&!warehouseId){this.returnDialogError=this.t('returnDialogWarehouseRequired');return}const path=receiving?`/api/v1/admin/orders/${item.orderId}/returns/${item.id}/receive`:`/api/v1/admin/orders/${item.orderId}/returns/${item.id}/review`;const body=receiving?{restock:action.restock,warehouseId,note}:{approve:action.approve,note};this.returnDialogBusy=true;this.returnDialogError='';this.http.post<any>(path,body).subscribe({next:()=>{const orderId=item.orderId;this.returnDialogBusy=false;this.returnDialogRef?.nativeElement.close();this.viewOrder({id:orderId})},error:e=>{this.returnDialogBusy=false;this.returnDialogError=e.error?.message??e.error?.detail??this.t('returnDialogFailure')}})}
  refundPayment(payment:any):void{this.refundDialogPayment=payment;this.refundDialogAmount='';this.refundDialogError='';this.refundSubmitting=false;setTimeout(()=>{const dialog=this.refundDialogRef?.nativeElement;if(this.refundDialogPayment?.id===payment.id&&dialog&&!dialog.open)dialog.showModal()},0)}
  cancelRefundDialog(event:Event):void{if(this.refundSubmitting)event.preventDefault()}
  refundDialogClosed():void{if(this.refundSubmitting)return;this.refundDialogPayment=null;this.refundDialogAmount='';this.refundDialogError=''}

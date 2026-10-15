@@ -32,7 +32,12 @@ const COPY = {
     refundAlready: 'Already refunded', refundAmount: 'Refund amount', refundRemainingPlaceholder: 'Remaining balance',
     refundAmountHelp: 'Leave blank to refund the remaining balance.', refundSubmitting: 'Sending refund…',
     refundCancel: 'Cancel', refundSubmit: 'Send refund', refundInvalidAmount: 'Enter a positive refund amount.',
-    refundFailure: 'Refund was not confirmed. Retry with the same amount.'
+    refundFailure: 'Refund was not confirmed. Retry with the same amount.',
+    returnDialogEyebrow: 'RETURN', returnApproveTitle: 'Approve return', returnRejectTitle: 'Reject return',
+    returnRestockTitle: 'Receive and restock', returnReceiveTitle: 'Receive without restocking',
+    returnCustomerReason: 'Reason', returnDialogWarehouse: 'Warehouse',
+    returnDialogNote: 'Staff note', returnDialogBusy: 'Saving…',
+    returnDialogConfirm: 'Confirm', returnDialogWarehouseRequired: 'Select a warehouse.', returnDialogFailure: 'Update failed.'
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -53,7 +58,12 @@ const COPY = {
     refundAlready: 'Bereits erstattet', refundAmount: 'Erstattungsbetrag', refundRemainingPlaceholder: 'Verbleibender Betrag',
     refundAmountHelp: 'Leer lassen, um den verbleibenden Betrag zu erstatten.', refundSubmitting: 'Erstattung wird gesendet…',
     refundCancel: 'Abbrechen', refundSubmit: 'Erstattung senden', refundInvalidAmount: 'Geben Sie einen positiven Erstattungsbetrag ein.',
-    refundFailure: 'Die Erstattung wurde nicht bestätigt. Versuchen Sie es mit demselben Betrag erneut.'
+    refundFailure: 'Die Erstattung wurde nicht bestätigt. Versuchen Sie es mit demselben Betrag erneut.',
+    returnDialogEyebrow: 'RETOURE', returnApproveTitle: 'Genehmigen', returnRejectTitle: 'Ablehnen',
+    returnRestockTitle: 'Annehmen und einlagern', returnReceiveTitle: 'Ohne Einlagerung annehmen',
+    returnCustomerReason: 'Grund', returnDialogWarehouse: 'Lager',
+    returnDialogNote: 'Interne Notiz', returnDialogBusy: 'Wird gespeichert…',
+    returnDialogConfirm: 'Bestätigen', returnDialogWarehouseRequired: 'Lager auswählen.', returnDialogFailure: 'Aktualisierung fehlgeschlagen.'
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -74,7 +84,12 @@ const COPY = {
     refundAlready: 'Già rimborsato', refundAmount: 'Importo del rimborso', refundRemainingPlaceholder: 'Saldo residuo',
     refundAmountHelp: 'Lascia vuoto per rimborsare il saldo residuo.', refundSubmitting: 'Invio del rimborso…',
     refundCancel: 'Annulla', refundSubmit: 'Invia rimborso', refundInvalidAmount: 'Inserisci un importo positivo.',
-    refundFailure: 'Il rimborso non è stato confermato. Riprova con lo stesso importo.'
+    refundFailure: 'Il rimborso non è stato confermato. Riprova con lo stesso importo.',
+    returnDialogEyebrow: 'RESO', returnApproveTitle: 'Approva il reso', returnRejectTitle: 'Rifiuta il reso',
+    returnRestockTitle: 'Ricevi e reintegra', returnReceiveTitle: 'Ricevi senza reintegrare',
+    returnCustomerReason: 'Motivo', returnDialogWarehouse: 'Magazzino',
+    returnDialogNote: 'Nota interna', returnDialogBusy: 'Salvataggio…',
+    returnDialogConfirm: 'Conferma', returnDialogWarehouseRequired: 'Scegli un magazzino.', returnDialogFailure: 'Aggiornamento non riuscito.'
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -95,7 +110,12 @@ const COPY = {
     refundAlready: 'Déjà remboursé', refundAmount: 'Montant du remboursement', refundRemainingPlaceholder: 'Solde restant',
     refundAmountHelp: 'Laissez vide pour rembourser le solde restant.', refundSubmitting: 'Envoi du remboursement…',
     refundCancel: 'Annuler', refundSubmit: 'Envoyer le remboursement', refundInvalidAmount: 'Saisissez un montant de remboursement positif.',
-    refundFailure: 'Le remboursement n’a pas été confirmé. Réessayez avec le même montant.'
+    refundFailure: 'Le remboursement n’a pas été confirmé. Réessayez avec le même montant.',
+    returnDialogEyebrow: 'RETOUR', returnApproveTitle: 'Approuver le retour', returnRejectTitle: 'Refuser le retour',
+    returnRestockTitle: 'Réceptionner et remettre en stock', returnReceiveTitle: 'Réceptionner sans remise en stock',
+    returnCustomerReason: 'Motif', returnDialogWarehouse: 'Entrepôt',
+    returnDialogNote: 'Note interne', returnDialogBusy: 'Enregistrement…',
+    returnDialogConfirm: 'Confirmer', returnDialogWarehouseRequired: 'Choisissez un entrepôt.', returnDialogFailure: 'Échec de la mise à jour.'
   }
 } as const;
 
