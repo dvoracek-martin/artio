@@ -1,4 +1,4 @@
-FROM opensearchproject/opensearch:2.17.1@sha256:1193b7c29c5d63028523728243cc4da047ac49f697a8f8105e5aeee2f89bcc4c
+FROM opensearchproject/opensearch:3.9.0@sha256:adfa61f85025d06b4aeb562e7e74fde7e31c437039c93c3862c17e9acebd6c7c
 COPY --chown=1000:1000 opensearch.yml /usr/share/opensearch/config/opensearch.yml
 ENV OPENSEARCH_JAVA_OPTS="-Xms512m -Xmx512m"
 USER root

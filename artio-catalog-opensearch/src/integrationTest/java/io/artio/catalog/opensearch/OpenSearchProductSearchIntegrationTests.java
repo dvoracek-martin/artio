@@ -23,7 +23,7 @@ import org.testcontainers.utility.DockerImageName;
 @Testcontainers(disabledWithoutDocker = true)
 class OpenSearchProductSearchIntegrationTests {
     @Container
-    static final GenericContainer<?> OPENSEARCH = new GenericContainer<>(DockerImageName.parse("opensearchproject/opensearch:2.17.1"))
+    static final GenericContainer<?> OPENSEARCH = new GenericContainer<>(DockerImageName.parse("opensearchproject/opensearch:3.9.0"))
             .withEnv("discovery.type", "single-node")
             .withEnv("plugins.security.disabled", "true")
             .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "Artio-Test-OpenSearch-2026!Strong")
