@@ -45,7 +45,11 @@ const COPY = {
     replayDialogEyebrow: 'EVENT DELIVERY', replayDialogTitle: 'Replay event',
     replayKafkaDescription: 'Replay this Kafka event. Consumers must deduplicate its stable event ID.',
     replayOutboxDescription: 'Replay this outbox event. Consumers must deduplicate its stable event ID.',
-    replayDialogBusy: 'Submitting replay…', replayDialogConfirm: 'Replay event', replayDialogFailure: 'Could not replay this event.'
+    replayDialogBusy: 'Submitting replay…', replayDialogConfirm: 'Replay event', replayDialogFailure: 'Could not replay this event.',
+    productActionEyebrow: 'PRODUCT ACTION', archiveProductTitle: 'Archive product',
+    archiveProductDescription: 'The SKU and order history will be retained. The product will no longer be available for sale.',
+    cancelPublicationTitle: 'Cancel scheduled publication', cancelPublicationDescription: 'This product will remain unpublished until you schedule it again.',
+    productActionBusy: 'Updating product…', productActionConfirm: 'Confirm action', productActionFailure: 'Could not update this product.'
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -79,7 +83,11 @@ const COPY = {
     replayDialogEyebrow: 'EREIGNISZUSTELLUNG', replayDialogTitle: 'Ereignis erneut senden',
     replayKafkaDescription: 'Dieses Kafka-Ereignis erneut senden. Consumers müssen die stabile Ereignis-ID deduplizieren.',
     replayOutboxDescription: 'Dieses Outbox-Ereignis erneut senden. Consumers müssen die stabile Ereignis-ID deduplizieren.',
-    replayDialogBusy: 'Wird erneut gesendet…', replayDialogConfirm: 'Ereignis erneut senden', replayDialogFailure: 'Ereignis konnte nicht erneut gesendet werden.'
+    replayDialogBusy: 'Wird erneut gesendet…', replayDialogConfirm: 'Ereignis erneut senden', replayDialogFailure: 'Ereignis konnte nicht erneut gesendet werden.',
+    productActionEyebrow: 'PRODUKTAKTION', archiveProductTitle: 'Produkt archivieren',
+    archiveProductDescription: 'SKU und Bestellhistorie bleiben erhalten. Das Produkt ist danach nicht mehr käuflich.',
+    cancelPublicationTitle: 'Geplante Veröffentlichung abbrechen', cancelPublicationDescription: 'Das Produkt bleibt unveröffentlicht, bis Sie es erneut einplanen.',
+    productActionBusy: 'Produkt wird aktualisiert…', productActionConfirm: 'Aktion bestätigen', productActionFailure: 'Produkt konnte nicht aktualisiert werden.'
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -113,7 +121,11 @@ const COPY = {
     replayDialogEyebrow: 'CONSEGNA EVENTI', replayDialogTitle: 'Ripeti l’evento',
     replayKafkaDescription: 'Ripeti questo evento Kafka. I consumer devono deduplicare l’ID evento stabile.',
     replayOutboxDescription: 'Ripeti questo evento outbox. I consumer devono deduplicare l’ID evento stabile.',
-    replayDialogBusy: 'Invio della ripetizione…', replayDialogConfirm: 'Ripeti evento', replayDialogFailure: 'Impossibile ripetere l’evento.'
+    replayDialogBusy: 'Invio della ripetizione…', replayDialogConfirm: 'Ripeti evento', replayDialogFailure: 'Impossibile ripetere l’evento.',
+    productActionEyebrow: 'AZIONE PRODOTTO', archiveProductTitle: 'Archivia il prodotto',
+    archiveProductDescription: 'Lo SKU e la cronologia degli ordini saranno conservati. Il prodotto non sarà più disponibile per la vendita.',
+    cancelPublicationTitle: 'Annulla la pubblicazione programmata', cancelPublicationDescription: 'Il prodotto resterà non pubblicato finché non programmerai una nuova pubblicazione.',
+    productActionBusy: 'Aggiornamento del prodotto…', productActionConfirm: 'Conferma azione', productActionFailure: 'Impossibile aggiornare il prodotto.'
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -147,7 +159,11 @@ const COPY = {
     replayDialogEyebrow: 'LIVRAISON DES ÉVÉNEMENTS', replayDialogTitle: 'Relancer l’événement',
     replayKafkaDescription: 'Relancez cet événement Kafka. Les consommateurs doivent dédupliquer son identifiant stable.',
     replayOutboxDescription: 'Relancez cet événement outbox. Les consommateurs doivent dédupliquer son identifiant stable.',
-    replayDialogBusy: 'Nouvel envoi…', replayDialogConfirm: 'Relancer l’événement', replayDialogFailure: 'Impossible de relancer cet événement.'
+    replayDialogBusy: 'Nouvel envoi…', replayDialogConfirm: 'Relancer l’événement', replayDialogFailure: 'Impossible de relancer cet événement.',
+    productActionEyebrow: 'ACTION PRODUIT', archiveProductTitle: 'Archiver le produit',
+    archiveProductDescription: 'Le SKU et l’historique des commandes seront conservés. Le produit ne sera plus disponible à la vente.',
+    cancelPublicationTitle: 'Annuler la publication programmée', cancelPublicationDescription: 'Le produit restera non publié jusqu’à la programmation d’une nouvelle publication.',
+    productActionBusy: 'Mise à jour du produit…', productActionConfirm: 'Confirmer l’action', productActionFailure: 'Impossible de mettre à jour ce produit.'
   }
 } as const;
 
