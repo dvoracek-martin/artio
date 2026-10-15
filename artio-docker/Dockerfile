@@ -1,9 +1,9 @@
-FROM gradle:8.14.6-jdk21@sha256:566f76c0c946a2f68e10d4374d61f28ad8411f36f364a41a981ab46ded096d18 AS build
+FROM gradle:9.8.1-jdk25@sha256:e4f9e3d037cc0c7d8fc42cd97edb976dfd19a5b7314212b88b6de3807d13cd47 AS build
 WORKDIR /workspace
 COPY . .
 RUN gradle --no-daemon :artio-rest-api:bootJar :artio-rest-api:extensionControllerBootJar
 
-FROM eclipse-temurin:21-jre@sha256:ccbad9e7cb84c27092b12c40a4143e5733e050db9c3784d84f632dcf423fb2ef
+FROM eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64
 WORKDIR /app
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \

@@ -52,8 +52,8 @@ tasks.register<org.springframework.boot.gradle.tasks.bundling.BootJar>("extensio
     archiveFileName.set("artio-extension-controller.jar")
     mainClass.set("io.artio.api.extensions.controller.ExtensionControllerApplication")
     // The privileged controller must not publish the commerce/OpenAPI surface through auto-configuration.
-    classpath = (sourceSets.main.get().runtimeClasspath + sourceSets.main.get().compileClasspath)
-        .filter { !it.name.startsWith("springdoc-") }
+    setClasspath((sourceSets.main.get().runtimeClasspath + sourceSets.main.get().compileClasspath)
+        .filter { !it.name.startsWith("springdoc-") })
     targetJavaVersion.set(tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar")
         .flatMap { it.targetJavaVersion })
 }

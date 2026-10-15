@@ -56,7 +56,7 @@ class PackagedExtensionControllerIntegrationTests {
                 .withFileFromPath("controller.jar", jar)
                 .withFileFromPath("start-api.sh", script)
                 .withFileFromString("Dockerfile", """
-                        FROM eclipse-temurin:21-jre
+                        FROM eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64
                         WORKDIR /app
                         COPY controller.jar /app/extension-controller.jar
                         COPY start-api.sh /app/start-api.sh

@@ -135,6 +135,61 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     }
 
     @Test
+    void retriesOrderEventAfterPostgresConnectionOutageAndDoesNotDeadLetterIt() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
+                userId, "db-recovery-" + userId + "@example.test", "unused-test-hash", "Database", "Recovery");
+
+        String json = mapper.writeValueAsString(Map.of("schemaVersion", 1, "eventId", eventId,
+                "type", "ORDER_CREATED", "occurredAt", Instant.now(), "orderId", orderId,
+                "userId", userId, "locale", "en"));
+
+        jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            String role = jdbc.queryForObject("SELECT current_user", String.class);
+            String quotedRole = "\"" + role.replace("\"", "\"\"") + "\"";
+            try (var statement = connection.createStatement()) {
+                statement.execute("ALTER ROLE " + quotedRole + " NOLOGIN");
+                statement.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        + "WHERE datname=current_database() AND usename=current_user AND pid<>pg_backend_pid()");
+
+                try {
+                    send(eventId, orderId, json);
+                    Thread.sleep(2_000);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new java.sql.SQLException("Interrupted while PostgreSQL logins were disabled", interrupted);
+                } catch (Exception failure) {
+                    throw new java.sql.SQLException("Could not publish outage acceptance event", failure);
+                }
+                try (var check = connection.prepareStatement("SELECT COUNT(*) FROM event_inbox "
+                        + "WHERE consumer_name='order-notification-v1' AND event_id=?")) {
+                    check.setObject(1, eventId);
+                    try (var result = check.executeQuery()) {
+                        result.next();
+                        assertThat(result.getInt(1))
+                                .as("the consumer cannot commit while PostgreSQL rejects new connections")
+                                .isZero();
+                    }
+                }
+            } finally {
+                try (var restore = connection.createStatement()) {
+                    restore.execute("ALTER ROLE " + quotedRole + " LOGIN");
+                }
+            }
+            return null;
+        });
+
+        awaitInbox(eventId);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
+                "order-email:" + orderId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM kafka_consumer_dead_letters "
+                        + "WHERE source_topic=? AND event_id=?", Integer.class, TOPIC, eventId.toString()))
+                .isZero();
+    }
+
+    @Test
     void recoversNotificationDeliveryClaimAbandonedBeforeWorkerRestart() {
         jdbc.update("UPDATE notification_delivery_outbox SET status='SENT',locked_at=NULL WHERE status='PENDING'");
         UUID userId = UUID.randomUUID();

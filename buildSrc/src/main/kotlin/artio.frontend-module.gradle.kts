@@ -2,7 +2,7 @@ plugins { base }
 
 val npmCommand = if (org.gradle.internal.os.OperatingSystem.current().isWindows) "npm.cmd" else "npm"
 
-val npmInstall by tasks.registering(Exec::class) {
+val npmInstall = tasks.register<Exec>("npmInstall") {
     group = "build"
     description = "Installs the locked Angular dependencies."
     workingDir(projectDir)
@@ -11,14 +11,14 @@ val npmInstall by tasks.registering(Exec::class) {
     outputs.dir("node_modules")
 }
 
-val npmBuild by tasks.registering(Exec::class) {
+val npmBuild = tasks.register<Exec>("npmBuild") {
     group = "build"
     description = "Builds the Angular application in production mode."
     dependsOn(npmInstall)
     workingDir(projectDir)
     commandLine(npmCommand, "run", "build")
     inputs.dir("src")
-    inputs.files("angular.json", "tsconfig.json", "tsconfig.app.json", "tailwind.config.js", "postcss.config.js")
+    inputs.files("package.json", "package-lock.json", "angular.json", "tsconfig.json", "tsconfig.app.json", "tailwind.config.js", "postcss.config.js")
     outputs.dir("dist")
 }
 

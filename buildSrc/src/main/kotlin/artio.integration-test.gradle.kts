@@ -1,6 +1,6 @@
 plugins { id("artio.java-library") }
 
-val integrationTest by sourceSets.creating {
+val integrationTest = sourceSets.create("integrationTest") {
     compileClasspath += sourceSets.main.get().output + sourceSets.main.get().compileClasspath
     runtimeClasspath += output + sourceSets.main.get().output + sourceSets.main.get().runtimeClasspath
 }
