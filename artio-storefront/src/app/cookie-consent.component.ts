@@ -7,7 +7,7 @@ import { LocaleService } from './locale.service';
 type Consent={essential:true;analytics:boolean;marketing:boolean;policyVersion:string;updatedAt:string};
 @Component({selector:'artio-cookie-consent',standalone:true,imports:[CommonModule,FormsModule],template:`
 <section class="consent-panel" *ngIf="visible" aria-labelledby="consent-title" role="dialog" aria-modal="false">
- <div class="consent-copy"><p class="eyebrow">ARTIO · PRIVACY</p><h2 id="consent-title">{{t('consentTitle')}}</h2><p>{{t('consentBody')}} <a href="/privacy">Privacy notice</a></p></div>
+ <div class="consent-copy"><p class="eyebrow">{{t('privacyEyebrow')}}</p><h2 id="consent-title">{{t('consentTitle')}}</h2><p>{{t('consentBody')}} <a href="/privacy">{{t('privacyNotice')}}</a></p></div>
  <div class="consent-options"><label><input type="checkbox" checked disabled> {{t('essential')}}</label><label><input type="checkbox" [(ngModel)]="analytics"> {{t('analytics')}}</label><label><input type="checkbox" [(ngModel)]="marketing"> {{t('marketing')}}</label></div>
  <div class="consent-actions"><button type="button" class="consent-secondary" (click)="reject()">{{t('reject')}}</button><button type="button" class="consent-primary" (click)="save()">{{t('accept')}}</button></div>
 </section>
