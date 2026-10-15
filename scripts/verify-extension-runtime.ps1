@@ -42,6 +42,19 @@ try {
         Set-Item -Path "Env:ARTIO_TEST_EXTENSION_IMAGE_V$version" -Value $digestReference.Trim()
     }
 
+    $egressTag = 'localhost:5000/artio-extension-egress:integration'
+    docker build --platform linux/amd64 --tag 'artio-extension-egress:integration' (Join-Path $repoRoot 'artio-docker\extension-egress')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not build the provider-egress gateway fixture.' }
+    docker tag 'artio-extension-egress:integration' $egressTag
+    if ($LASTEXITCODE -ne 0) { throw 'Could not tag the provider-egress gateway fixture.' }
+    docker push $egressTag
+    if ($LASTEXITCODE -ne 0) { throw 'Could not push the provider-egress gateway fixture to the temporary registry.' }
+    $egressDigest = docker image inspect $egressTag --format '{{index .RepoDigests 0}}'
+    if ($LASTEXITCODE -ne 0 -or -not $egressDigest -or $egressDigest -notmatch '@sha256:[a-f0-9]{64}$') {
+        throw 'Could not resolve immutable digest for the provider-egress gateway fixture.'
+    }
+    Set-Item -Path 'Env:ARTIO_TEST_EGRESS_IMAGE' -Value $egressDigest.Trim()
+
     Push-Location $repoRoot
     try {
         $verificationArguments = @(':artio-rest-api:integrationTest', '--rerun', '--no-daemon')
@@ -52,6 +65,7 @@ try {
 } finally {
     Remove-Item Env:ARTIO_TEST_EXTENSION_IMAGE_V1 -ErrorAction SilentlyContinue
     Remove-Item Env:ARTIO_TEST_EXTENSION_IMAGE_V2 -ErrorAction SilentlyContinue
+    Remove-Item Env:ARTIO_TEST_EGRESS_IMAGE -ErrorAction SilentlyContinue
     if ($registryStarted) {
         docker rm --force $registryName | Out-Null
     }
