@@ -1,4 +1,4 @@
-FROM grafana/grafana:11.2.2@sha256:d5133220d770aba5cb655147b619fa8770b90f41d8489a821d33b1cd34d16f89
+FROM grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
 USER root
 RUN mkdir -p /var/lib/grafana && chown -R 10001:10001 /var/lib/grafana
 COPY provisioning /etc/grafana/provisioning

@@ -1,4 +1,4 @@
-FROM otel/opentelemetry-collector-contrib:0.111.0@sha256:a2a52e43c1a80aa94120ad78c2db68780eb90e6d11c8db5b3ce2f6a0cc6b5029
+FROM otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
 COPY otel-collector.yaml /etc/otelcol-contrib/config.yaml
 USER 10001:10001
 EXPOSE 4317 4318 9464 13133

@@ -1,6 +1,6 @@
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.111.0
+    image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
@@ -12,14 +12,12 @@ services:
       - jaeger
 
   jaeger:
-    image: jaegertracing/all-in-one:1.60.0
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
+    image: quay.io/jaegertracing/jaeger:2.22.0@sha256:836b967b5abcf1f7758066aa6b348619267a2f1459f72d472840570f9bd88a17
     ports:
       - "127.0.0.1:16686:16686"
 
   prometheus:
-    image: prom/prometheus:v2.54.1
+    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -29,7 +27,7 @@ services:
       - "127.0.0.1:9090:9090"
 
   grafana:
-    image: grafana/grafana:11.2.2
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
     environment:
       GF_SECURITY_ADMIN_USER: ${ARTIO_OBSERVABILITY_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: "${ARTIO_OBSERVABILITY_ADMIN_PASSWORD:?Set ARTIO_OBSERVABILITY_ADMIN_PASSWORD}"
