@@ -1,6 +1,7 @@
 
 import { Component, ElementRef, EventEmitter, HostListener, Input, Output, forwardRef, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ControlValueAccessor, FormsModule, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
 
 export type SelectOption = { value: string; label: string; detail?: string; disabled?: boolean };
 let nextSelectId = 0;
@@ -24,12 +25,12 @@ let nextSelectId = 0;
         <span class="sr-only" [id]="id+'-selection'">{{selectionSummary}}</span>
         @if (open) {
           <div class="search-select-popover" [style.left.px]="position.left" [style.top.px]="position.top" [style.width.px]="position.width" [style.max-height.px]="position.height">
-            <div class="select-search"><span aria-hidden="true">⌕</span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="'Search '+label" [placeholder]="'Search '+label.toLowerCase()+'…'" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
+            <div class="select-search"><span aria-hidden="true">⌕</span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="text('selectSearch',{label})" [placeholder]="text('selectSearchPlaceholder',{label:label.toLowerCase()})" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
             @if (loading) {
-              <p class="select-no-results" role="status">Loading options…</p>
+              <p class="select-no-results" role="status">{{text('selectLoading')}}</p>
             }
             @if (multiple) {
-              <div class="select-selection-bar"><span>{{values.length}} selected</span><button type="button" (click)="clear()" [disabled]="!values.length">Clear</button></div>
+              <div class="select-selection-bar"><span>{{selectedCount}}</span><button type="button" (click)="clear()" [disabled]="!values.length">{{text('selectClear')}}</button></div>
             }
             <div class="select-options" [style.max-height.px]="position.height-(multiple?130:65)" [id]="id+'-options'" role="listbox" [attr.aria-label]="label" [attr.aria-multiselectable]="multiple">
               @for (option of filtered; track optionValue(index, option); let index = $index) {
@@ -38,12 +39,12 @@ let nextSelectId = 0;
                   <small>{{option.detail}}</small>
                 }</span>
               </button>
-              }@if (!filtered.length) {
-              <p class="select-no-results">No matching options.</p>
+              }@if (!loading && !filtered.length) {
+              <p class="select-no-results">{{text('selectNoResults')}}</p>
             }
           </div>
           @if (multiple) {
-            <button type="button" class="select-done" (click)="close()">Done · {{values.length}} selected</button>
+            <button type="button" class="select-done" (click)="close()">{{text('selectDone',{count:values.length.toString()})}}</button>
           }
         </div>
       }
@@ -68,7 +69,9 @@ export class SearchSelectComponent implements ControlValueAccessor {
   get selectedOptions(): SelectOption[] { return this.values.map(value => this.options.find(x => x.value === value) ?? { value, label: value }); }
   optionValue(index:number,option:SelectOption):string{return option.value;}
   get selectedLabel():string{return this.selectedOptions.length ? this.selectedOptions[0].label : this.placeholder;}
-  get selectionSummary():string{return this.selectedOptions.length?this.selectedOptions.map(option=>option.label).join(', '):'Nothing selected';}
+  get selectionSummary():string{return this.selectedOptions.length?this.selectedOptions.map(option=>option.label).join(', '):this.text('selectNothingSelected');}
+  get selectedCount():string{return this.text('selectSelected',{count:this.values.length.toString()});}
+  text(key:BackofficeTextKey,values:Record<string,string>={}):string{return Object.entries(values).reduce<string>((value,[name,replacement])=>value.replaceAll(`{${name}}`,replacement),backofficeText(currentBackofficeLocale(),key));}
   get filtered(): SelectOption[] { const query = this.query.trim().toLocaleLowerCase(); const options=[...this.options,...this.selectedOptions.filter(x=>!this.options.some(option=>option.value===x.value))]; return options.filter(x => (x.label + ' ' + x.value + ' ' + (x.detail ?? '')).toLocaleLowerCase().includes(query)); }
   writeValue(value: string | string[] | null): void { this.values = Array.isArray(value) ? [...value] : value ? [value] : []; }
   registerOnChange(fn: (value: string | string[]) => void): void { this.change = fn; }
