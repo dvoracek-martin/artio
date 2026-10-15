@@ -16,4 +16,17 @@ describe('shared Backoffice loading copy', () => {
     expect(backofficeText(locale as BackofficeLocale, 'loadingInventory')).toBe(inventory);
     expect(backofficeText(locale as BackofficeLocale, 'loadingGiftCards')).toBe(giftCards);
   });
+
+  it.each([
+    ['en', 'Could not load this information.', 'Enter valid JSON.', 'Choose a product variant.', 'Market price country codes must be unique.'],
+    ['de', 'Diese Daten konnten nicht geladen werden.', 'Geben Sie gültiges JSON ein.', 'Wählen Sie eine Produktvariante aus.', 'Die Ländercodes für Marktpreise müssen eindeutig sein.'],
+    ['it', 'Impossibile caricare questi dati.', 'Inserisci JSON valido.', 'Scegli una variante del prodotto.', 'I codici paese dei prezzi di mercato devono essere univoci.'],
+    ['fr', 'Impossible de charger ces informations.', 'Saisissez un JSON valide.', 'Choisissez une variante du produit.', 'Les codes pays des prix de marché doivent être uniques.']
+  ] as const)('provides localized admin request and validation fallbacks in %s', (locale, loadFailure, invalidJson, selectionRequired, uniqueCountries) => {
+    const language = locale as BackofficeLocale;
+    expect(backofficeText(language, 'adminLoadFailure')).toBe(loadFailure);
+    expect(backofficeText(language, 'adminInvalidJson')).toBe(invalidJson);
+    expect(backofficeText(language, 'adminSelectionRequired')).toBe(selectionRequired);
+    expect(backofficeText(language, 'adminUniqueCountries')).toBe(uniqueCountries);
+  });
 });
