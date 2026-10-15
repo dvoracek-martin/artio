@@ -28,6 +28,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -53,6 +54,7 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired KafkaTemplate<String, String> kafka;
     @Autowired ObjectMapper mapper;
+    @Autowired KafkaProperties kafkaProperties;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -177,6 +179,20 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         assertThat(calls.get()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("SENT");
         assertThat(jdbc.queryForObject("SELECT attempts FROM notification_delivery_outbox WHERE id=?", Integer.class, deliveryId)).isEqualTo(1);
+    }
+
+    @Test
+    void kafkaLagDiagnosticsReadCommittedAndEndOffsetsFromTheBroker() {
+        var diagnostics = new KafkaConsumerLagController(kafkaProperties, TOPIC, "artio-notification-worker").consumerLag();
+        assertThat(diagnostics.topic()).isEqualTo(TOPIC);
+        assertThat(diagnostics.group()).isEqualTo("artio-notification-worker");
+        assertThat(diagnostics.partitions()).hasSize(1);
+        var partition = diagnostics.partitions().getFirst();
+        assertThat(partition.partition()).isZero();
+        assertThat(partition.committedOffset()).isGreaterThanOrEqualTo(0);
+        assertThat(partition.endOffset()).isGreaterThanOrEqualTo(partition.committedOffset());
+        assertThat(partition.lag()).isEqualTo(partition.endOffset() - partition.committedOffset());
+        assertThat(diagnostics.totalLag()).isEqualTo(partition.lag());
     }
 
     private void send(UUID eventId, UUID orderId, String json) throws Exception {
