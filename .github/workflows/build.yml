@@ -10,6 +10,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -230,3 +232,58 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH,CRITICAL
+      - name: Package verified runtime artifacts
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p build/provenance
+          tar -czf "build/provenance/artio-${GITHUB_SHA}.tar.gz" \
+            artio-rest-api/build/libs \
+            artio-backoffice/dist/backoffice \
+            artio-storefront/dist/storefront
+      - name: Upload verified runtime artifacts
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: artio-runtime-${{ github.sha }}
+          path: build/provenance/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove images created by this CI run
+        if: always()
+        run: |
+          for image in \
+            "artio/api:${GITHUB_SHA}" \
+            "artio/storefront:${GITHUB_SHA}" \
+            "artio/backoffice:${GITHUB_SHA}" \
+            "artio/plugin-stripe:${GITHUB_SHA}" \
+            "artio/plugin-paypal:${GITHUB_SHA}" \
+            "artio/plugin-swiss-post:${GITHUB_SHA}" \
+            "artio/plugin-brevo:${GITHUB_SHA}" \
+            "artio/plugin-opensearch:${GITHUB_SHA}" \
+            "artio/plugin-opensearch-engine:${GITHUB_SHA}" \
+            "artio/plugin-observability-control:${GITHUB_SHA}" \
+            "artio/plugin-observability-collector:${GITHUB_SHA}" \
+            "artio/plugin-observability-grafana:${GITHUB_SHA}" \
+            "artio/plugin-observability-jaeger:${GITHUB_SHA}" \
+            "artio/plugin-observability-prometheus:${GITHUB_SHA}"; do
+            docker image rm "$image" >/dev/null 2>&1 || true
+          done
+
+  attest:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified runtime artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: artio-runtime-${{ github.sha }}
+          path: build/provenance
+      - name: Attest runtime artifact provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: build/provenance/*.tar.gz
