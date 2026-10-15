@@ -3,6 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
+import { ProductWizardTextKey, productWizardText } from './product-wizard-locale';
 import { firstValueFrom, forkJoin } from 'rxjs';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
@@ -20,7 +21,9 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   @Output() created = new EventEmitter<string>();
   private http = inject(HttpClient);
   private destroyed = false;
-  steps = ['The essentials', 'Organization', 'Product images', 'Review & create'];
+  get steps():string[]{return [this.t('stepEssentials'),this.t('stepOrganization'),this.t('stepImages'),this.t('stepReview')]}
+  t(key:ProductWizardTextKey,values:Record<string,string|number>={}):string{return Object.entries(values).reduce((text,[name,value])=>text.replaceAll(`{${name}}`,String(value)),productWizardText(key))}
+  stepDescription(index:number):string{return this.t(index===0?'stepIdentity':index===1?'stepCategories':index===2?'stepUpload':'stepLastLook')}
   step = 0;
   loading = true;
   busy = false;
@@ -43,7 +46,7 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
     this.error = '';
     forkJoin({ categories: this.http.get<Category[]>('/api/v1/categories'), brands: this.http.get<Brand[]>('/api/v1/brands'), attributes: this.http.get<Attribute[]>('/api/v1/attribute-definitions') }).subscribe({
       next: data => { this.categories = data.categories.filter(x => x.active); this.brands = data.brands.filter(x => x.active); this.attributes = data.attributes.filter(x => x.active); this.loading = false; },
-      error: e => { this.loading = false; this.error = this.message(e, 'Could not load catalog options. Try again.'); }
+      error: e => { this.loading = false; this.error = this.message(e, this.t('loadFailure')); }
     });
   }
   categoryLabel(category: Category): string {
@@ -54,9 +57,9 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
     return names.join(' / ');
   }
   get categoryOptions():SelectOption[]{return this.categories.map(x=>({value:x.id,label:this.categoryLabel(x)}));}
-  get brandOptions():SelectOption[]{return [{value:'',label:'No brand'},...this.brands.map(x=>({value:x.id,label:x.name}))];}
+  get brandOptions():SelectOption[]{return [{value:'',label:this.t('noBrand')},...this.brands.map(x=>({value:x.id,label:x.name}))];}
   get selectedCategories(): string { return this.categories.filter(x => this.draft.categoryIds.includes(x.id)).map(x => this.categoryLabel(x)).join(', '); }
-  get brandName(): string { return this.brands.find(x => x.id === this.draft.brandId)?.name ?? 'No brand'; }
+  get brandName(): string { return this.brands.find(x => x.id === this.draft.brandId)?.name ?? this.t('noBrand'); }
   setSku(value: string): void {
     const previous = this.draft.sku;
     this.draft.sku = value.toUpperCase().trim();
@@ -74,24 +77,24 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
       this.categories = [...this.categories, category];
       this.draft.categoryIds.push(category.id);
       this.categoryName = '';
-    } catch (e) { this.error = this.message(e, 'Could not create the category.'); }
+    } catch (e) { this.error = this.message(e, this.t('createCategoryFailure')); }
     finally { this.creatingCategory = false; }
   }
   validate(step: number): boolean {
     this.error = '';
     if (step === 0) {
-      if (!this.draft.name.trim() || this.draft.name.length > 500) this.error = 'Enter a product name, up to 500 characters.';
-      else if (!/^[A-Z0-9-]{3,50}$/.test(this.draft.sku)) this.error = 'Product SKU needs 3–50 uppercase letters, numbers or hyphens.';
-      else if (!this.draft.variantName.trim() || this.draft.variantName.length > 250) this.error = 'Enter a variant name, up to 250 characters.';
-      else if (!/^[A-Z0-9-]{3,50}$/.test(this.draft.variantSku)) this.error = 'Variant SKU needs 3–50 uppercase letters, numbers or hyphens.';
-      else if (this.draft.description.length > 5000) this.error = 'Keep the description within 5,000 characters.';
+      if (!this.draft.name.trim() || this.draft.name.length > 500) this.error = this.t('productNameError');
+      else if (!/^[A-Z0-9-]{3,50}$/.test(this.draft.sku)) this.error = this.t('skuError');
+      else if (!this.draft.variantName.trim() || this.draft.variantName.length > 250) this.error = this.t('variantNameError');
+      else if (!/^[A-Z0-9-]{3,50}$/.test(this.draft.variantSku)) this.error = this.t('variantSkuError');
+      else if (this.draft.description.length > 5000) this.error = this.t('descriptionError');
     }
     if (step === 1) {
-      if (!this.draft.categoryIds.length) this.error = 'Choose at least one category for your product.';
+      if (!this.draft.categoryIds.length) this.error = this.t('chooseCategoryError');
       for (const attribute of this.attributes) {
         const value = String(this.draft.attributes[attribute.code] ?? '').trim();
-        if (attribute.required && !value) { this.error = `Add a value for ${attribute.label}.`; break; }
-        if (value && attribute.type === 'NUMBER' && !Number.isFinite(Number(value))) { this.error = `Enter a number for ${attribute.label}.`; break; }
+        if (attribute.required && !value) { this.error = this.t('attributeValueError',{label:attribute.label}); break; }
+        if (value && attribute.type === 'NUMBER' && !Number.isFinite(Number(value))) { this.error = this.t('attributeNumberError',{label:attribute.label}); break; }
       }
     }
     return !this.error;
@@ -105,8 +108,8 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   addImages(files: File[]): void {
     this.error = '';
     for (const file of files) {
-      if (this.images.length >= 100) { this.error = 'A product can have up to 100 images.'; break; }
-      if (!['image/jpeg', 'image/png'].includes(file.type) || !file.size || file.size > 10 * 1024 * 1024) { this.error = `${file.name}: choose a JPEG or PNG up to 10 MiB.`; continue; }
+      if (this.images.length >= 100) { this.error = this.t('imageCountError'); break; }
+      if (!['image/jpeg', 'image/png'].includes(file.type) || !file.size || file.size > 10 * 1024 * 1024) { this.error = this.t('imageFileError',{file:file.name}); continue; }
       this.images.push({ file, url: URL.createObjectURL(file), alt: this.draft.name, uploaded: false });
     }
   }
@@ -119,7 +122,7 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
     this.error = '';
     try {
       if (!this.productId) {
-        this.progress = 'Creating your product draft…';
+        this.progress = this.t('creatingDraft');
         const attributes = Object.fromEntries(Object.entries(this.draft.attributes).filter(([, value]) => String(value ?? '').trim()).map(([key, value]) => [key, String(value).trim()]));
         const product = await firstValueFrom(this.http.post<{ id: string }>('/api/v1/products/drafts', { ...this.draft, name: this.draft.name.trim(), description: this.draft.description.trim(), variantName: this.draft.variantName.trim(), brandId: this.draft.brandId || null, attributes }));
         this.productId = product.id;
@@ -127,19 +130,19 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
       for (const [index, image] of this.images.entries()) {
         if (this.destroyed) return;
         if (image.uploaded) continue;
-        this.progress = `Uploading image ${index + 1} of ${this.images.length}…`;
+        this.progress = this.t('uploadingImage',{current:index+1,total:this.images.length});
         const body = new FormData(); body.append('file', image.file, image.file.name);
         await firstValueFrom(this.http.post(`/api/v1/products/${this.productId}/media`, body, { params: { altText: image.alt } }));
         image.uploaded = true;
       }
       if (this.destroyed) return;
       if (this.publish) {
-        this.progress = 'Activating your product…';
+        this.progress = this.t('activatingProduct');
         await firstValueFrom(this.http.put(`/api/v1/products/${this.productId}/active`, { active: true }));
       }
       if (!this.destroyed) this.created.emit(this.productId);
     } catch (e) {
-      this.error = this.message(e, 'Could not save the product. Please try again.') + (this.productId ? ' Your product is saved as a draft. Retry to finish, or remove a rejected image below.' : ' Check the details before retrying. If your connection was interrupted, check the product list first.');
+      this.error = this.message(e, this.t('saveFailure')) + (this.productId ? this.t('savedDraftRetry') : this.t('checkDetailsRetry'));
     } finally { this.busy = false; this.progress = ''; }
   }
   private message(error: unknown, fallback: string): string { return error instanceof HttpErrorResponse ? error.error?.message ?? error.error?.detail ?? fallback : fallback; }
