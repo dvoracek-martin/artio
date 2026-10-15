@@ -33,6 +33,9 @@ const COPY = {
     refundAmountHelp: 'Leave blank to refund the remaining balance.', refundSubmitting: 'Sending refund…',
     refundCancel: 'Cancel', refundSubmit: 'Send refund', refundInvalidAmount: 'Enter a positive refund amount.',
     refundFailure: 'Refund was not confirmed. Retry with the same amount.',
+    giftCardStatusEyebrow: 'GIFT CARD STATUS', disableGiftCardTitle: 'Disable gift card', enableGiftCardTitle: 'Enable gift card',
+    disableGiftCardDescription: 'A disabled card cannot be redeemed or refunded until it is enabled again.', enableGiftCardDescription: 'This card can be redeemed again after it is enabled.',
+    giftCardStatusBusy: 'Updating gift card…', giftCardStatusConfirm: 'Confirm status change', giftCardStatusFailure: 'Could not update gift card status.',
     returnDialogEyebrow: 'RETURN', returnApproveTitle: 'Approve return', returnRejectTitle: 'Reject return',
     returnRestockTitle: 'Receive and restock', returnReceiveTitle: 'Receive without restocking',
     returnCustomerReason: 'Reason', returnDialogWarehouse: 'Warehouse',
@@ -49,7 +52,10 @@ const COPY = {
     productActionEyebrow: 'PRODUCT ACTION', archiveProductTitle: 'Archive product',
     archiveProductDescription: 'The SKU and order history will be retained. The product will no longer be available for sale.',
     cancelPublicationTitle: 'Cancel scheduled publication', cancelPublicationDescription: 'This product will remain unpublished until you schedule it again.',
-    productActionBusy: 'Updating product…', productActionConfirm: 'Confirm action', productActionFailure: 'Could not update this product.'
+    productActionBusy: 'Updating product…', productActionConfirm: 'Confirm action', productActionFailure: 'Could not update this product.',
+    deleteMediaEyebrow: 'CATALOG IMAGE', deleteMediaTitle: 'Delete product image',
+    deleteMediaDescription: 'This image will be removed from the product and cannot be restored.', deleteMediaNoAlt: 'Image without alternative text',
+    deleteMediaBusy: 'Deleting image…', deleteMediaConfirm: 'Delete image', deleteMediaFailure: 'Could not delete the image.'
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -71,6 +77,9 @@ const COPY = {
     refundAmountHelp: 'Leer lassen, um den verbleibenden Betrag zu erstatten.', refundSubmitting: 'Erstattung wird gesendet…',
     refundCancel: 'Abbrechen', refundSubmit: 'Erstattung senden', refundInvalidAmount: 'Geben Sie einen positiven Erstattungsbetrag ein.',
     refundFailure: 'Die Erstattung wurde nicht bestätigt. Versuchen Sie es mit demselben Betrag erneut.',
+    giftCardStatusEyebrow: 'GUTSCHEINSTATUS', disableGiftCardTitle: 'Gutschein deaktivieren', enableGiftCardTitle: 'Gutschein aktivieren',
+    disableGiftCardDescription: 'Ein deaktivierter Gutschein kann bis zur erneuten Aktivierung weder eingelöst noch erstattet werden.', enableGiftCardDescription: 'Nach der Aktivierung kann dieser Gutschein wieder eingelöst werden.',
+    giftCardStatusBusy: 'Gutschein wird aktualisiert…', giftCardStatusConfirm: 'Statusänderung bestätigen', giftCardStatusFailure: 'Gutscheinstatus konnte nicht aktualisiert werden.',
     returnDialogEyebrow: 'RETOURE', returnApproveTitle: 'Genehmigen', returnRejectTitle: 'Ablehnen',
     returnRestockTitle: 'Annehmen und einlagern', returnReceiveTitle: 'Ohne Einlagerung annehmen',
     returnCustomerReason: 'Grund', returnDialogWarehouse: 'Lager',
@@ -87,7 +96,10 @@ const COPY = {
     productActionEyebrow: 'PRODUKTAKTION', archiveProductTitle: 'Produkt archivieren',
     archiveProductDescription: 'SKU und Bestellhistorie bleiben erhalten. Das Produkt ist danach nicht mehr käuflich.',
     cancelPublicationTitle: 'Geplante Veröffentlichung abbrechen', cancelPublicationDescription: 'Das Produkt bleibt unveröffentlicht, bis Sie es erneut einplanen.',
-    productActionBusy: 'Produkt wird aktualisiert…', productActionConfirm: 'Aktion bestätigen', productActionFailure: 'Produkt konnte nicht aktualisiert werden.'
+    productActionBusy: 'Produkt wird aktualisiert…', productActionConfirm: 'Aktion bestätigen', productActionFailure: 'Produkt konnte nicht aktualisiert werden.',
+    deleteMediaEyebrow: 'KATALOGBILD', deleteMediaTitle: 'Produktbild löschen',
+    deleteMediaDescription: 'Das Bild wird aus dem Produkt entfernt und kann nicht wiederhergestellt werden.', deleteMediaNoAlt: 'Bild ohne Alternativtext',
+    deleteMediaBusy: 'Bild wird gelöscht…', deleteMediaConfirm: 'Bild löschen', deleteMediaFailure: 'Bild konnte nicht gelöscht werden.'
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -109,6 +121,9 @@ const COPY = {
     refundAmountHelp: 'Lascia vuoto per rimborsare il saldo residuo.', refundSubmitting: 'Invio del rimborso…',
     refundCancel: 'Annulla', refundSubmit: 'Invia rimborso', refundInvalidAmount: 'Inserisci un importo positivo.',
     refundFailure: 'Il rimborso non è stato confermato. Riprova con lo stesso importo.',
+    giftCardStatusEyebrow: 'STATO CARTA REGALO', disableGiftCardTitle: 'Disattiva la carta regalo', enableGiftCardTitle: 'Attiva la carta regalo',
+    disableGiftCardDescription: 'Una carta disattivata non può essere riscattata né rimborsata fino alla riattivazione.', enableGiftCardDescription: 'Dopo l’attivazione, questa carta potrà essere riscattata di nuovo.',
+    giftCardStatusBusy: 'Aggiornamento della carta regalo…', giftCardStatusConfirm: 'Conferma la modifica dello stato', giftCardStatusFailure: 'Impossibile aggiornare lo stato della carta regalo.',
     returnDialogEyebrow: 'RESO', returnApproveTitle: 'Approva il reso', returnRejectTitle: 'Rifiuta il reso',
     returnRestockTitle: 'Ricevi e reintegra', returnReceiveTitle: 'Ricevi senza reintegrare',
     returnCustomerReason: 'Motivo', returnDialogWarehouse: 'Magazzino',
@@ -125,7 +140,10 @@ const COPY = {
     productActionEyebrow: 'AZIONE PRODOTTO', archiveProductTitle: 'Archivia il prodotto',
     archiveProductDescription: 'Lo SKU e la cronologia degli ordini saranno conservati. Il prodotto non sarà più disponibile per la vendita.',
     cancelPublicationTitle: 'Annulla la pubblicazione programmata', cancelPublicationDescription: 'Il prodotto resterà non pubblicato finché non programmerai una nuova pubblicazione.',
-    productActionBusy: 'Aggiornamento del prodotto…', productActionConfirm: 'Conferma azione', productActionFailure: 'Impossibile aggiornare il prodotto.'
+    productActionBusy: 'Aggiornamento del prodotto…', productActionConfirm: 'Conferma azione', productActionFailure: 'Impossibile aggiornare il prodotto.',
+    deleteMediaEyebrow: 'IMMAGINE CATALOGO', deleteMediaTitle: 'Elimina immagine del prodotto',
+    deleteMediaDescription: 'L’immagine sarà rimossa dal prodotto e non potrà essere ripristinata.', deleteMediaNoAlt: 'Immagine senza testo alternativo',
+    deleteMediaBusy: 'Eliminazione dell’immagine…', deleteMediaConfirm: 'Elimina immagine', deleteMediaFailure: 'Impossibile eliminare l’immagine.'
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -147,6 +165,9 @@ const COPY = {
     refundAmountHelp: 'Laissez vide pour rembourser le solde restant.', refundSubmitting: 'Envoi du remboursement…',
     refundCancel: 'Annuler', refundSubmit: 'Envoyer le remboursement', refundInvalidAmount: 'Saisissez un montant de remboursement positif.',
     refundFailure: 'Le remboursement n’a pas été confirmé. Réessayez avec le même montant.',
+    giftCardStatusEyebrow: 'STATUT DE LA CARTE CADEAU', disableGiftCardTitle: 'Désactiver la carte cadeau', enableGiftCardTitle: 'Activer la carte cadeau',
+    disableGiftCardDescription: 'Une carte désactivée ne peut être utilisée ni remboursée avant sa réactivation.', enableGiftCardDescription: 'Une fois activée, cette carte pourra de nouveau être utilisée.',
+    giftCardStatusBusy: 'Mise à jour de la carte cadeau…', giftCardStatusConfirm: 'Confirmer le changement de statut', giftCardStatusFailure: 'Impossible de modifier le statut de la carte cadeau.',
     returnDialogEyebrow: 'RETOUR', returnApproveTitle: 'Approuver le retour', returnRejectTitle: 'Refuser le retour',
     returnRestockTitle: 'Réceptionner et remettre en stock', returnReceiveTitle: 'Réceptionner sans remise en stock',
     returnCustomerReason: 'Motif', returnDialogWarehouse: 'Entrepôt',
@@ -163,7 +184,10 @@ const COPY = {
     productActionEyebrow: 'ACTION PRODUIT', archiveProductTitle: 'Archiver le produit',
     archiveProductDescription: 'Le SKU et l’historique des commandes seront conservés. Le produit ne sera plus disponible à la vente.',
     cancelPublicationTitle: 'Annuler la publication programmée', cancelPublicationDescription: 'Le produit restera non publié jusqu’à la programmation d’une nouvelle publication.',
-    productActionBusy: 'Mise à jour du produit…', productActionConfirm: 'Confirmer l’action', productActionFailure: 'Impossible de mettre à jour ce produit.'
+    productActionBusy: 'Mise à jour du produit…', productActionConfirm: 'Confirmer l’action', productActionFailure: 'Impossible de mettre à jour ce produit.',
+    deleteMediaEyebrow: 'IMAGE DU CATALOGUE', deleteMediaTitle: 'Supprimer l’image du produit',
+    deleteMediaDescription: 'Cette image sera retirée du produit et ne pourra pas être restaurée.', deleteMediaNoAlt: 'Image sans texte alternatif',
+    deleteMediaBusy: 'Suppression de l’image…', deleteMediaConfirm: 'Supprimer l’image', deleteMediaFailure: 'Impossible de supprimer l’image.'
   }
 } as const;
 

@@ -1,7 +1,8 @@
 
 import { HttpClient } from '@angular/common/http';
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, ChangeDetectionStrategy, ElementRef, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
 
 type ProductMedia = { id: string; altText: string; position: number; contentUrl: string; width: number; height: number };
 
@@ -42,9 +43,27 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
       @if (!items.length) {
         <p class="empty">No product images yet.</p>
       }
+      @if (deleteTarget) {
+        <dialog #deleteDialog class="refund-dialog" aria-labelledby="delete-media-title" (cancel)="cancelDeleteDialog($event)" (close)="deleteDialogClosed()">
+          <form class="refund-dialog-content" (ngSubmit)="confirmDelete()">
+            <p class="eyebrow">{{t('deleteMediaEyebrow')}}</p>
+            <h2 id="delete-media-title">{{t('deleteMediaTitle')}}</h2>
+            <p class="muted">{{t('deleteMediaDescription')}}</p>
+            <p class="refund-payment-summary"><strong>{{deleteTarget.altText||t('deleteMediaNoAlt')}}</strong></p>
+            @if (deleteError) { <p class="error" role="alert">{{deleteError}}</p> }
+            @if (deleteBusy) { <p class="muted" role="status">{{t('deleteMediaBusy')}}</p> }
+            <div class="refund-dialog-actions">
+              <button type="button" class="secondary" [disabled]="deleteBusy" (click)="closeDeleteDialog()">{{t('refundCancel')}}</button>
+              <button type="submit" class="primary" [disabled]="deleteBusy">{{t('deleteMediaConfirm')}}</button>
+            </div>
+          </form>
+        </dialog>
+      }
     </section>`
 })
 export class ProductMediaAdminComponent implements OnChanges {
+  @ViewChild('deleteDialog') private deleteDialogRef?:ElementRef<HTMLDialogElement>;
+  t(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
   @Input({required:true}) productId='';
   @Input() productName='';
   @Output() close = new EventEmitter<void>();
@@ -54,6 +73,9 @@ export class ProductMediaAdminComponent implements OnChanges {
   altText='';
   error='';
   busy=false;
+  deleteTarget:ProductMedia|null=null;
+  deleteBusy=false;
+  deleteError='';
 
   ngOnChanges(changes:SimpleChanges):void { if(changes['productId']&&this.productId)this.load(); }
   selectFile(event:Event):void { const input=event.target as HTMLInputElement; this.file=input.files?.[0]??null; this.error=''; }
@@ -83,7 +105,10 @@ export class ProductMediaAdminComponent implements OnChanges {
     this.http.put<ProductMedia[]>(`/api/v1/products/${this.productId}/media/order`,{mediaIds:reordered.map(item=>item.id)}).subscribe({next:items=>this.items=items,error:e=>this.error=e.error?.message??e.error?.detail??'Could not reorder images.'});
   }
   remove(item:ProductMedia):void {
-    if(!window.confirm('Delete this product image?'))return;
-    this.http.delete(`/api/v1/products/${this.productId}/media/${item.id}`).subscribe({next:()=>this.load(),error:e=>this.error=e.error?.message??e.error?.detail??'Could not delete the image.'});
+    this.deleteTarget=item;this.deleteBusy=false;this.deleteError='';setTimeout(()=>{const dialog=this.deleteDialogRef?.nativeElement;if(this.deleteTarget?.id===item.id&&dialog&&!dialog.open)dialog.showModal()},0);
   }
+  cancelDeleteDialog(event:Event):void{if(this.deleteBusy)event.preventDefault()}
+  deleteDialogClosed():void{if(this.deleteBusy)return;this.deleteTarget=null;this.deleteError=''}
+  closeDeleteDialog():void{if(!this.deleteBusy)this.deleteDialogRef?.nativeElement.close()}
+  confirmDelete():void{const item=this.deleteTarget;if(!item||this.deleteBusy)return;this.deleteBusy=true;this.deleteError='';this.http.delete(`/api/v1/products/${this.productId}/media/${item.id}`).subscribe({next:()=>{this.deleteBusy=false;this.deleteDialogRef?.nativeElement.close();this.load()},error:e=>{this.deleteBusy=false;this.deleteError=e.error?.message??e.error?.detail??this.t('deleteMediaFailure')}})}
 }

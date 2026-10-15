@@ -1,9 +1,10 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, ElementRef, ViewChild } from '@angular/core';
 import { CURRENCY_OPTIONS } from './commerce-options';
 import { SearchSelectComponent } from './search-select.component';
 import { FormsModule } from '@angular/forms';
+import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
 
 type GiftCard = { id: string; initialBalance: number; balance: number; currency: string; expiresAt: string | null; active: boolean; createdAt: string };
 type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId: string | null; amount: number; kind: string; createdAt: string };
@@ -43,6 +44,23 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
       }
     </div>
 
+    @if (statusTarget) {
+      <dialog #statusDialog class="refund-dialog" aria-labelledby="gift-card-status-title" (cancel)="cancelStatusDialog($event)" (close)="statusDialogClosed()">
+        <form class="refund-dialog-content" (ngSubmit)="submitStatusChange()">
+          <p class="eyebrow">{{t('giftCardStatusEyebrow')}}</p>
+          <h2 id="gift-card-status-title">{{statusTarget.active?t('disableGiftCardTitle'):t('enableGiftCardTitle')}}</h2>
+          <p class="muted">{{statusTarget.active?t('disableGiftCardDescription'):t('enableGiftCardDescription')}}</p>
+          <p class="refund-payment-summary"><strong>{{statusTarget.id}}</strong><span>{{statusTarget.balance}} {{statusTarget.currency}}</span></p>
+          @if (statusError) { <p class="error" role="alert">{{statusError}}</p> }
+          @if (statusBusy) { <p class="muted" role="status">{{t('giftCardStatusBusy')}}</p> }
+          <div class="refund-dialog-actions">
+            <button type="button" class="secondary" [disabled]="statusBusy" (click)="closeStatusDialog()">{{t('refundCancel')}}</button>
+            <button type="submit" class="primary" [disabled]="statusBusy">{{t('giftCardStatusConfirm')}}</button>
+          </div>
+        </form>
+      </dialog>
+    }
+
     @if (selectedCard) {
       <div class="panel table-panel">
         <div class="panel-heading"><div><p class="eyebrow">IMMUTABLE LEDGER</p><h2>Transactions · {{selectedCard.id}}</h2></div><button class="link-button" (click)="selectedCard=null">Close</button></div>
@@ -62,6 +80,8 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
     `
 })
 export class GiftCardAdminComponent {
+  @ViewChild('statusDialog') private statusDialogRef?:ElementRef<HTMLDialogElement>;
+  t(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
   currencyOptions=CURRENCY_OPTIONS;
   private readonly http = inject(HttpClient);
   cards: GiftCard[] = [];
@@ -69,6 +89,9 @@ export class GiftCardAdminComponent {
   selectedCard: GiftCard | null = null;
   issuedCode: string | null = null;
   busy = false;
+  statusTarget:GiftCard|null=null;
+  statusBusy=false;
+  statusError='';
   error = '';
   draft = { amount: 50, currency: 'CHF', expiresAt: '' };
 
@@ -102,13 +125,13 @@ export class GiftCardAdminComponent {
   }
 
   toggle(card: GiftCard): void {
-    const active = !card.active;
-    if (!window.confirm(`${active ? 'Enable' : 'Disable'} this card? ${active ? '' : 'Disabling prevents redemption and refunds until it is re-enabled.'}`)) return;
-    this.http.put<GiftCard>(`/api/v1/admin/gift-cards/${card.id}/active`, { active }).subscribe({
-      next: updated => { this.cards = this.cards.map(item => item.id === updated.id ? updated : item); this.error = ''; },
-      error: e => this.error = e.error?.detail ?? 'Could not update gift card status.'
-    });
+    this.statusTarget=card;this.statusBusy=false;this.statusError='';setTimeout(()=>{const dialog=this.statusDialogRef?.nativeElement;if(this.statusTarget?.id===card.id&&dialog&&!dialog.open)dialog.showModal()},0);
   }
+
+  cancelStatusDialog(event:Event):void{if(this.statusBusy)event.preventDefault()}
+  statusDialogClosed():void{if(this.statusBusy)return;this.statusTarget=null;this.statusError=''}
+  closeStatusDialog():void{if(!this.statusBusy)this.statusDialogRef?.nativeElement.close()}
+  submitStatusChange():void{const card=this.statusTarget;if(!card||this.statusBusy)return;this.statusBusy=true;this.statusError='';this.http.put<GiftCard>(`/api/v1/admin/gift-cards/${card.id}/active`,{active:!card.active}).subscribe({next:updated=>{this.cards=this.cards.map(item=>item.id===updated.id?updated:item);this.statusBusy=false;this.statusDialogRef?.nativeElement.close();this.error=''},error:e=>{this.statusBusy=false;this.statusError=e.error?.detail??this.t('giftCardStatusFailure')}})}
 
   viewTransactions(card: GiftCard): void {
     this.selectedCard = card;
