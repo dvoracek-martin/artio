@@ -1330,6 +1330,40 @@ class CatalogApiIntegrationTests {
         assertThat(reducedQuote.tax().amount()).isEqualByComparingTo("2.60");
     }
 
+    @Test
+    void activeTaxRulesCannotOverlapWithinJurisdictionAndCategory() {
+        var from = java.time.Instant.now().plusSeconds(86_400);
+        var middle = from.plusSeconds(86_400);
+        var until = middle.plusSeconds(86_400);
+        var first = adminExchange("/api/tax-rules", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.TaxRequest(
+                        "ZZ-OVERLAP", new BigDecimal("7.5"), from, until,
+                        io.artio.pricing.TaxCategory.STANDARD),
+                io.artio.api.pricing.PricingApplicationService.TaxView.class);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        var overlap = adminExchange("/api/tax-rules", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.TaxRequest(
+                        "ZZ-OVERLAP", new BigDecimal("8.0"), middle, null,
+                        io.artio.pricing.TaxCategory.STANDARD),
+                String.class);
+        assertThat(overlap.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        var adjacent = adminExchange("/api/tax-rules", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.TaxRequest(
+                        "ZZ-OVERLAP", new BigDecimal("8.0"), until, null,
+                        io.artio.pricing.TaxCategory.STANDARD),
+                io.artio.api.pricing.PricingApplicationService.TaxView.class);
+        assertThat(adjacent.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        var otherCategory = adminExchange("/api/tax-rules", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.TaxRequest(
+                        "ZZ-OVERLAP", new BigDecimal("2.0"), from, null,
+                        io.artio.pricing.TaxCategory.REDUCED),
+                io.artio.api.pricing.PricingApplicationService.TaxView.class);
+        assertThat(otherCategory.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
     private boolean reserveIfAvailable(UUID orderId, UUID warehouseId, UUID sellableId) {
         try {
             inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
@@ -1667,7 +1701,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
-        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33");
+        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33", "34");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
