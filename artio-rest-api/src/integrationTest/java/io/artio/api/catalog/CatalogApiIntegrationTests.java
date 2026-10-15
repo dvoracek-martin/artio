@@ -1331,6 +1331,61 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void bundleApiQuotesMultipleSelectionGroupsAndBothBundlePriceModes() {
+        var suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+        var product = adminExchange("/api/products", HttpMethod.POST,
+                new ProductRequest("Bundle quote item", null, "BUNDLE-P-" + suffix), ProductResponse.class);
+        var first = adminExchange("/api/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Primary", "BUNDLE-A-" + suffix), VariantResponse.class,
+                product.getBody().id());
+        var second = adminExchange("/api/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Optional", "BUNDLE-B-" + suffix), VariantResponse.class,
+                product.getBody().id());
+        for (var variant : List.of(first.getBody(), second.getBody())) {
+            var saved = adminExchange("/api/prices", HttpMethod.POST,
+                    new io.artio.api.pricing.PricingApplicationService.PriceRequest(variant.id(), "US", "WEB",
+                            new BigDecimal(variant.id().equals(first.getBody().id()) ? "10.00" : "5.00"), "USD",
+                            java.time.Instant.now().minusSeconds(60), null),
+                    io.artio.api.pricing.PricingApplicationService.PriceView.class);
+            assertThat(saved.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        }
+
+        var percentageBundle = adminExchange("/api/bundles", HttpMethod.POST,
+                new io.artio.api.bundles.BundleApplicationService.BundleRequest("Configured set", "BND-C-" + suffix,
+                        io.artio.bundles.BundleType.CONFIGURABLE, List.of(), List.of(
+                                new io.artio.api.bundles.BundleApplicationService.OptionGroupRequest("primary", "Primary", 1, 1,
+                                        List.of(new io.artio.api.bundles.BundleApplicationService.ChoiceRequest(first.getBody().id(), BigDecimal.ONE))),
+                                new io.artio.api.bundles.BundleApplicationService.OptionGroupRequest("optional", "Optional", 0, 1,
+                                        List.of(new io.artio.api.bundles.BundleApplicationService.ChoiceRequest(second.getBody().id(), new BigDecimal("2"))))),
+                        new io.artio.api.bundles.BundleApplicationService.PricingRuleRequest(
+                                io.artio.bundles.BundlePricingRule.Mode.PERCENTAGE_OFF_COMPONENTS, null, null, new BigDecimal("10"))),
+                io.artio.api.bundles.BundleApplicationService.BundleView.class);
+        assertThat(percentageBundle.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var quote = http.postForEntity("/api/bundles/{id}/quote",
+                new io.artio.api.bundles.BundleApplicationService.BundleQuoteRequest(
+                        Map.of("primary", Set.of(first.getBody().id()), "optional", Set.of(second.getBody().id())),
+                        new BigDecimal("2"), "US", "WEB", "US"),
+                io.artio.bundles.BundleQuote.class, percentageBundle.getBody().id());
+        assertThat(quote.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(quote.getBody().componentTotal().amount()).isEqualByComparingTo("20.00");
+        assertThat(quote.getBody().perBundlePrice().amount()).isEqualByComparingTo("18.00");
+        assertThat(quote.getBody().totalPrice().amount()).isEqualByComparingTo("36.00");
+
+        var fixedBundle = adminExchange("/api/bundles", HttpMethod.POST,
+                new io.artio.api.bundles.BundleApplicationService.BundleRequest("Fixed set", "BND-F-" + suffix,
+                        io.artio.bundles.BundleType.FIXED,
+                        List.of(new io.artio.api.bundles.BundleApplicationService.ComponentRequest(first.getBody().id(), BigDecimal.ONE)),
+                        List.of(), new io.artio.api.bundles.BundleApplicationService.PricingRuleRequest(
+                                io.artio.bundles.BundlePricingRule.Mode.FIXED_PRICE, new BigDecimal("7.50"), "USD", null)),
+                io.artio.api.bundles.BundleApplicationService.BundleView.class);
+        var fixedQuote = http.postForEntity("/api/bundles/{id}/quote",
+                new io.artio.api.bundles.BundleApplicationService.BundleQuoteRequest(Map.of(), BigDecimal.ONE, "US", "WEB", "US"),
+                io.artio.bundles.BundleQuote.class, fixedBundle.getBody().id());
+        assertThat(fixedQuote.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(fixedQuote.getBody().totalPrice().amount()).isEqualByComparingTo("7.50");
+    }
+
+    @Test
     void activeTaxRulesCannotOverlapWithinJurisdictionAndCategory() {
         var from = java.time.Instant.now().plusSeconds(86_400);
         var middle = from.plusSeconds(86_400);
