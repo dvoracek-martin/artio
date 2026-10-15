@@ -19,7 +19,7 @@ try {
     $registryReady = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         try {
-            Invoke-WebRequest -Uri 'http://127.0.0.1:5000/v2/' -TimeoutSec 2 | Out-Null
+            Invoke-WebRequest -Uri 'http://127.0.0.1:5000/v2/' -UseBasicParsing -TimeoutSec 2 | Out-Null
             $registryReady = $true
             break
         } catch { Start-Sleep -Milliseconds 500 }
