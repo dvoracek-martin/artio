@@ -18,6 +18,16 @@ docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-backof
 
 CI also builds and scans every bundled plugin image that has a Dockerfile. For a local scan, use the same Trivy version and flags from `.github/workflows/build.yml` against each resulting image. Keep scanner databases and build output out of source control.
 
+For a digest-pinned upstream image, a remote Trivy scan avoids creating a local Docker image:
+
+```powershell
+$scanCache = 'D:\Temp\artio-trivy-cache'
+trivy image --image-src remote --cache-dir $scanCache --scanners vuln --ignore-unfixed --pkg-types os,library --severity HIGH,CRITICAL --format json --output opensearch-scan.json 'opensearchproject/opensearch@sha256:<reviewed-digest>'
+trivy clean --all --cache-dir $scanCache
+```
+
+The Java vulnerability database may use close to 1 GB of disk. Keep the JSON report outside source control, clean the cache after the scan when it is not needed for another scan, and retain the exact image digest with the result. A remote scan does not test runtime behavior; run the corresponding integration test separately when changing the engine version.
+
 ## Java platform update
 
 Spring Boot's Gradle plugin and dependency BOM must be upgraded together in `buildSrc/build.gradle.kts` and `buildSrc/src/main/kotlin/artio.spring-adapter.gradle.kts`. After an upgrade, run the full Gradle test and integration-test gate, rebuild the API image, and inspect its Trivy report. The project uses Java 21 and Gradle 8.14.6, with the wrapper distribution SHA-256 pinned in `gradle/wrapper/gradle-wrapper.properties`. Evaluate major framework changes against their documented compatibility and migration guide before adopting them.
