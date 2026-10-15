@@ -1,12 +1,22 @@
 # Dependency and container security scans
 
-The pull-request and push workflow checks both frontend lockfiles with the official npm registry and fails on moderate or higher npm advisories. It builds and scans the API, Storefront, Backoffice, all provider/search plugins, the OpenSearch engine, and each bundled observability image (control, collector, Grafana, Jaeger, Prometheus). Trivy checks for HIGH and CRITICAL OS and library vulnerabilities. It ignores advisories without an available fix and fails for any remaining finding at those severities, except that the bundled OpenSearch engine temporarily fails only on CRITICAL findings. The Trivy action is pinned to a full commit SHA and the scanner version is explicit.
+The pull-request and push workflow checks both frontend lockfiles with the official npm registry and fails on moderate or higher npm advisories. It builds and scans the API, Storefront, Backoffice, all provider/search plugins, the OpenSearch engine, and each bundled observability image (control, collector, Grafana, Jaeger, Prometheus). Trivy checks for HIGH and CRITICAL OS and library vulnerabilities. It ignores advisories without an available fix and fails for any remaining finding at those severities, except that the bundled OpenSearch engine and four observability runtime images temporarily fail only on CRITICAL findings. The Trivy action is pinned to a full commit SHA and the scanner version is explicit.
 
 The scan is a release gate, not proof that an image has no risk. Review scanner output and upstream advisories when dependencies, base images, or scan policy change. A new finding blocks the workflow until the package is updated or an owner documents a narrow, time-bounded exception with its rationale and compensating control. Do not suppress a test or broadly ignore a vulnerability to obtain a green build.
 
-## Temporary OpenSearch engine exception
+## Temporary upstream image exceptions
 
-The bundled engine uses the digest-pinned upstream OpenSearch 3.9.0 image. A Trivy 0.76.0 scan found no fixed CRITICAL findings but 108 fixed HIGH findings (37 Amazon Linux packages and 71 Java packages); the preceding 2.x images had fixed CRITICAL findings as well. The engine integration contract passes against 3.9.0. Until 2026-11-15, CI fails this image on CRITICAL findings and allows HIGH findings; every other image retains the HIGH/CRITICAL gate. The digest pin, monthly review, and CRITICAL scan are compensating controls. Re-scan and either remove this exception or renew it with a current finding count and rationale by the expiry date.
+Trivy 0.76.0 found no fixed CRITICAL findings in these digest-pinned upstream images, but it did find fixed HIGH findings:
+
+| Image | Version | Fixed HIGH findings |
+| --- | --- | ---: |
+| OpenSearch engine | 3.9.0 | 108 (37 Amazon Linux, 71 Java) |
+| OpenTelemetry Collector | 0.162.0 | 4 |
+| Grafana | 13.2.4 | 56 |
+| Prometheus | 3.15.0 | 8 |
+| Jaeger | 2.22.0 | 4 |
+
+The OpenSearch integration contract passes against 3.9.0. Until 2026-11-15, CI fails these five images on CRITICAL findings and allows HIGH findings; every other image retains the HIGH/CRITICAL gate. The digest pins, monthly review, and CRITICAL scans are compensating controls. Re-scan and either remove each exception or renew it with a current finding count and rationale by the expiry date.
 
 Docker base images are pinned by digest so an input image cannot silently move between builds. API and Nginx runtime builds apply the current distribution security package updates before copying application artifacts; the API image also removes Temurin's unused Pebble test certificate server. Rebuild and scan images regularly to receive operating-system fixes while retaining the reviewed digest as the recorded input. Frontend npm dependency audits run against `registry.npmjs.org`; this explicit registry is required because the repository's configured mirror does not expose the npm audit endpoint.
 

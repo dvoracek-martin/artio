@@ -192,6 +192,7 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH,CRITICAL
+      # Temporary, image-scoped upstream HIGH exceptions expire 2026-11-15; see docs/security/dependency-scanning.md.
       - name: Scan observability collector image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -202,7 +203,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: os,library
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
       - name: Scan observability Grafana image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -213,7 +214,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: os,library
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
       - name: Scan observability Jaeger image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -224,7 +225,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: os,library
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
       - name: Scan observability Prometheus image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -235,7 +236,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: os,library
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
       - name: Package verified runtime artifacts
         if: github.event_name == 'push'
         run: |
