@@ -14,7 +14,7 @@ Owner decision, 2026-10-15: loyalty, subscriptions and advanced reports require 
 
 An unavailable Enterprise feature returns HTTP 403 with code `FEATURE_NOT_LICENSED` at the API/use-case boundary. UI hiding is only a convenience. License checks must never throw out of basic payment completion or refund processing. New-order loyalty eligibility must be persisted at order creation and honored on later capture/reconciliation even if the license has expired. Existing pre-boundary orders retain their prior promise; expiry does not erase balances or ledger history. Administrators may inspect existing loyalty obligations without an entitlement. Privacy export/erasure remains Community.
 
-Standard and advanced monetary aggregates must remain separate by currency; adding CHF and EUR is invalid. The current reporting endpoint mixes standard and advanced fields and must be separated while retaining useful Community reports.
+Standard and advanced monetary aggregates remain separate by currency; adding CHF and EUR is invalid. Standard captured-tender/activity metrics are Community. Ranked variant activity and currency-separated lifetime captured value use the separately gated advanced endpoint; see [reporting v1](../reporting/reporting-v1.md).
 
 ## Implemented loyalty and subscription boundaries
 
@@ -89,4 +89,4 @@ The status has `installationId`, `edition`, `state`, available `features`, `expi
 
 Runtime integration is implemented with PostgreSQL persistence, local cache, owner-only API, bounded HTTPS refresh and a dedicated scheduler. PostgreSQL/real-TLS integration tests cover restart, expiry, successful refresh with a file credential, safe responses, tampering/malformed/oversized/redirect/slow/TLS failure, transactional rollback and stale replacement across processes. Real API tests cover role authorization and fixed/chunked upload limits; migration and backup tests verify persistent identity. Consult the task ledger for the latest executed gates.
 
-Loyalty and subscription use-case boundaries and expiry obligation tests are implemented. Remaining licensing completion gates: currency-separated standard/advanced reports with `ADVANCED_REPORTING` enforcement, and Backoffice edition/status behavior. The licensing phase is not complete until those pass too.
+Loyalty/subscription boundaries and expiry obligation tests are implemented. Reporting now separates Community metrics from server-gated `ADVANCED_REPORTING`, with currency-separated aggregates and real PostgreSQL/API coverage. Remaining licensing completion gate: Backoffice edition/status/import/refresh and feature-availability workflows. The licensing phase is not complete until those pass too.

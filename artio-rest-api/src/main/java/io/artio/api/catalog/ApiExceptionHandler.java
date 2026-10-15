@@ -21,6 +21,12 @@ import org.slf4j.LoggerFactory;
 public class ApiExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
+    @ExceptionHandler({org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class,
+            org.springframework.web.bind.MissingServletRequestParameterException.class})
+    ResponseEntity<ApiError> invalidParameter(Exception exception, HttpServletRequest request) {
+        return error(HttpStatus.BAD_REQUEST, "A request parameter is missing or has an invalid value", request);
+    }
+
     @ExceptionHandler(io.artio.api.licensing.FeatureNotLicensedException.class)
     ResponseEntity<ApiError> notLicensed(io.artio.api.licensing.FeatureNotLicensedException exception, HttpServletRequest request) {
         Object originalPath = request.getAttribute(ApiVersioningFilter.ORIGINAL_REQUEST_PATH_ATTRIBUTE);
