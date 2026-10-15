@@ -91,7 +91,7 @@ public class PaymentController {
                     storefrontUrl + "/orders", Map.of("orderId", orderId.toString(), "expiresAt", expiresAt.toString())));
         } catch (PaymentProvider.CheckoutRejectedException rejected) {
             checkoutFailureCompensation.cancelRejectedCheckout(orderId);
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "Payment provider rejected checkout; order and stock reservation were cancelled");
         } catch (RuntimeException failure) {
             // Provider timeouts may be ambiguous; preserve the reservation and retry with the same key.

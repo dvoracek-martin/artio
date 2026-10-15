@@ -41,7 +41,7 @@ public class ProductMediaController {
         if (file == null || file.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.BAD_REQUEST, "Choose an image file");
         if (file.getSize() > ProductMediaService.MAX_UPLOAD_BYTES) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE, "Image upload is limited to 10 MiB");
+                org.springframework.http.HttpStatus.CONTENT_TOO_LARGE, "Image upload is limited to 10 MiB");
         MediaResponse result = response(productId, media.upload(productId, file.getBytes(), altText));
         return ResponseEntity.created(URI.create(result.contentUrl())).body(result);
     }
@@ -53,7 +53,7 @@ public class ProductMediaController {
         if (file == null || file.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.BAD_REQUEST, "Choose an image file");
         if (file.getSize() > ProductMediaService.MAX_UPLOAD_BYTES) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE, "Image upload is limited to 10 MiB");
+                org.springframework.http.HttpStatus.CONTENT_TOO_LARGE, "Image upload is limited to 10 MiB");
         return response(productId, media.replace(productId, mediaId, file.getBytes(), altText));
     }
 

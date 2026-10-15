@@ -7,7 +7,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -26,6 +27,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "artio.security.encryption-key=product-draft-test-encryption-key-32-characters-minimum",
         "artio.setup.token=product-draft-test-setup-token-32-characters-minimum"
 })
+@AutoConfigureTestRestTemplate
 class ProductDraftIntegrationTests {
     @Container static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
     @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) {

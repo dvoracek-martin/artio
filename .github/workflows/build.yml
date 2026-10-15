@@ -40,11 +40,193 @@ jobs:
           npm --registry=https://registry.npmjs.org audit --audit-level=moderate --prefix artio-backoffice
       - name: Build, run tests and generate coverage
         run: ./gradlew --no-daemon clean build integrationTest jacocoTestReport
+      - name: Verify Docker extension lifecycle and egress isolation
+        shell: pwsh
+        run: ./scripts/verify-extension-runtime.ps1
+      - name: Verify Docker observability plugin lifecycle
+        shell: pwsh
+        run: ./scripts/verify-observability-plugin.ps1
+      - name: Verify payment provider plugin containers
+        shell: pwsh
+        run: ./scripts/verify-payment-provider-containers.ps1
       - name: Build API container
         run: docker build -f artio-docker/Dockerfile -t artio/api:${GITHUB_SHA} .
       - name: Build storefront container
         run: docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-storefront --build-arg APP_NAME=storefront -t artio/storefront:${GITHUB_SHA} .
       - name: Build backoffice container
         run: docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-backoffice --build-arg APP_NAME=backoffice -t artio/backoffice:${GITHUB_SHA} .
+      - name: Build Stripe plugin container
+        run: docker build -f artio-plugins/stripe-payments/Dockerfile -t artio/plugin-stripe:${GITHUB_SHA} artio-plugins/stripe-payments
+      - name: Build PayPal plugin container
+        run: docker build -f artio-plugins/paypal-payments/Dockerfile -t artio/plugin-paypal:${GITHUB_SHA} artio-plugins/paypal-payments
       - name: Build Swiss Post plugin container
         run: docker build -f artio-plugins/swiss-post/Dockerfile -t artio/plugin-swiss-post:${GITHUB_SHA} artio-plugins/swiss-post
+      - name: Build Brevo plugin container
+        run: docker build -f artio-plugins/brevo-email/Dockerfile -t artio/plugin-brevo:${GITHUB_SHA} artio-plugins/brevo-email
+      - name: Build OpenSearch plugin container
+        run: docker build -f artio-plugins/opensearch-search/Dockerfile -t artio/plugin-opensearch:${GITHUB_SHA} artio-plugins/opensearch-search
+      - name: Build bundled OpenSearch engine container
+        run: docker build -f artio-plugins/opensearch-search/opensearch/Dockerfile -t artio/plugin-opensearch-engine:${GITHUB_SHA} artio-plugins/opensearch-search/opensearch
+      - name: Build observability control container
+        run: docker build -f artio-plugins/observability/control/Dockerfile -t artio/plugin-observability-control:${GITHUB_SHA} artio-plugins/observability/control
+      - name: Build observability collector container
+        run: docker build -f artio-plugins/observability/collector/Dockerfile -t artio/plugin-observability-collector:${GITHUB_SHA} artio-plugins/observability/collector
+      - name: Build observability Grafana container
+        run: docker build -f artio-plugins/observability/grafana/Dockerfile -t artio/plugin-observability-grafana:${GITHUB_SHA} artio-plugins/observability/grafana
+      - name: Build observability Jaeger container
+        run: docker build -f artio-plugins/observability/jaeger/Dockerfile -t artio/plugin-observability-jaeger:${GITHUB_SHA} artio-plugins/observability/jaeger
+      - name: Build observability Prometheus container
+        run: docker build -f artio-plugins/observability/prometheus/Dockerfile -t artio/plugin-observability-prometheus:${GITHUB_SHA} artio-plugins/observability/prometheus
+      - name: Scan API image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/api:${{ github.sha }}
+          version: v0.76.0
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan Storefront image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/storefront:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan Backoffice image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/backoffice:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan Stripe plugin image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-stripe:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan PayPal plugin image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-paypal:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan Swiss Post plugin image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-swiss-post:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan Brevo plugin image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-brevo:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan OpenSearch plugin image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-opensearch:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan bundled OpenSearch engine image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-opensearch-engine:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan observability control image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-observability-control:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan observability collector image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-observability-collector:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan observability Grafana image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-observability-grafana:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan observability Jaeger image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-observability-jaeger:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan observability Prometheus image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-observability-prometheus:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL

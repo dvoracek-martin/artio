@@ -1,4 +1,4 @@
-FROM node:24-alpine AS build
+FROM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS build
 ARG MODULE
 ARG APP_NAME
 WORKDIR /workspace
@@ -7,7 +7,8 @@ RUN npm ci --no-audit --no-fund
 COPY ${MODULE}/ ./
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+RUN apk upgrade --no-cache
 COPY artio-docker/nginx.conf /etc/nginx/conf.d/default.conf
 ARG MODULE
 ARG APP_NAME

@@ -1,6 +1,6 @@
 package io.artio.catalog.opensearch;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import io.artio.catalog.Product;
 import io.artio.catalog.ports.ProductSearch;
 import io.artio.catalog.ports.ProductSearchResult;
@@ -77,7 +77,7 @@ public class OpenSearchProductSearch implements RebuildableProductSearch {
         var oldIndices = new java.util.ArrayList<String>();
         boolean aliasExists = false;
         if (existingAlias != null) {
-            var indexNames = existingAlias.fieldNames();
+            var indexNames = existingAlias.propertyNames().iterator();
             while (indexNames.hasNext()) {
                 String oldIndex = indexNames.next();
                 if (existingAlias.path(oldIndex).path("aliases").has(INDEX)) {
@@ -97,18 +97,20 @@ public class OpenSearchProductSearch implements RebuildableProductSearch {
             if (concreteIndexExists) oldIndices.add(INDEX);
         }
         if (aliasExists) {
-            var actions = new java.util.ArrayList<Object>();
+            var actions = new java.util.ArrayList<java.util.Map<String, Object>>();
             oldIndices.forEach(oldIndex -> {
-                actions.add(new AliasAction("remove", oldIndex, INDEX));
+                actions.add(java.util.Map.of("remove", java.util.Map.of("index", oldIndex, "alias", INDEX)));
             });
-            actions.add(new AliasAction("add", generation, INDEX));
+            actions.add(java.util.Map.of("add", java.util.Map.of("index", generation, "alias", INDEX)));
             client.post().uri("/_aliases").body(new AliasRequest(actions)).retrieve().toBodilessEntity();
         } else if (concreteIndexExists) {
             client.post().uri("/_aliases").body(new AliasRequest(List.of(
-                    new RemoveIndexAction(INDEX), new AliasAction("add", generation, INDEX))))
+                    java.util.Map.of("remove_index", java.util.Map.of("index", INDEX)),
+                    java.util.Map.of("add", java.util.Map.of("index", generation, "alias", INDEX)))))
                     .retrieve().toBodilessEntity();
         } else {
-            client.post().uri("/_aliases").body(new AliasRequest(List.of(new AliasAction("add", generation, INDEX))))
+            client.post().uri("/_aliases").body(new AliasRequest(List.of(
+                    java.util.Map.of("add", java.util.Map.of("index", generation, "alias", INDEX)))))
                     .retrieve().toBodilessEntity();
         }
         for (String oldIndex : oldIndices) deleteGeneration(oldIndex);
@@ -180,13 +182,5 @@ public class OpenSearchProductSearch implements RebuildableProductSearch {
     private record TermClause(java.util.Map<String, String> term) {}
     private record MultiMatch(MultiMatchQuery multi_match) { MultiMatch(String text) { this(new MultiMatchQuery(text, List.of("name^3", "sku^2", "description", "attributeText"))); } }
     private record MultiMatchQuery(String query, List<String> fields) {}
-    private record AliasRequest(List<Object> actions) {}
-    private record AliasAction(String operation, String index, String alias) {
-        @com.fasterxml.jackson.annotation.JsonValue
-        Object json() { return java.util.Map.of(operation, java.util.Map.of("index", index, "alias", alias)); }
-    }
-    private record RemoveIndexAction(String index) {
-        @com.fasterxml.jackson.annotation.JsonValue
-        Object json() { return java.util.Map.of("remove_index", java.util.Map.of("index", index)); }
-    }
+    private record AliasRequest(List<java.util.Map<String, Object>> actions) {}
 }

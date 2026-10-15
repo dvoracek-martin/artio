@@ -6,8 +6,8 @@ plugins {
 dependencies {
     implementation("software.amazon.awssdk:s3:2.55.14")
     implementation("software.amazon.awssdk:url-connection-client:2.55.14")
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-api:2.6.0")
+    implementation("org.springframework.boot:spring-boot-starter-webmvc")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-api:3.1.1")
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.flywaydb:flyway-core")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
@@ -26,8 +26,8 @@ dependencies {
     implementation(project(":artio-notifications"))
     implementation(project(":artio-extensions"))
     implementation("org.springframework.boot:spring-boot-starter-security")
-    implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
-    implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
+    implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
+    implementation("org.springframework.boot:spring-boot-starter-security-oauth2-client")
     implementation("org.springframework.boot:spring-boot-starter-graphql")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("io.micrometer:micrometer-tracing-bridge-otel")
@@ -38,6 +38,8 @@ dependencies {
     compileOnly("com.github.docker-java:docker-java-transport-httpclient5:3.7.1")
     testImplementation("com.github.docker-java:docker-java-core:3.7.1")
     testImplementation("com.github.docker-java:docker-java-transport-httpclient5:3.7.1")
+    testImplementation("org.springframework.boot:spring-boot-resttestclient")
+    testImplementation("org.springframework.boot:spring-boot-restclient")
 }
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     archiveFileName.set("artio-rest-api.jar")

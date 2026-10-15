@@ -29,10 +29,10 @@ public final class LicenseController {
     public LicensingService.Status install(HttpServletRequest request, JwtAuthenticationToken actor) throws IOException {
         requireOwner(actor);
         if (request.getContentLengthLong() > SignedEntitlementVerifier.MAX_DOCUMENT_BYTES)
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Signed entitlement exceeds 64 KiB");
+            throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "Signed entitlement exceeds 64 KiB");
         byte[] document = request.getInputStream().readNBytes(SignedEntitlementVerifier.MAX_DOCUMENT_BYTES + 1);
         if (document.length > SignedEntitlementVerifier.MAX_DOCUMENT_BYTES)
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Signed entitlement exceeds 64 KiB");
+            throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "Signed entitlement exceeds 64 KiB");
         return licensing.install(document, UUID.fromString(actor.getToken().getSubject()));
     }
 

@@ -5,7 +5,7 @@ param([string[]]$Tests = @(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$fixturePath = Join-Path $repoRoot 'artio-extensions\reference-runtime'
+$fixturePath = [System.IO.Path]::Combine($repoRoot, 'artio-extensions', 'reference-runtime')
 $registryName = "artio-extension-registry-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $registryStarted = $false
 
@@ -59,7 +59,8 @@ try {
     try {
         $verificationArguments = @(':artio-rest-api:integrationTest', '--rerun', '--no-daemon')
         foreach ($test in $Tests) { $verificationArguments += @('--tests', $test) }
-        & .\gradlew.bat @verificationArguments
+        $gradleWrapper = if ($IsWindows) { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
+        & $gradleWrapper @verificationArguments
         if ($LASTEXITCODE -ne 0) { throw 'The real Docker extension lifecycle integration test failed.' }
     } finally { Pop-Location }
 } finally {

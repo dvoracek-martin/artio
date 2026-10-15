@@ -55,7 +55,7 @@ gradle.projectsEvaluated {
                 configuration.dependencies.mapNotNull { dependency ->
                     when (dependency) {
                         is org.gradle.api.artifacts.ProjectDependency -> {
-                            val target = dependency.dependencyProject.name
+                            val target = dependency.path.substringAfterLast(':')
                             if (target != "artio-kernel" && target !in artioDomainModules) {
                                 "$moduleName:${configuration.name} -> $target (only artio-kernel or an approved domain module is allowed)"
                             } else null

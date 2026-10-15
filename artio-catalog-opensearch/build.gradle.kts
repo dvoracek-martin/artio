@@ -5,7 +5,8 @@ plugins {
 
 dependencies {
     implementation(project(":artio-catalog"))
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-jackson2")
+    implementation("org.springframework.boot:spring-boot-starter-webmvc")
     add("integrationTestImplementation", platform("org.testcontainers:testcontainers-bom:1.20.4"))
     add("integrationTestImplementation", "org.testcontainers:junit-jupiter")
 }

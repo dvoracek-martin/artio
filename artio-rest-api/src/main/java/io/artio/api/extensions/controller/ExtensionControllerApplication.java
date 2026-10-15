@@ -11,18 +11,19 @@ import org.springframework.context.annotation.Import;
 @SpringBootApplication(
         scanBasePackages = "io.artio.api.extensions.controller",
         excludeName = {
-                "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
-                "org.springframework.boot.autoconfigure.jdbc.JdbcTemplateAutoConfiguration",
-                "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration",
-                "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration",
-                "org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration",
-                "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration",
-                "org.springframework.boot.autoconfigure.security.oauth2.resource.servlet.OAuth2ResourceServerAutoConfiguration",
-                "org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration",
-                "org.springframework.boot.autoconfigure.mail.MailSenderAutoConfiguration",
-                "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration",
-                "org.springframework.boot.autoconfigure.graphql.GraphQlAutoConfiguration",
-                "org.springframework.boot.autoconfigure.graphql.servlet.GraphQlWebMvcAutoConfiguration"
+                "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
+                "org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration",
+                "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration",
+                "org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration",
+                "org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration",
+                "org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterAutoConfiguration",
+                "org.springframework.boot.security.autoconfigure.actuate.web.servlet.ManagementWebSecurityAutoConfiguration",
+                "org.springframework.boot.security.oauth2.server.resource.autoconfigure.OAuth2ResourceServerAutoConfiguration",
+                "org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration",
+                "org.springframework.boot.mail.autoconfigure.MailSenderAutoConfiguration",
+                "org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration",
+                "org.springframework.boot.graphql.autoconfigure.GraphQlAutoConfiguration",
+                "org.springframework.boot.graphql.autoconfigure.servlet.GraphQlWebMvcAutoConfiguration"
         })
 @ConditionalOnProperty(name = "artio.runtime.role", havingValue = "extension-controller")
 @Import({DockerRuntimeConfiguration.class, ExtensionCredentialService.class})

@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$pluginRoot = Join-Path $repoRoot 'artio-plugins\observability'
+$pluginRoot = [System.IO.Path]::Combine($repoRoot, 'artio-plugins', 'observability')
 $registryName = "artio-observability-registry-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $registryStarted = $false
 $images = @(
@@ -49,7 +49,8 @@ try {
 
     Push-Location $repoRoot
     try {
-        & .\gradlew.bat :artio-rest-api:integrationTest --rerun --tests io.artio.api.extensions.ObservabilityPluginIntegrationTests --no-daemon
+        $gradleWrapper = if ($IsWindows) { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
+        & $gradleWrapper :artio-rest-api:integrationTest --rerun --tests io.artio.api.extensions.ObservabilityPluginIntegrationTests --no-daemon
         if ($LASTEXITCODE -ne 0) { throw 'The live observability plugin bundle integration test failed.' }
     } finally { Pop-Location }
 } finally {

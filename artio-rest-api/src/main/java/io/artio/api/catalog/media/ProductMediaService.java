@@ -39,7 +39,7 @@ public class ProductMediaService {
         Integer currentCount = jdbc.queryForObject("SELECT count(*) FROM catalog_product_media WHERE product_id=?", Integer.class, productId);
         if (currentCount != null && currentCount >= MAX_MEDIA_PER_PRODUCT) throw new ResponseStatusException(HttpStatus.CONFLICT, "A product cannot have more than 100 images");
         if (uploaded == null || uploaded.length == 0) throw new IllegalArgumentException("Choose an image file");
-        if (uploaded.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Image upload is limited to 10 MiB");
+        if (uploaded.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "Image upload is limited to 10 MiB");
         String cleanAlt = altText == null ? "" : altText.trim();
         if (cleanAlt.length() > 500) throw new IllegalArgumentException("Alternative text cannot exceed 500 characters");
         SanitizedImage image = sanitize(uploaded);
@@ -90,7 +90,7 @@ public class ProductMediaService {
     public MediaView replace(UUID productId, UUID mediaId, byte[] uploaded, String altText) {
         lockProduct(productId);
         if (uploaded == null || uploaded.length == 0) throw new IllegalArgumentException("Choose an image file");
-        if (uploaded.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Image upload is limited to 10 MiB");
+        if (uploaded.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "Image upload is limited to 10 MiB");
         String cleanAlt = altText == null ? "" : altText.trim();
         if (cleanAlt.length() > 500) throw new IllegalArgumentException("Alternative text cannot exceed 500 characters");
         SanitizedImage image = sanitize(uploaded);
@@ -178,7 +178,7 @@ public class ProductMediaService {
                         throw new IllegalArgumentException("Image format could not be safely encoded");
                     }
                     byte[] sanitized = output.toByteArray();
-                    if (sanitized.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Processed image exceeds 10 MiB");
+                    if (sanitized.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "Processed image exceeds 10 MiB");
                     return new SanitizedImage(contentType, width, height, sanitized);
                 }
             } finally {

@@ -2,7 +2,7 @@ package io.artio.api.licensing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -22,7 +22,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -43,6 +44,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(classes = io.artio.api.ArtioRestApiApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureTestRestTemplate
 class LicenseApiIntegrationTests {
     @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
     private static final KeyPair ISSUER;
@@ -62,7 +64,7 @@ class LicenseApiIntegrationTests {
     @Autowired ObjectMapper mapper;
     @Autowired LicensingService licensing;
     // Availability only: financial assertions use real PostgreSQL gift-card tender, never mocked provider outcomes.
-    @org.springframework.boot.test.mock.mockito.MockBean io.artio.extensions.commerce.PaymentProvider paymentProvider;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean io.artio.extensions.commerce.PaymentProvider paymentProvider;
     @LocalServerPort int port;
     private UUID owner;
     private String ownerToken;
@@ -157,7 +159,7 @@ class LicenseApiIntegrationTests {
     @Test
     void boundedOwnerUploadRejectsBothFixedAndChunkedBodiesWithoutChangingCommunity() throws Exception {
         byte[] oversized = new byte[65_537];
-        assertThat(exchange("/api/v1/admin/system/license", HttpMethod.POST, oversized, ownerToken).getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+        assertThat(exchange("/api/v1/admin/system/license", HttpMethod.POST, oversized, ownerToken).getStatusCode()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE);
         try (var client = HttpClient.newHttpClient()) {
             var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/admin/system/license"))
                     .timeout(java.time.Duration.ofSeconds(5)).header("Authorization", "Bearer " + ownerToken)

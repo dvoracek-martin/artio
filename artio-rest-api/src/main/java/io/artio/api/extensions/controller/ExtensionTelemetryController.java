@@ -40,13 +40,13 @@ final class ExtensionTelemetryController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "OTLP destination is not supported");
         }
         if (request.getContentLengthLong() > MAX_PAYLOAD_BYTES) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "OTLP payload exceeds its 4 MiB limit");
+            throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "OTLP payload exceeds its 4 MiB limit");
         }
         byte[] payload;
         try { payload = request.getInputStream().readNBytes(MAX_PAYLOAD_BYTES + 1); }
         catch (IOException failure) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTLP payload could not be read"); }
         if (payload.length == 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OTLP payload is empty");
-        if (payload.length > MAX_PAYLOAD_BYTES) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "OTLP payload exceeds its 4 MiB limit");
+        if (payload.length > MAX_PAYLOAD_BYTES) throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "OTLP payload exceeds its 4 MiB limit");
         ExtensionRuntimePort.TelemetryResponse response = runtime.forwardOtlp(pluginId, signal, payload);
         MediaType responseType;
         try { responseType = MediaType.parseMediaType(response.contentType()); }

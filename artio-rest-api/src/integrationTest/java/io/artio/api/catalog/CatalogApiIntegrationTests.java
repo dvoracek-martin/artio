@@ -3,8 +3,8 @@ package io.artio.api.catalog;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import java.util.Map;
 import java.util.List;
 import java.util.Set;
@@ -26,7 +26,8 @@ import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Import;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -46,6 +47,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureTestRestTemplate
 @Import(CatalogApiIntegrationTests.LocalCacheConfiguration.class)
 class CatalogApiIntegrationTests {
     private static final String ACTIVE_TEST_ENCRYPTION_KEY = "integration-test-encryption-key-value-32-bytes-minimum";
@@ -823,7 +825,7 @@ class CatalogApiIntegrationTests {
         assertThat(page.getBody()).isNotNull();
         assertThat(page.getBody().total()).isEqualTo(1);
         assertThat(page.getBody().items()).anySatisfy(item->assertThat(item.id()).isEqualTo(product.getBody().id()));
-        var forbidden=http.getForEntity("/api/v1/admin/catalog/products",AdminCatalogProductQueryController.ProductPage.class);
+        var forbidden=http.getForEntity("/api/v1/admin/catalog/products",String.class);
         assertThat(forbidden.getStatusCode()).isIn(HttpStatus.UNAUTHORIZED,HttpStatus.FORBIDDEN);
     }
 
@@ -937,7 +939,7 @@ class CatalogApiIntegrationTests {
         var anonymousHeaders = new HttpHeaders();
         anonymousHeaders.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
         var anonymous = http.postForEntity("/api/v1/products/{id}/media", new HttpEntity<>(anonymousParts, anonymousHeaders),
-                ProductMediaController.MediaResponse.class, product.getBody().id());
+                String.class, product.getBody().id());
         assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 
         var first = uploadProductImage(product.getBody().id(), firstImage, "Front view");
@@ -1070,7 +1072,7 @@ class CatalogApiIntegrationTests {
         var response = http.exchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
                 new HttpEntity<>(null, headers), ApiError.class, orderId);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getStatusCode().value()).isEqualTo(422);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
         assertThat(inventory.reservationsByOrder(orderId)).singleElement()
                 .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
@@ -1573,8 +1575,7 @@ class CatalogApiIntegrationTests {
         String eventPrefix = "diagnostic-" + UUID.randomUUID();
         jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('EXTENSION',?,'completed',now()-interval '120 days',now()-interval '5 days')", eventPrefix + "-recently-processed");
         jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('EXTENSION',?,'completed',now()-interval '1 day',now()-interval '120 days')", eventPrefix + "-old-processed");
-        var anonymous = http.getForEntity("/api/v1/admin/operations/outbox",
-                io.artio.api.notifications.OutboxOperationsController.OutboxSummary.class);
+        var anonymous = http.getForEntity("/api/v1/admin/operations/outbox", String.class);
         assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         var headers = new HttpHeaders();
         headers.setBearerAuth(adminToken);
@@ -1747,7 +1748,7 @@ class CatalogApiIntegrationTests {
 
         var variantId = createdVariant.getBody().id();
         var anonymousStatusChange=http.exchange("/api/variants/{id}/active",HttpMethod.PUT,
-                new HttpEntity<>(new SetActiveRequest(false)),VariantResponse.class,variantId);
+                new HttpEntity<>(new SetActiveRequest(false)),String.class,variantId);
         assertThat(anonymousStatusChange.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         adminExchange("/api/variants/{id}/active", HttpMethod.PUT, new SetActiveRequest(false), String.class, variantId);
         var inactive = http.getForEntity("/api/variants/{id}", VariantResponse.class, variantId);
@@ -1974,7 +1975,7 @@ class CatalogApiIntegrationTests {
                         JsonNode object = event.path("data").path("object");
                         return new WebhookResult(event.path("id").asText(), type, object.path("id").asText(), paymentState,
                                 new BigDecimal(object.path("amount").asText()), object.path("currency").asText(), true);
-                    } catch (IOException invalid) {
+                    } catch (RuntimeException invalid) {
                         return new WebhookResult("", "", "", PaymentState.FAILED, false);
                     }
                 }
@@ -1989,7 +1990,7 @@ class CatalogApiIntegrationTests {
                         if ("expired".equals(status))
                             return Optional.of(new PaymentResult(reference, PaymentState.EXPIRED, null, null, null));
                         return Optional.empty();
-                    } catch (IOException invalid) { return Optional.empty(); }
+                    } catch (RuntimeException invalid) { return Optional.empty(); }
                 }
             };
         }

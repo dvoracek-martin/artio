@@ -37,7 +37,7 @@ public class ProductCsvController {
     @PostMapping(value="/import",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
     public ProductCsvImportService.ImportReport importCsv(@RequestPart("file") MultipartFile file) throws IOException {
         if(file==null||file.isEmpty())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Select a non-empty CSV file");
-        if(file.getSize()>MAX_UPLOAD_BYTES)throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,"CSV import is limited to 5 MiB");
+        if(file.getSize()>MAX_UPLOAD_BYTES)throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE,"CSV import is limited to 5 MiB");
         String csv;
         try{csv=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(file.getBytes())).toString();}
         catch(CharacterCodingException invalid){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"CSV file must use UTF-8",invalid);}
@@ -50,7 +50,7 @@ public class ProductCsvController {
                 (rs,row)->new ProductResponse(rs.getObject("id",java.util.UUID.class),rs.getString("name"),rs.getString("description"),rs.getString("sku"),
                         rs.getBoolean("active"),rs.getTimestamp("created_at").toInstant(),rs.getTimestamp("updated_at").toInstant(),null,Set.of(),Map.of(),null,null,null,
                         rs.getTimestamp("archived_at")!=null,rs.getTimestamp("archived_at")==null?null:rs.getTimestamp("archived_at").toInstant()),MAX_EXPORT_ROWS+1);
-        if(rows.size()>MAX_EXPORT_ROWS)throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,"Catalog export is limited to 50000 products");
+        if(rows.size()>MAX_EXPORT_ROWS)throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE,"Catalog export is limited to 50000 products");
         byte[] body=ProductCsvCodec.export(rows).getBytes(StandardCharsets.UTF_8);
         var headers=new HttpHeaders();headers.setContentType(new MediaType("text","csv",StandardCharsets.UTF_8));
         headers.setContentDisposition(ContentDisposition.attachment().filename("artio-products.csv").build());
