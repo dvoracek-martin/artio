@@ -10,6 +10,8 @@ All routes require ADMIN or SUPERADMIN. Canonical paths use `/api/v1`; the `/api
 
 `days` defaults to 30 and accepts integers from 1 through 365. The order-creation window is `since <= created_at < until`, using rolling 24-hour days. Invalid period values, including nonnumeric values, return the common 400 error envelope. Anonymous callers receive 401; customers receive 403. An administrator without the advanced grant receives 403 `FEATURE_NOT_LICENSED` before financial aggregation runs. A different Enterprise grant does not grant access. Expiry blocks new advanced queries and leaves standard reports available.
 
+The Backoffice Reports page uses bounded 7, 30, 90 or 365 day periods, displays standard order activity and currency-separated tender, and loads advanced sections only when the safe staff feature-availability endpoint includes `ADVANCED_REPORTING`. Each amount is formatted with its own ISO currency. The UI keeps the stored `recordedLineValue` label and explains its stored-price basis; it does not present it as net captured revenue.
+
 ## Standard response
 
 `since`, `until`, `orders`, `activeCustomers`, `ordersByStatus` and `salesByCurrency` describe the same creation cohort. Order/customer/status counts include unpaid and cancelled activity. Each currency row contains `currency`, `orders`, `customers`, `capturedAmount`, `refundedAmount` and `netCapturedAmount`.

@@ -73,7 +73,7 @@ Community starts with no issuer trust file, signed document or refresh endpoint.
 
 `ARTIO_LICENSE_REFRESH_URL` optionally configures the HTTPS issuer endpoint. `ARTIO_LICENSE_REFRESH_CREDENTIAL_FILE` optionally names a protected bearer credential file, usually in the same secret volume. The token is never an environment-variable value. `ARTIO_LICENSE_REFRESH_INTERVAL_SECONDS` defaults to `21600`. These refresh settings apply to the API process only; workers evaluate the shared local state.
 
-All following canonical routes require an authenticated SUPERADMIN (the `/api/...` compatibility alias remains available):
+All following canonical management routes require an authenticated SUPERADMIN (the `/api/...` compatibility alias remains available):
 
 | Method and route | Behavior |
 |---|---|
@@ -83,10 +83,12 @@ All following canonical routes require an authenticated SUPERADMIN (the `/api/..
 
 The status has `installationId`, `edition`, `state`, available `features`, `expiresAt`, `graceUntil`, `verificationStatus`, `refreshConfigured`, `refreshStatus`, `lastRefreshAttemptAt`, `lastRefreshSuccessAt` and `refreshInProgress`. An empty or expired grant exposes an empty feature set. Refresh states include `NOT_CONFIGURED`, `NEVER`, `IN_PROGRESS`, `SUCCESS`, `UNAVAILABLE`, `INVALID_RESPONSE` and `INVALID_CONFIGURATION`; no issuer response body/error message is exposed. Invalid uploads return 400 and preserve the current document; oversized uploads return 413. Unauthorized callers return 401/403 before upload parsing.
 
+Authenticated staff can read `GET /api/v1/admin/license/availability` with ADMIN or SUPERADMIN. It returns only `edition`, `state`, available `features`, `expiresAt` and `graceUntil`, so report and loyalty workflows can display feature availability without exposing installation or issuer identifiers. Customers are denied. The Backoffice Reports page consumes this status and the standard/advanced report endpoints. System Settings presents owner-only status, JSON file import and explicit issuer refresh; browser screens do not create signing keys or decide server authorization.
+
 ## Implementation evidence
 
 `SignedEntitlementVerifier` and `EntitlementPolicy` implement local Ed25519 verification and validity/replacement policy. Ten tests verify strict UTF-8 persistence compatibility, exact active/grace/expired boundaries, explicit features, installation matching, tampering/unknown issuer rejection, strict schema/duplicate handling, time/size/encoding limits, Community defaults, last-known-good behavior, restart expiry, signed feature removal and stale/future replacement rejection. Ephemeral issuer private keys exist only in tests.
 
 Runtime integration is implemented with PostgreSQL persistence, local cache, owner-only API, bounded HTTPS refresh and a dedicated scheduler. PostgreSQL/real-TLS integration tests cover restart, expiry, successful refresh with a file credential, safe responses, tampering/malformed/oversized/redirect/slow/TLS failure, transactional rollback and stale replacement across processes. Real API tests cover role authorization and fixed/chunked upload limits; migration and backup tests verify persistent identity. Consult the task ledger for the latest executed gates.
 
-Loyalty/subscription boundaries and expiry obligation tests are implemented. Reporting now separates Community metrics from server-gated `ADVANCED_REPORTING`, with currency-separated aggregates and real PostgreSQL/API coverage. Remaining licensing completion gate: Backoffice edition/status/import/refresh and feature-availability workflows. The licensing phase is not complete until those pass too.
+Loyalty/subscription boundaries and expiry obligation tests are implemented. Reporting now separates Community metrics from server-gated `ADVANCED_REPORTING`, with currency-separated aggregates and real PostgreSQL/API coverage. Backoffice edition/status/import/refresh and feature-availability workflows are implemented; the task ledger records the latest builds and API gates.

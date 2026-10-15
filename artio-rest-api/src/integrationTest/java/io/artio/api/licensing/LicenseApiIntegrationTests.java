@@ -136,6 +136,25 @@ class LicenseApiIntegrationTests {
     }
 
     @Test
+    void administratorsCanReadOnlySafeFeatureAvailabilityWhileCustomerCannot() throws Exception {
+        String path = "/api/v1/admin/license/availability";
+        assertThat(http.getForEntity(path, JsonNode.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(exchange(path, HttpMethod.GET, null, customerToken).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        var community = exchange(path, HttpMethod.GET, null, adminToken);
+        assertThat(community.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(community.getBody().path("edition").asText()).isEqualTo("COMMUNITY");
+        assertThat(community.getBody().path("features")).isEmpty();
+        assertThat(community.getBody().toString()).doesNotContain("installationId", "licenseId", "payload", "signature", "refresh", "keyId");
+
+        installFeatures(List.of("ADVANCED_REPORTING"), false);
+        var enterprise = exchange(path, HttpMethod.GET, null, adminToken);
+        assertThat(enterprise.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(enterprise.getBody().path("edition").asText()).isEqualTo("ENTERPRISE");
+        assertThat(enterprise.getBody().path("features").toString()).contains("ADVANCED_REPORTING");
+        assertThat(enterprise.getBody().toString()).doesNotContain("installationId", "licenseId", "payload", "signature", "refresh", "keyId");
+    }
+
+    @Test
     void boundedOwnerUploadRejectsBothFixedAndChunkedBodiesWithoutChangingCommunity() throws Exception {
         byte[] oversized = new byte[65_537];
         assertThat(exchange("/api/v1/admin/system/license", HttpMethod.POST, oversized, ownerToken).getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
