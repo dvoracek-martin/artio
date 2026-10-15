@@ -7,7 +7,7 @@ val npmInstall = tasks.register<Exec>("npmInstall") {
     description = "Installs the locked Angular dependencies."
     workingDir(projectDir)
     commandLine(npmCommand, "ci", "--no-audit", "--no-fund")
-    inputs.files("package.json", "package-lock.json")
+    inputs.files(".npmrc", "package.json", "package-lock.json")
     outputs.dir("node_modules")
 }
 

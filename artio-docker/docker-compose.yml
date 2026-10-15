@@ -95,6 +95,7 @@ services:
       dockerfile: artio-docker/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: ${ARTIO_API_SPRING_PROFILES_ACTIVE:-${SPRING_PROFILES_ACTIVE:-production}}
+      ARTIO_SETUP_SKIP: ${ARTIO_SETUP_SKIP:-false}
       ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
       ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
       ARTIO_CATALOG_MEDIA_STORAGE_PATH: /var/lib/artio/media
