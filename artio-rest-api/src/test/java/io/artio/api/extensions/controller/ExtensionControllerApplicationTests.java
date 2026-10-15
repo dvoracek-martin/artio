@@ -12,6 +12,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import io.artio.extensions.ExtensionRuntimePort;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(classes = ExtensionControllerApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -26,7 +29,30 @@ import org.springframework.http.MediaType;
         })
 class ExtensionControllerApplicationTests {
     @MockBean DockerClient docker;
+    @MockBean ExtensionRuntimePort runtime;
     @Autowired TestRestTemplate http;
+
+    @Test
+    void forwardsAuthenticatedArtioIdentityToTheFixedGrafanaProxy() throws Exception {
+        String userId = "fbf38b6f-431a-4f5d-aae7-85ad63f9a0e1";
+        String email = "admin@example.invalid";
+        when(runtime.proxyObservability("observability.artio", "GET", "/api/user", null, userId, email))
+                .thenReturn(new ExtensionRuntimePort.UiProxyResponse(200, "application/json", java.util.Map.of(),
+                        "{\"login\":\"artio-fbf38b6f-431a-4f5d-aae7-85ad63f9a0e1\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+        var headers = jsonHeaders();
+        headers.setBearerAuth("integration-controller-token-value-at-least-32-characters");
+        var response = http.postForEntity("/internal/v1/observability/grafana",
+                new HttpEntity<>(new ExtensionObservabilityController.GrafanaProxyRequest(
+                        "GET", "/api/user", null, userId, email), headers), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String encodedBody = new com.fasterxml.jackson.databind.ObjectMapper().readTree(response.getBody())
+                .path("bodyBase64").asText();
+        assertThat(new String(java.util.Base64.getDecoder().decode(encodedBody), java.nio.charset.StandardCharsets.UTF_8))
+                .contains("artio-fbf38b6f-431a-4f5d-aae7-85ad63f9a0e1");
+        verify(runtime).proxyObservability("observability.artio", "GET", "/api/user", null, userId, email);
+    }
 
     @Test
     void internalLifecycleRoutesRejectCallsWithoutTheControllerCredential() {

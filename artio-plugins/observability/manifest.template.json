@@ -34,7 +34,7 @@
       "image": "ghcr.io/artio-plugins/observability-collector@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
       "port": 13133,
       "healthPath": "/",
-      "dependsOn": ["main"],
+      "dependsOn": ["jaeger"],
       "internalPorts": [4317, 4318, 9464]
     },
     {

@@ -35,11 +35,11 @@ final class ExtensionObservabilityController {
             throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST);
         }
         ExtensionRuntimePort.UiProxyResponse response = runtime.proxyObservability(
-                "observability.artio", request.method(), request.path(), request.query());
+                "observability.artio", request.method(), request.path(), request.query(), request.userId(), request.email());
         return ResponseEntity.ok(new GrafanaProxyResponse(response.statusCode(), response.contentType(),
                 response.headers(), Base64.getEncoder().encodeToString(response.body())));
     }
 
-    record GrafanaProxyRequest(String method, String path, String query) { }
+    record GrafanaProxyRequest(String method, String path, String query, String userId, String email) { }
     record GrafanaProxyResponse(int statusCode, String contentType, Map<String, String> headers, String bodyBase64) { }
 }

@@ -64,9 +64,13 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
         return post("internal/v1/extensions/" + segment(manifest.id()) + "/bundle-health", new ManifestHealthRequest(manifest), Duration.ofSeconds(30), RuntimeHealth.class);
     }
     @Override public UiProxyResponse proxyObservability(String pluginId, String method, String path, String query) {
+        return proxyObservability(pluginId, method, path, query, null, null);
+    }
+    @Override public UiProxyResponse proxyObservability(String pluginId, String method, String path, String query,
+            String userId, String email) {
         if (!"observability.artio".equals(pluginId)) throw new IllegalArgumentException("Unsupported observability plugin");
         GrafanaProxyResponse response = post("internal/v1/observability/grafana",
-                new GrafanaProxyRequest(method, path, query), Duration.ofSeconds(15), GrafanaProxyResponse.class);
+                new GrafanaProxyRequest(method, path, query, userId, email), Duration.ofSeconds(15), GrafanaProxyResponse.class);
         if (response.bodyBase64() == null || response.bodyBase64().length() > 11_184_812) {
             throw new ExtensionProtocolException("Observability response exceeded its size limit");
         }
@@ -144,7 +148,7 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     }
     private record HealthRequest(String healthPath) { }
     private record ManifestHealthRequest(PluginManifest manifest) { }
-    private record GrafanaProxyRequest(String method, String path, String query) { }
+    private record GrafanaProxyRequest(String method, String path, String query, String userId, String email) { }
     private record GrafanaProxyResponse(int statusCode, String contentType, Map<String, String> headers, String bodyBase64) { }
     private record InvocationRequest(String pluginId, int credentialGeneration, String extensionPoint, String operation,
             String idempotencyKey, String configurationJson, String requestJson, long deadlineMillis) { }

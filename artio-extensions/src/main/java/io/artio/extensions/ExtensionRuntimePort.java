@@ -35,6 +35,10 @@ public interface ExtensionRuntimePort {
     default UiProxyResponse proxyObservability(String pluginId, String method, String path, String query) {
         throw new ExtensionUnavailableException("Observability UI is unavailable");
     }
+    default UiProxyResponse proxyObservability(String pluginId, String method, String path, String query,
+            String userId, String email) {
+        return proxyObservability(pluginId, method, path, query);
+    }
     InvocationResult invoke(String pluginId, String extensionPoint, String operation, String idempotencyKey,
                             String configurationJson, String requestJson, Duration deadline);
     default InvocationResult invoke(String pluginId, int credentialGeneration, String extensionPoint, String operation,

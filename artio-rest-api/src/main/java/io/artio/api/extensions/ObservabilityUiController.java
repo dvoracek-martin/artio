@@ -37,7 +37,7 @@ public final class ObservabilityUiController {
     }
 
     @GetMapping({"/ui", "/ui/**"})
-    public ResponseEntity<byte[]> proxy(HttpServletRequest request) {
+    public ResponseEntity<byte[]> proxy(JwtAuthenticationToken authentication, HttpServletRequest request) {
         String requestUri = request.getRequestURI();
         if (requestUri == null || !requestUri.startsWith(UI_PREFIX)) return ResponseEntity.notFound().build();
         String path = requestUri.substring(UI_PREFIX.length());
@@ -48,7 +48,8 @@ public final class ObservabilityUiController {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
         }
         response = availableRuntime.proxyObservability("observability.artio", request.getMethod(), path,
-                request.getQueryString());
+                request.getQueryString(), authentication.getToken().getSubject(),
+                authentication.getToken().getClaimAsString("email"));
         var builder = ResponseEntity.status(response.statusCode()).contentType(parseContentType(response.contentType()))
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .header("X-Content-Type-Options", "nosniff");

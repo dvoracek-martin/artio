@@ -367,6 +367,12 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     @Override
     public ExtensionRuntimePort.UiProxyResponse proxyObservability(String pluginId, String method, String path, String query) {
+        return proxyObservability(pluginId, method, path, query, null, null);
+    }
+
+    @Override
+    public ExtensionRuntimePort.UiProxyResponse proxyObservability(String pluginId, String method, String path, String query,
+            String userId, String email) {
         if (!"observability.artio".equals(pluginId) || !("GET".equals(method) || "HEAD".equals(method))) {
             throw new IllegalArgumentException("Unsupported observability proxy request");
         }
@@ -387,6 +393,14 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             if (query != null && !query.isBlank()) target = URI.create(target.toString() + "?" + query);
             var builder = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(10))
                     .header("Accept", "text/html,application/json,*/*");
+            if (userId != null || email != null) {
+                if (userId == null || email == null || email.isBlank() || email.length() > 254
+                        || email.chars().anyMatch(Character::isISOControl)) {
+                    throw new IllegalArgumentException("Observability user identity is invalid");
+                }
+                String grafanaUser = "artio-" + java.util.UUID.fromString(userId);
+                builder.header("X-WEBAUTH-USER", grafanaUser).header("X-WEBAUTH-EMAIL", email);
+            }
             HttpRequest request = "HEAD".equals(method)
                     ? builder.method("HEAD", HttpRequest.BodyPublishers.noBody()).build() : builder.GET().build();
             HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -650,8 +664,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
     }
 
-    private static String safeHealthPath(String path) {
-        if (path == null || !path.matches("/[A-Za-z0-9/_-]{1,120}") || path.contains("..")) {
+    static String safeHealthPath(String path) {
+        if (path == null || !path.matches("/[A-Za-z0-9/_-]{0,120}") || path.contains("..")) {
             throw new IllegalArgumentException("Plugin health path is invalid");
         }
         return path;

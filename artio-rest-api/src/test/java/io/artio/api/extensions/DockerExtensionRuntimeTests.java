@@ -33,6 +33,14 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void healthPathsAllowTheServiceRootButRejectTraversalAndInvalidCharacters() {
+        assertThat(DockerExtensionRuntime.safeHealthPath("/")).isEqualTo("/");
+        assertThat(DockerExtensionRuntime.safeHealthPath("/health")).isEqualTo("/health");
+        assertThatIllegalArgumentException().isThrownBy(() -> DockerExtensionRuntime.safeHealthPath("/../admin"));
+        assertThatIllegalArgumentException().isThrownBy(() -> DockerExtensionRuntime.safeHealthPath("/health?debug=true"));
+    }
+
+    @Test
     void persistentPluginVolumeNamesAreBoundToPluginServiceAndPathWithoutLeakingPath() {
         String first = DockerExtensionRuntime.volumeName("observability.artio", "prometheus", "/prometheus");
         assertThat(first).isEqualTo(DockerExtensionRuntime.volumeName("observability.artio", "prometheus", "/prometheus"));
