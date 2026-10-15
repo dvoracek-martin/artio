@@ -35,7 +35,7 @@ jobs:
       - name: Require Docker for PostgreSQL integration tests
         run: docker info
       - name: Build, run tests and generate coverage
-        run: ./gradlew --no-daemon clean build integrationTest jacocoTestReport
+        run: bash ./gradlew --no-daemon clean build integrationTest jacocoTestReport
       - name: Build API container
         run: docker build -f artio-docker/Dockerfile -t artio/api:${GITHUB_SHA} .
       - name: Build storefront container
