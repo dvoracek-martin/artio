@@ -1,6 +1,12 @@
+param([string]$Tag = '1.0.0')
+
+if ($Tag -notmatch '^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$') {
+    throw 'Docker image tag must be a valid tag value.'
+}
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$version = '1.0.0'
+$version = $Tag
 $images = @(
     @{ Name = 'observability-control'; Path = 'control' },
     @{ Name = 'observability-collector'; Path = 'collector' },
