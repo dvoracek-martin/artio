@@ -135,6 +135,38 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     }
 
     @Test
+    void recoversNotificationDeliveryClaimAbandonedBeforeWorkerRestart() {
+        jdbc.update("UPDATE notification_delivery_outbox SET status='SENT',locked_at=NULL WHERE status='PENDING'");
+        UUID userId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        UUID deliveryId = UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
+                userId, "recovered-worker-" + userId + "@example.test", "unused-test-hash", "Recovery", "Worker");
+        jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body,status,attempts,locked_at) "
+                        + "VALUES (?,?,?,?,?,?,'PROCESSING',1,now()-interval '6 minutes')",
+                deliveryId, "recovery-test:" + deliveryId, userId, orderId, "Recovery acceptance", "retry after abandoned claim");
+
+        var calls = new AtomicInteger();
+        var transport = new io.artio.extensions.commerce.NotificationTransport() {
+            @Override public DeliveryResult deliver(OutboundMessage message) {
+                calls.incrementAndGet();
+                return new DeliveryResult(true, "recovery-acceptance", null, null);
+            }
+        };
+        var beanFactory = new StaticListableBeanFactory();
+        beanFactory.addBean("recoveryAcceptanceTransport", transport);
+        var handler = new OrderNotificationHandler(jdbc,
+                beanFactory.getBeanProvider(io.artio.extensions.commerce.NotificationTransport.class), true);
+
+        handler.deliverPendingBatch();
+
+        assertThat(calls.get()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("SENT");
+        assertThat(jdbc.queryForObject("SELECT attempts FROM notification_delivery_outbox WHERE id=?", Integer.class, deliveryId)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT locked_at IS NULL FROM notification_delivery_outbox WHERE id=?", Boolean.class, deliveryId)).isTrue();
+    }
+
+    @Test
     void concurrentNotificationReplicasClaimAndDeliverEachOutboxMessageOnlyOnce() throws Exception {
         jdbc.update("UPDATE notification_delivery_outbox SET status='SENT',locked_at=NULL WHERE status='PENDING'");
         UUID userId = UUID.randomUUID();
