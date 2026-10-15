@@ -14,7 +14,6 @@ dependencies {
     implementation(project(":artio-kernel"))
     implementation(project(":artio-catalog"))
     implementation(project(":artio-catalog-postgres"))
-    implementation(project(":artio-catalog-opensearch"))
     implementation(project(":artio-pricing"))
     implementation(project(":artio-pricing-postgres"))
     implementation(project(":artio-inventory"))

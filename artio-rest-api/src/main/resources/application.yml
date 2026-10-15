@@ -95,9 +95,8 @@ artio:
     refresh-interval-seconds: ${ARTIO_LICENSE_REFRESH_INTERVAL_SECONDS:21600}
   search:
     enabled: ${ARTIO_SEARCH_ENABLED:false}
-    provider: ${ARTIO_SEARCH_PROVIDER:opensearch}
+    provider: ${ARTIO_SEARCH_PROVIDER:extension}
     extension-plugin-id: ${ARTIO_SEARCH_EXTENSION_PLUGIN_ID:}
-    url: ${ARTIO_SEARCH_URL:http://localhost:9200}
   rate-limit:
     enabled: ${ARTIO_RATE_LIMIT_ENABLED:true}
     requests-per-minute: ${ARTIO_RATE_LIMIT_PER_MINUTE:100}

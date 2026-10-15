@@ -16,13 +16,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /** Maps the provider-neutral search contract to an enabled catalog.search.v1 plugin. */
 @Component
-@ConditionalOnProperty(name = "artio.search.provider", havingValue = "extension")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
+        "'${artio.search.provider:extension}' == 'extension' && ${artio.search.enabled:false}")
 public class ExtensionProductSearchAdapter implements RebuildableProductSearch {
     private static final String EXTENSION_POINT = "catalog.search.v1";
     private final ManagedExtensionInvoker extensions;

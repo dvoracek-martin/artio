@@ -55,22 +55,6 @@ services:
       kafka:
         condition: service_healthy
 
-  opensearch:
-    profiles: [search]
-    image: opensearchproject/opensearch:2.17.1
-    environment:
-      discovery.type: single-node
-      plugins.security.disabled: "true"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${ARTIO_OPENSEARCH_INITIAL_ADMIN_PASSWORD:-}
-      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
-    ports:
-      - "127.0.0.1:9200:9200"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
   postgres:
     image: postgres:16-alpine
     environment:
@@ -115,7 +99,8 @@ services:
       ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
       ARTIO_CATALOG_MEDIA_STORAGE_PATH: /var/lib/artio/media
       ARTIO_SEARCH_ENABLED: ${ARTIO_SEARCH_ENABLED:-false}
-      ARTIO_SEARCH_URL: http://opensearch:9200
+      ARTIO_SEARCH_PROVIDER: ${ARTIO_SEARCH_PROVIDER:-extension}
+      ARTIO_SEARCH_EXTENSION_PLUGIN_ID: ${ARTIO_SEARCH_EXTENSION_PLUGIN_ID:-catalog.opensearch}
       ARTIO_EXTENSION_TRUSTED_REGISTRIES: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-}
       ARTIO_EXTENSION_DOCKER_ENABLED: ${ARTIO_EXTENSION_DOCKER_ENABLED:-true}
       ARTIO_EXTENSION_DOCKER_MODE: remote
