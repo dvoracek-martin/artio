@@ -26,7 +26,13 @@ const COPY = {
     licenseLoadError: 'Could not read license status.', fileTooLarge: 'The signed license file exceeds 64 KiB.', fileReadError: 'Could not read the signed license file as text.',
     fileSelectedReadError: 'Could not read the selected license file.', rejectedLicense: 'The signed license was rejected. Existing license status is unchanged.', refreshError: 'Could not request license refresh.',
     communityLicenseHelp: 'Community keeps commerce, plugin management and existing customer obligations available. Loyalty, subscriptions and advanced reports need their matching Enterprise feature.',
-    featureLoyalty: 'Loyalty', featureSubscriptions: 'Subscriptions', featureAdvancedReporting: 'Advanced reports'
+    featureLoyalty: 'Loyalty', featureSubscriptions: 'Subscriptions', featureAdvancedReporting: 'Advanced reports',
+    refundOpen: 'Refund', refundEyebrow: 'PAYMENT ACTION', refundTitle: 'Refund payment',
+    refundDescription: 'This sends a real refund request to the payment provider. Review the amount before continuing.',
+    refundAlready: 'Already refunded', refundAmount: 'Refund amount', refundRemainingPlaceholder: 'Remaining balance',
+    refundAmountHelp: 'Leave blank to refund the remaining balance.', refundSubmitting: 'Sending refund…',
+    refundCancel: 'Cancel', refundSubmit: 'Send refund', refundInvalidAmount: 'Enter a positive refund amount.',
+    refundFailure: 'Refund was not confirmed. Retry with the same amount.'
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -41,7 +47,13 @@ const COPY = {
     availableFeatures: 'Verfügbare Funktionen', noEnterpriseFeatures: 'Keine · Community-Funktionen bleiben verfügbar', validUntil: 'Gültig bis', graceEnds: 'Kulanzzeit endet', noActiveEntitlement: 'Keine aktive Enterprise-Berechtigung installiert.', refreshStatus: 'Kontrollierte Aktualisierung', refreshResult: 'Aktualisierungsergebnis', lastSuccess: 'Letzter Erfolg', lastAttempt: 'Letzter Versuch', refreshIssuer: 'Beim Issuer aktualisieren', refreshing: 'Wird aktualisiert…',
     noIssuerConfigured: 'Keine Issuer-URL konfiguriert. Importieren Sie unten ein signiertes Lizenzdokument.', ownerAction: 'EIGENTÜMERAKTION', installEntitlement: 'Signierte Berechtigung installieren', installExplanation: 'Wählen Sie das signierte JSON-Dokument für diese Installation. Artio prüft es mit den konfigurierten öffentlichen Vertrauensschlüsseln. Datei und Inhalt werden nach dem Installieren gelöscht.',
     signedFile: 'Signiertes Lizenz-JSON', verifying: 'Wird geprüft…', verifyInstall: 'Prüfen und installieren', refreshStatusButton: 'Status aktualisieren', licenseLoadError: 'Lizenzstatus konnte nicht gelesen werden.', fileTooLarge: 'Die Lizenzdatei ist größer als 64 KiB.', fileReadError: 'Die Lizenzdatei konnte nicht als Text gelesen werden.', fileSelectedReadError: 'Die ausgewählte Lizenzdatei konnte nicht gelesen werden.', rejectedLicense: 'Die signierte Lizenz wurde abgelehnt. Der bisherige Status bleibt unverändert.', refreshError: 'Lizenzaktualisierung konnte nicht angefordert werden.',
-    communityLicenseHelp: 'Community hält Handel, Plugin-Verwaltung und bestehende Kundenverpflichtungen verfügbar. Treueprogramm, Abonnements und erweiterte Berichte benötigen die jeweilige Enterprise-Funktion.', featureLoyalty: 'Treueprogramm', featureSubscriptions: 'Abonnements', featureAdvancedReporting: 'Erweiterte Berichte'
+    communityLicenseHelp: 'Community hält Handel, Plugin-Verwaltung und bestehende Kundenverpflichtungen verfügbar. Treueprogramm, Abonnements und erweiterte Berichte benötigen die jeweilige Enterprise-Funktion.', featureLoyalty: 'Treueprogramm', featureSubscriptions: 'Abonnements', featureAdvancedReporting: 'Erweiterte Berichte',
+    refundOpen: 'Erstatten', refundEyebrow: 'ZAHLUNGSAKTION', refundTitle: 'Zahlung erstatten',
+    refundDescription: 'Dies sendet eine echte Erstattungsanfrage an den Zahlungsanbieter. Prüfen Sie den Betrag, bevor Sie fortfahren.',
+    refundAlready: 'Bereits erstattet', refundAmount: 'Erstattungsbetrag', refundRemainingPlaceholder: 'Verbleibender Betrag',
+    refundAmountHelp: 'Leer lassen, um den verbleibenden Betrag zu erstatten.', refundSubmitting: 'Erstattung wird gesendet…',
+    refundCancel: 'Abbrechen', refundSubmit: 'Erstattung senden', refundInvalidAmount: 'Geben Sie einen positiven Erstattungsbetrag ein.',
+    refundFailure: 'Die Erstattung wurde nicht bestätigt. Versuchen Sie es mit demselben Betrag erneut.'
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -56,7 +68,13 @@ const COPY = {
     availableFeatures: 'Funzionalità disponibili', noEnterpriseFeatures: 'Nessuna · Le funzioni Community restano disponibili', validUntil: 'Valida fino al', graceEnds: 'Il periodo di tolleranza termina il', noActiveEntitlement: 'Nessuna licenza Enterprise attiva installata.', refreshStatus: 'Aggiornamento controllato', refreshResult: 'Risultato aggiornamento', lastSuccess: 'Ultimo successo', lastAttempt: 'Ultimo tentativo', refreshIssuer: 'Aggiorna dall’issuer', refreshing: 'Aggiornamento…',
     noIssuerConfigured: 'URL issuer non configurato. Importa qui sotto un documento di licenza firmato.', ownerAction: 'AZIONE PROPRIETARIO', installEntitlement: 'Installa la licenza firmata', installExplanation: 'Seleziona il documento JSON firmato per questa installazione. Artio lo verifica con le chiavi pubbliche attendibili configurate. Il file e il contenuto vengono cancellati dopo l’installazione.',
     signedFile: 'JSON della licenza firmata', verifying: 'Verifica…', verifyInstall: 'Verifica e installa', refreshStatusButton: 'Aggiorna stato', licenseLoadError: 'Impossibile leggere lo stato della licenza.', fileTooLarge: 'Il file della licenza supera 64 KiB.', fileReadError: 'Impossibile leggere il file della licenza come testo.', fileSelectedReadError: 'Impossibile leggere il file selezionato.', rejectedLicense: 'La licenza firmata è stata rifiutata. Lo stato attuale non è cambiato.', refreshError: 'Impossibile richiedere l’aggiornamento della licenza.',
-    communityLicenseHelp: 'Community mantiene disponibili commercio, gestione dei plugin e obblighi verso i clienti esistenti. Loyalty, abbonamenti e report avanzati richiedono la rispettiva funzione Enterprise.', featureLoyalty: 'Loyalty', featureSubscriptions: 'Abbonamenti', featureAdvancedReporting: 'Report avanzati'
+    communityLicenseHelp: 'Community mantiene disponibili commercio, gestione dei plugin e obblighi verso i clienti esistenti. Loyalty, abbonamenti e report avanzati richiedono la rispettiva funzione Enterprise.', featureLoyalty: 'Loyalty', featureSubscriptions: 'Abbonamenti', featureAdvancedReporting: 'Report avanzati',
+    refundOpen: 'Rimborsa', refundEyebrow: 'AZIONE DI PAGAMENTO', refundTitle: 'Rimborsa il pagamento',
+    refundDescription: 'Questa operazione invia una richiesta di rimborso reale al fornitore di pagamento. Controlla l’importo prima di continuare.',
+    refundAlready: 'Già rimborsato', refundAmount: 'Importo del rimborso', refundRemainingPlaceholder: 'Saldo residuo',
+    refundAmountHelp: 'Lascia vuoto per rimborsare il saldo residuo.', refundSubmitting: 'Invio del rimborso…',
+    refundCancel: 'Annulla', refundSubmit: 'Invia rimborso', refundInvalidAmount: 'Inserisci un importo positivo.',
+    refundFailure: 'Il rimborso non è stato confermato. Riprova con lo stesso importo.'
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -71,7 +89,13 @@ const COPY = {
     availableFeatures: 'Fonctionnalités disponibles', noEnterpriseFeatures: 'Aucune · Les fonctionnalités Community restent disponibles', validUntil: 'Valide jusqu’au', graceEnds: 'La période de grâce se termine le', noActiveEntitlement: 'Aucun droit Enterprise actif installé.', refreshStatus: 'Actualisation contrôlée', refreshResult: 'Résultat de l’actualisation', lastSuccess: 'Dernière réussite', lastAttempt: 'Dernière tentative', refreshIssuer: 'Actualiser auprès de l’issuer', refreshing: 'Actualisation…',
     noIssuerConfigured: 'Aucune URL issuer configurée. Importez ci-dessous un document de licence signé.', ownerAction: 'ACTION PROPRIÉTAIRE', installEntitlement: 'Installer un droit signé', installExplanation: 'Sélectionnez le document JSON signé fourni pour cette installation. Artio le vérifie avec les clés publiques de confiance configurées. Le fichier et son contenu sont effacés après l’installation.',
     signedFile: 'JSON de licence signé', verifying: 'Vérification…', verifyInstall: 'Vérifier et installer', refreshStatusButton: 'Actualiser le statut', licenseLoadError: 'Impossible de lire le statut de licence.', fileTooLarge: 'Le fichier de licence dépasse 64 Kio.', fileReadError: 'Impossible de lire le fichier de licence comme texte.', fileSelectedReadError: 'Impossible de lire le fichier sélectionné.', rejectedLicense: 'La licence signée a été refusée. Le statut existant est conservé.', refreshError: 'Impossible de demander l’actualisation de licence.',
-    communityLicenseHelp: 'Community conserve le commerce, la gestion des plugins et les obligations client existantes. La fidélité, les abonnements et les rapports avancés nécessitent leur fonctionnalité Enterprise correspondante.', featureLoyalty: 'Fidélité', featureSubscriptions: 'Abonnements', featureAdvancedReporting: 'Rapports avancés'
+    communityLicenseHelp: 'Community conserve le commerce, la gestion des plugins et les obligations client existantes. La fidélité, les abonnements et les rapports avancés nécessitent leur fonctionnalité Enterprise correspondante.', featureLoyalty: 'Fidélité', featureSubscriptions: 'Abonnements', featureAdvancedReporting: 'Rapports avancés',
+    refundOpen: 'Rembourser', refundEyebrow: 'ACTION DE PAIEMENT', refundTitle: 'Rembourser le paiement',
+    refundDescription: 'Cette action envoie une véritable demande de remboursement au prestataire de paiement. Vérifiez le montant avant de continuer.',
+    refundAlready: 'Déjà remboursé', refundAmount: 'Montant du remboursement', refundRemainingPlaceholder: 'Solde restant',
+    refundAmountHelp: 'Laissez vide pour rembourser le solde restant.', refundSubmitting: 'Envoi du remboursement…',
+    refundCancel: 'Annuler', refundSubmit: 'Envoyer le remboursement', refundInvalidAmount: 'Saisissez un montant de remboursement positif.',
+    refundFailure: 'Le remboursement n’a pas été confirmé. Réessayez avec le même montant.'
   }
 } as const;
 
