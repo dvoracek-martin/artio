@@ -5,6 +5,7 @@ import { CURRENCY_OPTIONS } from './commerce-options';
 import { SearchSelectComponent } from './search-select.component';
 import { FormsModule } from '@angular/forms';
 import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
+import { giftCardAdminText } from './gift-card-admin-locale';
 
 type GiftCard = { id: string; initialBalance: number; balance: number; currency: string; expiresAt: string | null; active: boolean; createdAt: string };
 type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId: string | null; amount: number; kind: string; createdAt: string };
@@ -16,31 +17,32 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
     template: `
     <section>
       <div class="panel">
-        <div class="panel-heading"><div><p class="eyebrow">STORED VALUE</p><h2>Issue a gift card</h2></div></div>
+        <div class="panel-heading"><div><p class="eyebrow">{{gt('eyebrow')}}</p><h2>{{gt('issueTitle')}}</h2></div></div>
         <form class="create-form" (ngSubmit)="issue()">
-          <label>Initial amount<input type="number" min="0.01" step="0.01" [(ngModel)]="draft.amount" name="amount" required></label>
-          <label>Currency<artio-search-select [(ngModel)]="draft.currency" name="currency" label="Gift card currency" [options]="currencyOptions"></artio-search-select></label>
-          <label>Expiry date (optional)<input type="date" [(ngModel)]="draft.expiresAt" name="expiresAt"></label>
-          <button class="primary" [disabled]="busy">{{busy?'Issuing…':'Issue gift card'}}</button>
+          <label>{{gt('initialAmount')}}<input type="number" min="0.01" step="0.01" [(ngModel)]="draft.amount" name="amount" required></label>
+          <label>{{gt('currency')}}<artio-search-select [(ngModel)]="draft.currency" name="currency" [label]="gt('currencyLabel')" [options]="currencyOptions"></artio-search-select></label>
+          <label>{{gt('expiry')}}<input type="date" [(ngModel)]="draft.expiresAt" name="expiresAt"></label>
+          <button class="primary" [disabled]="busy">{{busy?gt('issuing'):gt('issue')}}</button>
         </form>
         @if (issuedCode) {
-          <div class="notice" role="status"><strong>Copy this code now. It cannot be retrieved later.</strong><p><code>{{issuedCode}}</code></p><button class="link-button" (click)="copyCode()">Copy code</button><button class="link-button" (click)="issuedCode=null">Dismiss</button></div>
+          <div class="notice" role="status"><strong>{{gt('copyNow')}}</strong><p><code>{{issuedCode}}</code></p><button class="link-button" (click)="copyCode()">{{gt('copyCode')}}</button><button class="link-button" (click)="issuedCode=null">{{gt('dismiss')}}</button></div>
         }
       </div>
 
       <div class="panel table-panel">
-        <div class="panel-heading"><div><p class="eyebrow">CARD REGISTER</p><h2>Gift cards</h2></div><button class="link-button" (click)="load()">Refresh</button></div>
-        <table><thead><tr><th>ISSUED</th><th>INITIAL</th><th>BALANCE</th><th>EXPIRY</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+        <div class="panel-heading"><div><p class="eyebrow">{{gt('register')}}</p><h2>{{gt('cards')}}</h2></div><button class="link-button" (click)="load()">{{gt('refresh')}}</button></div>
+        @if (loading) { <p class="muted" role="status">{{gt('loadingCards')}}</p> }
+        <table><thead><tr><th>{{gt('issued')}}</th><th>{{gt('initial')}}</th><th>{{gt('balance')}}</th><th>{{gt('expiryColumn')}}</th><th>{{gt('status')}}</th><th>{{gt('actions')}}</th></tr></thead>
         <tbody>@for (card of cards; track card) {
           <tr>
             <td><code>{{card.id}}</code></td><td>{{card.initialBalance}} {{card.currency}}</td><td>{{card.balance}} {{card.currency}}</td>
-            <td>{{card.expiresAt ? (card.expiresAt | date:'mediumDate') : 'Never'}}</td><td>{{card.active?'Active':'Disabled'}}</td>
-            <td><button class="link-button" (click)="toggle(card)">{{card.active?'Disable':'Enable'}}</button><button class="link-button" (click)="viewTransactions(card)">Ledger</button></td>
+            <td>{{card.expiresAt ? (card.expiresAt | date:'mediumDate') : gt('never')}}</td><td>{{card.active?gt('active'):gt('disabled')}}</td>
+            <td><button class="link-button" (click)="toggle(card)">{{card.active?gt('disable'):gt('enable')}}</button><button class="link-button" (click)="viewTransactions(card)">{{gt('ledger')}}</button></td>
           </tr>
         }</tbody>
       </table>
-      @if (!cards.length) {
-        <p class="empty">No gift cards have been issued.</p>
+      @if (!loading && !cards.length) {
+        <p class="empty">{{gt('noCards')}}</p>
       }
     </div>
 
@@ -63,13 +65,14 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
 
     @if (selectedCard) {
       <div class="panel table-panel">
-        <div class="panel-heading"><div><p class="eyebrow">IMMUTABLE LEDGER</p><h2>Transactions · {{selectedCard.id}}</h2></div><button class="link-button" (click)="selectedCard=null">Close</button></div>
-        <table><thead><tr><th>DATE</th><th>KIND</th><th>AMOUNT</th><th>ORDER / REFUND</th></tr></thead><tbody>
+        <div class="panel-heading"><div><p class="eyebrow">{{gt('immutableLedger')}}</p><h2>{{gt('transactions')}} · {{selectedCard.id}}</h2></div><button class="link-button" (click)="selectedCard=null">{{gt('close')}}</button></div>
+        @if (transactionsLoading) { <p class="muted" role="status">{{gt('loadingTransactions')}}</p> }
+        <table><thead><tr><th>{{gt('date')}}</th><th>{{gt('kind')}}</th><th>{{gt('amount')}}</th><th>{{gt('orderRefund')}}</th></tr></thead><tbody>
         @for (entry of transactions; track entry) {
           <tr><td>{{entry.createdAt | date:'medium'}}</td><td>{{entry.kind}}</td><td>{{entry.amount}} {{selectedCard.currency}}</td><td>{{entry.orderId||entry.paymentRefundId||'—'}}</td></tr>
         }
-      </tbody></table>@if (!transactions.length) {
-      <p class="empty">No balance movements yet.</p>
+      </tbody></table>@if (!transactionsLoading && !transactions.length) {
+      <p class="empty">{{gt('noMovements')}}</p>
     }
     </div>
     }
@@ -82,9 +85,11 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
 export class GiftCardAdminComponent {
   @ViewChild('statusDialog') private statusDialogRef?:ElementRef<HTMLDialogElement>;
   t(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
+  gt(key:string):string{return giftCardAdminText(currentBackofficeLocale(),key)}
   currencyOptions=CURRENCY_OPTIONS;
   private readonly http = inject(HttpClient);
   cards: GiftCard[] = [];
+  loading = false; transactionsLoading = false;
   transactions: GiftCardTransaction[] = [];
   selectedCard: GiftCard | null = null;
   issuedCode: string | null = null;
@@ -98,9 +103,10 @@ export class GiftCardAdminComponent {
   constructor() { this.load(); }
 
   load(): void {
+    this.loading=true;
     this.http.get<GiftCard[]>('/api/v1/admin/gift-cards').subscribe({
-      next: cards => this.cards = cards,
-      error: e => this.error = e.error?.detail ?? 'Could not load gift cards.'
+      next: cards => {this.cards = cards;this.loading=false},
+      error: e => {this.loading=false;this.error = e.error?.detail ?? this.gt('loadFailure')}
     });
   }
 
@@ -114,14 +120,14 @@ export class GiftCardAdminComponent {
       amount: Number(this.draft.amount), currency: this.draft.currency.trim().toUpperCase(), expiresAt
     }).subscribe({
       next: result => { this.issuedCode = result.code; this.busy = false; this.load(); },
-      error: e => { this.error = e.error?.detail ?? 'Could not issue gift card.'; this.busy = false; }
+      error: e => { this.error = e.error?.detail ?? this.gt('issueFailure'); this.busy = false; }
     });
   }
 
   async copyCode(): Promise<void> {
     if (!this.issuedCode) return;
     try { await navigator.clipboard.writeText(this.issuedCode); }
-    catch { this.error = 'Clipboard access was denied. Select and copy the displayed code.'; }
+    catch { this.error = this.gt('clipboardFailure'); }
   }
 
   toggle(card: GiftCard): void {
@@ -136,9 +142,10 @@ export class GiftCardAdminComponent {
   viewTransactions(card: GiftCard): void {
     this.selectedCard = card;
     this.transactions = [];
+    this.transactionsLoading=true;
     this.http.get<GiftCardTransaction[]>(`/api/v1/admin/gift-cards/${card.id}/transactions`).subscribe({
-      next: rows => this.transactions = rows,
-      error: e => this.error = e.error?.detail ?? 'Could not load gift card ledger.'
+      next: rows => {this.transactions = rows;this.transactionsLoading=false},
+      error: e => {this.transactionsLoading=false;this.error = e.error?.detail ?? this.gt('ledgerFailure')}
     });
   }
 }
