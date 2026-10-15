@@ -1701,7 +1701,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
-        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33", "34");
+        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33", "34", "35");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
