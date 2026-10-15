@@ -4,6 +4,7 @@ import { Component, EventEmitter, Input, OnInit, Output, inject, ChangeDetection
 import { FormsModule } from '@angular/forms';
 import { COUNTRY_OPTIONS, CURRENCY_OPTIONS, LANGUAGE_OPTIONS, LOCALE_OPTIONS, TIMEZONE_OPTIONS } from './commerce-options';
 import { SearchSelectComponent } from './search-select.component';
+import { SetupTextKey, setupText } from './setup-wizard-locale';
 import { firstValueFrom } from 'rxjs';
 
 type SetupDraft = { storeName: string; countryCode: string; currencyCode: string; locale: string; timezone: string; availableLanguages: string; externalBaseUrl: string; email: string; firstName: string; lastName: string };
@@ -16,8 +17,9 @@ export class SetupWizardComponent implements OnInit {
   @Input() developerMode = false;
   @Output() completed = new EventEmitter<{ email: string; demoCredentials: boolean }>();
   private http = inject(HttpClient);
-  steps = ['Welcome', 'Your store', 'Region & languages', 'Administrator', 'Review & launch'];
-  descriptions = ['A fresh start', 'Make it yours', 'Local by design', 'Your secure access', 'Ready when you are'];
+  get steps():string[]{return [this.t('stepWelcome'),this.t('stepStore'),this.t('stepRegion'),this.t('stepOwner'),this.t('stepReview')]}
+  get descriptions():string[]{return [this.t('descWelcome'),this.t('descStore'),this.t('descRegion'),this.t('descOwner'),this.t('descReview')]}
+  t(key:SetupTextKey):string{return setupText(key)}
   step = 0;
   busy = false;
   error = '';
@@ -62,7 +64,7 @@ export class SetupWizardComponent implements OnInit {
       if (this.step === 3) { await this.saveDraft(); }
       this.step++;
       this.focus();
-    } catch (e) { this.fail(e, 'Could not save setup progress. Please try again.'); }
+    } catch (e) { this.fail(e, this.t('errorProgress')); }
     finally { this.busy = false; }
   }
   private async saveDraft(): Promise<void> {
@@ -82,27 +84,27 @@ export class SetupWizardComponent implements OnInit {
       this.password = this.confirmation = this.token = '';
       this.step = 5;
       this.focus();
-    } catch (e) { this.fail(e, 'Could not complete setup. Your settings are saved; please try again.'); }
+    } catch (e) { this.fail(e, this.t('errorComplete')); }
     finally { this.busy = false; }
   }
   private demoCredentials = false;
   finish(): void { this.completed.emit({ email: this.draft.email.trim(), demoCredentials: this.demoCredentials }); }
   private headers(): Record<string, string> { return { 'X-Artio-Setup-Token': this.token }; }
   private fail(error: unknown, fallback: string): void {
-    this.error = error instanceof HttpErrorResponse ? error.error?.message ?? error.error?.detail ?? (error.status === 429 ? 'Setup is temporarily locked. Wait 15 minutes before trying again.' : fallback) : fallback;
+    this.error = error instanceof HttpErrorResponse ? error.error?.message ?? error.error?.detail ?? (error.status === 429 ? this.t('errorLocked') : fallback) : fallback;
     setTimeout(() => document.getElementById('setup-error')?.focus());
   }
   validate(step: number): boolean {
     this.error = '';
-    if (step === 0 && !this.token.trim()) this.error = 'Enter your installation setup token.';
+    if (step === 0 && !this.token.trim()) this.error = this.t('errorToken');
     if (step === 1) {
-      if (!this.draft.storeName.trim() || this.draft.storeName.trim().length > 100) this.error = 'Enter a store name, up to 100 characters.';
+      if (!this.draft.storeName.trim() || this.draft.storeName.trim().length > 100) this.error = this.t('errorStoreName');
       if (this.draft.externalBaseUrl.trim()) {
         try {
           const url = new URL(this.draft.externalBaseUrl.trim());
           const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
           if (!(url.protocol === 'https:' || (url.protocol === 'http:' && local)) || url.username || url.password || url.search || url.hash) throw new Error();
-        } catch { this.error = 'Use an HTTPS store URL without credentials, query or fragment. HTTP is allowed for localhost.'; }
+        } catch { this.error = this.t('errorStoreUrl'); }
       }
     }
     if (step === 2) {
@@ -113,13 +115,13 @@ export class SetupWizardComponent implements OnInit {
         new Intl.DateTimeFormat(this.draft.locale, { timeZone: this.draft.timezone });
         if (!this.languages.length || this.languages.length > 32) throw new Error();
         this.languages.forEach(tag => { if (tag === 'und') throw new Error(); Intl.getCanonicalLocales(tag); });
-      } catch { this.error = 'Choose valid country, currency, language tags and time zone.'; }
+      } catch { this.error = this.t('errorRegion'); }
     }
     if (step === 3) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.draft.email.trim())) this.error = 'Enter a valid administrator email.';
-      else if (![this.draft.firstName, this.draft.lastName].every(x => x.trim() && x.trim().length <= 100)) this.error = 'Enter your first and last name, up to 100 characters each.';
-      else if (this.password.length < 16 || this.password.length > 72) this.error = 'Use a password between 16 and 72 characters.';
-      else if (this.password !== this.confirmation) this.error = 'The passwords do not match.';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.draft.email.trim())) this.error = this.t('errorEmail');
+      else if (![this.draft.firstName, this.draft.lastName].every(x => x.trim() && x.trim().length <= 100)) this.error = this.t('errorName');
+      else if (this.password.length < 16 || this.password.length > 72) this.error = this.t('errorPassword');
+      else if (this.password !== this.confirmation) this.error = this.t('errorPasswordMatch');
     }
     if (this.error) setTimeout(() => document.getElementById('setup-error')?.focus());
     return !this.error;
