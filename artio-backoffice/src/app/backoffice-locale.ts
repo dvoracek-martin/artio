@@ -74,6 +74,8 @@ const COPY = {
     extensionActionEyebrow: 'PLUGIN LIFECYCLE', extensionUpdateTitle: 'Update plugin', extensionRollbackTitle: 'Roll back plugin', extensionUninstallTitle: 'Uninstall plugin', extensionManifestLabel: 'Next plugin manifest JSON',
     extensionUpdateDescription: 'Review the next manifest carefully. The controller validates the signed release before applying it.', extensionRollbackDescription: 'Restore the previously installed plugin release.', extensionUninstallDescription: 'This stops and removes the managed container and purges its stored configuration.',
     extensionActionBusy: 'Applying plugin change…', extensionActionConfirm: 'Confirm plugin change', extensionManifestInvalid: 'Manifest must be a JSON object.', extensionActionFailure: 'Could not apply this plugin change.',
+    accessTitle: 'ACCOUNT ACCESS', accessClose: 'Close', accessRole: 'Role', accessCustomer: 'Customer', accessAdministrator: 'Administrator', accessSuperadmin: 'Superadministrator',
+    accessRoleHelp: 'Administrators can receive selected permissions. Customers have none; superadministrators have full access.', accessPermissions: 'Administrator permissions', accessSaving: 'Saving account access…', accessSave: 'Save access', accessFailure: 'Could not save account access. Your changes are still here; review them and try again.',
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -136,6 +138,8 @@ const COPY = {
     extensionActionEyebrow: 'PLUGIN-LEBENSZYKLUS', extensionUpdateTitle: 'Plugin aktualisieren', extensionRollbackTitle: 'Plugin zurücksetzen', extensionUninstallTitle: 'Plugin deinstallieren', extensionManifestLabel: 'JSON-Manifest der nächsten Version',
     extensionUpdateDescription: 'Prüfen Sie das nächste Manifest sorgfältig. Der Controller validiert vor der Anwendung die signierte Version.', extensionRollbackDescription: 'Die zuvor installierte Plugin-Version wiederherstellen.', extensionUninstallDescription: 'Der verwaltete Container wird gestoppt und entfernt; gespeicherte Konfiguration wird gelöscht.',
     extensionActionBusy: 'Plugin-Änderung wird angewendet…', extensionActionConfirm: 'Plugin-Änderung bestätigen', extensionManifestInvalid: 'Das Manifest muss ein JSON-Objekt sein.', extensionActionFailure: 'Plugin-Änderung konnte nicht angewendet werden.',
+    accessTitle: 'KONTOZUGRIFF', accessClose: 'Schließen', accessRole: 'Rolle', accessCustomer: 'Kunde', accessAdministrator: 'Administrator', accessSuperadmin: 'Superadministrator',
+    accessRoleHelp: 'Administratoren können ausgewählte Berechtigungen erhalten. Kunden haben keine; Superadministratoren haben Vollzugriff.', accessPermissions: 'Administratorberechtigungen', accessSaving: 'Kontozugriff wird gespeichert…', accessSave: 'Zugriff speichern', accessFailure: 'Kontozugriff konnte nicht gespeichert werden. Die Änderungen sind noch vorhanden; prüfen Sie sie und versuchen Sie es erneut.',
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -198,6 +202,8 @@ const COPY = {
     extensionActionEyebrow: 'CICLO DI VITA PLUGIN', extensionUpdateTitle: 'Aggiorna plugin', extensionRollbackTitle: 'Ripristina plugin', extensionUninstallTitle: 'Disinstalla plugin', extensionManifestLabel: 'Manifest JSON della prossima versione',
     extensionUpdateDescription: 'Controlla il manifest successivo. Il controller verifica la versione firmata prima di applicarla.', extensionRollbackDescription: 'Ripristina la versione del plugin installata in precedenza.', extensionUninstallDescription: 'Il container gestito verrà arrestato e rimosso; la configurazione salvata verrà eliminata.',
     extensionActionBusy: 'Applicazione della modifica al plugin…', extensionActionConfirm: 'Conferma modifica plugin', extensionManifestInvalid: 'Il manifest deve essere un oggetto JSON.', extensionActionFailure: 'Impossibile applicare la modifica al plugin.',
+    accessTitle: 'ACCESSO ALL’ACCOUNT', accessClose: 'Chiudi', accessRole: 'Ruolo', accessCustomer: 'Cliente', accessAdministrator: 'Amministratore', accessSuperadmin: 'Superamministratore',
+    accessRoleHelp: 'Gli amministratori possono ricevere autorizzazioni selezionate. I clienti non ne hanno; i superamministratori hanno accesso completo.', accessPermissions: 'Autorizzazioni amministratore', accessSaving: 'Salvataggio dell’accesso…', accessSave: 'Salva accesso', accessFailure: 'Impossibile salvare l’accesso. Le modifiche sono ancora presenti; controllale e riprova.',
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -259,7 +265,9 @@ const COPY = {
     productEditorBusy: 'Enregistrement du produit…', productEditorSave: 'Enregistrer les modifications', productEditorRequired: 'Complétez les champs obligatoires.', productEditorInvalidOptions: 'Les options doivent être un objet JSON avec des valeurs texte.', productEditorFutureDate: 'Choisissez une date future valide pour la publication.', productEditorFailure: 'Impossible d’enregistrer les modifications du produit.', productEditorDuplicateSuccess: 'Copie non publiée du produit créée.',
     extensionActionEyebrow: 'CYCLE DE VIE DU PLUGIN', extensionUpdateTitle: 'Mettre à jour le plugin', extensionRollbackTitle: 'Rétablir le plugin', extensionUninstallTitle: 'Désinstaller le plugin', extensionManifestLabel: 'Manifest JSON de la prochaine version',
     extensionUpdateDescription: 'Vérifiez le prochain manifest. Le contrôleur valide la version signée avant application.', extensionRollbackDescription: 'Rétablir la version précédente du plugin installée.', extensionUninstallDescription: 'Le conteneur géré sera arrêté et supprimé ; sa configuration enregistrée sera purgée.',
-    extensionActionBusy: 'Application de la modification du plugin…', extensionActionConfirm: 'Confirmer la modification', extensionManifestInvalid: 'Le manifest doit être un objet JSON.', extensionActionFailure: 'Impossible d’appliquer cette modification du plugin.'
+    extensionActionBusy: 'Application de la modification du plugin…', extensionActionConfirm: 'Confirmer la modification', extensionManifestInvalid: 'Le manifest doit être un objet JSON.', extensionActionFailure: 'Impossible d’appliquer cette modification du plugin.',
+    accessTitle: 'ACCÈS AU COMPTE', accessClose: 'Fermer', accessRole: 'Rôle', accessCustomer: 'Client', accessAdministrator: 'Administrateur', accessSuperadmin: 'Superadministrateur',
+    accessRoleHelp: 'Les administrateurs peuvent recevoir des autorisations sélectionnées. Les clients n’en ont aucune ; les superadministrateurs ont un accès complet.', accessPermissions: 'Autorisations administrateur', accessSaving: 'Enregistrement de l’accès…', accessSave: 'Enregistrer l’accès', accessFailure: 'Impossible d’enregistrer l’accès. Vos modifications sont conservées ; vérifiez-les puis réessayez.'
   }
 } as const;
 

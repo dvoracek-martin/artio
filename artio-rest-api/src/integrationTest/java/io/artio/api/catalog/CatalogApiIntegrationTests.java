@@ -219,6 +219,42 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void superadminAssignsRoleAndPermissionsAtomically() {
+        UUID targetId=UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,permissions,created_at) VALUES (?,?,?,'Access','Target','CUSTOMER','NONE',now())",
+                targetId,"access-"+targetId+"@example.test","fixture-hash");
+        jdbc.update("UPDATE users SET role='SUPERADMIN',permissions='*' WHERE id=?",adminUserId);
+
+        var assigned=adminExchange("/api/v1/admin/users/{id}/access",HttpMethod.PUT,
+                Map.of("role","ADMIN","permissions",List.of("INVENTORY_MANAGE")),
+                io.artio.api.users.UserController.UserView.class,targetId);
+        assertThat(assigned.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(assigned.getBody()).isNotNull();
+        assertThat(assigned.getBody().role()).isEqualTo("ADMIN");
+        assertThat(assigned.getBody().permissions()).containsExactly("INVENTORY_MANAGE");
+
+        var invalid=adminExchange("/api/v1/admin/users/{id}/access",HttpMethod.PUT,
+                Map.of("role","ADMIN","permissions",List.of("UNKNOWN_PERMISSION")),ApiError.class,targetId);
+        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(jdbc.queryForObject("SELECT role||':'||permissions FROM users WHERE id=?",String.class,targetId))
+                .isEqualTo("ADMIN:INVENTORY_MANAGE");
+
+        var demoted=adminExchange("/api/v1/admin/users/{id}/access",HttpMethod.PUT,
+                Map.of("role","CUSTOMER","permissions",List.of("INVENTORY_MANAGE")),
+                io.artio.api.users.UserController.UserView.class,targetId);
+        assertThat(demoted.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(demoted.getBody()).isNotNull();
+        assertThat(demoted.getBody().role()).isEqualTo("CUSTOMER");
+        assertThat(demoted.getBody().permissions()).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT permissions FROM users WHERE id=?",String.class,targetId)).isEqualTo("NONE");
+
+        var selfRoleChange=adminExchange("/api/v1/admin/users/{id}/access",HttpMethod.PUT,
+                Map.of("role","ADMIN","permissions",List.of("USER_MANAGE")),ApiError.class,adminUserId);
+        assertThat(selfRoleChange.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(jdbc.queryForObject("SELECT role FROM users WHERE id=?",String.class,adminUserId)).isEqualTo("SUPERADMIN");
+    }
+
+    @Test
     void partialShipmentsTrackLineQuantitiesAndAllocateOnlyWhatActuallyShips() {
         UUID orderId=UUID.randomUUID(),sellableId=UUID.randomUUID(),orderItemId=UUID.randomUUID();
         var warehouse=inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(

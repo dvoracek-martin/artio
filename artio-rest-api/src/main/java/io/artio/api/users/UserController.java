@@ -10,6 +10,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -66,6 +67,32 @@ public class UserController {
         int changed=jdbc.update("UPDATE users SET permissions=? WHERE id=?",stored,id);if(changed==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found");return find(id);
     }
 
+    @PutMapping("/api/admin/users/{id}/access")
+    @Transactional
+    public UserView access(@PathVariable UUID id,@RequestBody AccessRequest request,JwtAuthenticationToken auth){
+        requireSuperadmin(auth,"Only a superadmin can assign account access");
+        if(request==null||request.role()==null||!Set.of("CUSTOMER","ADMIN","SUPERADMIN").contains(request.role()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Unknown role");
+        if(request.permissions()==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Permissions are required");
+
+        var currentRoles=jdbc.query("SELECT role FROM users WHERE id=? FOR UPDATE",(rs,n)->rs.getString("role"),id);
+        if(currentRoles.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found");
+        if(id.toString().equals(auth.getToken().getSubject())&&!request.role().equals(currentRoles.getFirst()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Administrators cannot change their own role");
+
+        String storedPermissions;
+        if("ADMIN".equals(request.role())){
+            Set<String> normalized;
+            try {normalized=request.permissions().stream().map(p->Permission.valueOf(p.toUpperCase(Locale.ROOT)).name()).collect(java.util.stream.Collectors.toUnmodifiableSet());}
+            catch(RuntimeException e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Unknown permission",e);}
+            storedPermissions=normalized.isEmpty()?"NONE":normalized.stream().sorted().collect(java.util.stream.Collectors.joining(","));
+        }else{
+            storedPermissions="SUPERADMIN".equals(request.role())?"*":"NONE";
+        }
+        jdbc.update("UPDATE users SET role=?,permissions=? WHERE id=?",request.role(),storedPermissions,id);
+        return find(id);
+    }
+
     private static void requireSuperadmin(JwtAuthenticationToken auth,String message){
         if(auth.getAuthorities().stream().noneMatch(a->a.getAuthority().equals("ROLE_SUPERADMIN")))throw new ResponseStatusException(HttpStatus.FORBIDDEN,message);
     }
@@ -73,5 +100,5 @@ public class UserController {
     private UserView find(UUID id){var rows=jdbc.query("SELECT id,email,first_name,last_name,role,permissions,email_verified,active,created_at,last_login FROM users WHERE id=?",(rs,n)->view(rs.getObject("id",UUID.class),rs.getString("email"),rs.getString("first_name"),rs.getString("last_name"),rs.getString("role"),rs.getString("permissions"),rs.getBoolean("email_verified"),rs.getBoolean("active"),rs.getTimestamp("created_at").toInstant(),rs.getTimestamp("last_login")==null?null:rs.getTimestamp("last_login").toInstant()),id);if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found");return rows.getFirst();}
     private static UserView view(UUID id,String email,String first,String last,String role,String permissions,boolean verified,boolean active,Instant created,Instant lastLogin){Set<String> granted;if("SUPERADMIN".equals(role)||("ADMIN".equals(role)&&(permissions==null||permissions.isBlank()||"*".equals(permissions.trim()))))granted=java.util.Arrays.stream(Permission.values()).map(Enum::name).collect(java.util.stream.Collectors.toUnmodifiableSet());else if(permissions==null||permissions.isBlank()||"NONE".equalsIgnoreCase(permissions.trim()))granted=Set.of();else granted=java.util.Arrays.stream(permissions.split(",")).map(String::trim).filter(value->!value.isEmpty()).map(value->Permission.valueOf(value.toUpperCase(Locale.ROOT)).name()).collect(java.util.stream.Collectors.toUnmodifiableSet());return new UserView(id,email,first,last,role,granted,verified,active,created,lastLogin);}
     public record UserView(UUID id,String email,String firstName,String lastName,String role,Set<String> permissions,boolean emailVerified,boolean active,Instant createdAt,Instant lastLogin){}
-    public record ActiveRequest(boolean active){}public record VerificationRequest(boolean verified){}public record RoleRequest(String role){}public record PermissionsRequest(Set<String> permissions){}
+    public record ActiveRequest(boolean active){}public record VerificationRequest(boolean verified){}public record RoleRequest(String role){}public record PermissionsRequest(Set<String> permissions){}public record AccessRequest(String role,Set<String> permissions){}
 }
