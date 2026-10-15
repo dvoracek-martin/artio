@@ -1,8 +1,9 @@
 
 import { HttpClient } from '@angular/common/http';
-import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, ElementRef, ViewChild } from '@angular/core';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
+import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
 type Brand = { id: string; name: string; description: string; active: boolean };
@@ -78,10 +79,39 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
     @if (error) {
       <p class="error" role="alert">{{error}}</p>
     }
+    @if (catalogEditor) {
+      <dialog #catalogEditorDialog class="refund-dialog" aria-labelledby="catalog-editor-title" (cancel)="cancelCatalogEditor($event)" (close)="catalogEditorClosed()">
+        <form class="refund-dialog-content" (ngSubmit)="saveCatalogEdit()">
+          <p class="eyebrow">{{t('catalogEditEyebrow')}}</p>
+          <h2 id="catalog-editor-title">{{catalogEditor.kind==='category'?t('categoryEditTitle'):catalogEditor.kind==='brand'?t('brandEditTitle'):t('attributeEditTitle')}}</h2>
+          @if (catalogEditor.kind==='category') {
+            <label for="catalog-edit-name">{{t('catalogName')}}</label>
+            <input id="catalog-edit-name" name="catalogEditName" [(ngModel)]="catalogEditor.name" maxlength="120" required [disabled]="catalogEditorBusy" autofocus>
+            <artio-search-select [(ngModel)]="catalogEditor.parentId" name="catalogEditParent" [label]="t('catalogParent')" [options]="parentOptions" [placeholder]="t('catalogTopLevel')"></artio-search-select>
+          } @else if (catalogEditor.kind==='brand') {
+            <label for="catalog-edit-name">{{t('catalogName')}}</label>
+            <input id="catalog-edit-name" name="catalogEditName" [(ngModel)]="catalogEditor.name" maxlength="160" required [disabled]="catalogEditorBusy" autofocus>
+            <label for="catalog-edit-description">{{t('catalogDescription')}}</label>
+            <textarea id="catalog-edit-description" name="catalogEditDescription" rows="3" maxlength="1000" [(ngModel)]="catalogEditor.description" [disabled]="catalogEditorBusy"></textarea>
+          } @else {
+            <label for="catalog-edit-label">{{t('catalogAttributeLabel')}}</label>
+            <input id="catalog-edit-label" name="catalogEditLabel" [(ngModel)]="catalogEditor.label" maxlength="120" required [disabled]="catalogEditorBusy" autofocus>
+          }
+          @if (catalogEditorError) { <p class="error" role="alert">{{catalogEditorError}}</p> }
+          @if (catalogEditorBusy) { <p class="muted" role="status">{{t('catalogEditBusy')}}</p> }
+          <div class="refund-dialog-actions">
+            <button type="button" class="secondary" [disabled]="catalogEditorBusy" (click)="closeCatalogEditor()">{{t('refundCancel')}}</button>
+            <button type="submit" class="primary" [disabled]="catalogEditorBusy">{{t('catalogEditSave')}}</button>
+          </div>
+        </form>
+      </dialog>
+    }
     </section>
     `
 })
 export class CatalogMetadataAdminComponent {
+  @ViewChild('catalogEditorDialog') private catalogEditorDialogRef?:ElementRef<HTMLDialogElement>;
+  t(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
   private readonly http = inject(HttpClient);
   categories: Category[] = [];
   brands: Brand[] = [];
@@ -91,6 +121,9 @@ export class CatalogMetadataAdminComponent {
   selectedProduct: CatalogProduct | null = null;
   productDraft = { brandId: '', categoryIds: [] as string[], attributes: {} as Record<string,string> };
   error = '';
+  catalogEditor:any=null;
+  catalogEditorBusy=false;
+  catalogEditorError='';
   categoryDraft = { name: '', parentId: '' };
   brandDraft = { name: '', description: '' };
   attributeDraft = { code: '', label: '', type: 'TEXT' as AttributeDefinition['type'], required: false };
@@ -125,10 +158,7 @@ export class CatalogMetadataAdminComponent {
     });
   }
   editCategory(row: Category): void {
-    const name = prompt('Category name', row.name); if (!name?.trim()) return;
-    const parentText = prompt('Parent category UUID, or leave blank for top level', row.parentId ?? ''); if (parentText === null) return;
-    const parentId = parentText.trim() || null;
-    this.http.put(`/api/v1/categories/${row.id}`, { name: name.trim(), parentId, active: row.active }).subscribe({ next: () => { this.load(); this.error = ''; }, error: e => this.fail(e, 'Could not update category.') });
+    this.openCatalogEditor('category',{...row,parentId:row.parentId??''});
   }
   toggleCategory(row: Category): void {
     this.http.put(`/api/v1/categories/${row.id}`, { name: row.name, parentId: row.parentId, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, 'Could not change category status.') });
@@ -138,9 +168,7 @@ export class CatalogMetadataAdminComponent {
     this.http.post('/api/v1/brands', { ...this.brandDraft, name: this.brandDraft.name.trim(), active: true }).subscribe({ next: () => { this.brandDraft = { name: '', description: '' }; this.load(); this.error = ''; }, error: e => this.fail(e, 'Could not create brand.') });
   }
   editBrand(row: Brand): void {
-    const name = prompt('Brand name', row.name); if (!name?.trim()) return;
-    const description = prompt('Brand description', row.description ?? ''); if (description === null) return;
-    this.http.put(`/api/v1/brands/${row.id}`, { name: name.trim(), description: description.trim(), active: row.active }).subscribe({ next: () => { this.load(); this.error = ''; }, error: e => this.fail(e, 'Could not update brand.') });
+    this.openCatalogEditor('brand',{...row});
   }
   toggleBrand(row: Brand): void {
     this.http.put(`/api/v1/brands/${row.id}`, { name: row.name, description: row.description, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, 'Could not change brand status.') });
@@ -152,9 +180,14 @@ export class CatalogMetadataAdminComponent {
     });
   }
   editAttribute(row: AttributeDefinition): void {
-    const label = prompt('Attribute label', row.label); if (!label?.trim()) return;
-    this.http.put(`/api/v1/attribute-definitions/${row.id}`, { label: label.trim(), active: row.active }).subscribe({ next: () => { this.load(); this.error = ''; }, error: e => this.fail(e, 'Could not rename attribute.') });
+    this.openCatalogEditor('attribute',{...row});
   }
+
+  private openCatalogEditor(kind:'category'|'brand'|'attribute',row:any):void{this.catalogEditor={kind,...row};this.catalogEditorBusy=false;this.catalogEditorError='';setTimeout(()=>{if(this.catalogEditor&&!this.catalogEditorDialogRef?.nativeElement.open)this.catalogEditorDialogRef?.nativeElement.showModal()},0)}
+  cancelCatalogEditor(event:Event):void{if(this.catalogEditorBusy)event.preventDefault()}
+  catalogEditorClosed():void{if(this.catalogEditorBusy)return;this.catalogEditor=null;this.catalogEditorError=''}
+  closeCatalogEditor():void{if(!this.catalogEditorBusy)this.catalogEditorDialogRef?.nativeElement.close()}
+  saveCatalogEdit():void{const edit=this.catalogEditor;if(!edit||this.catalogEditorBusy)return;const label=edit.kind==='attribute'?edit.label.trim():edit.name.trim();if(!label){this.catalogEditorError=this.t('catalogEditRequired');return}let request;if(edit.kind==='category')request=this.http.put(`/api/v1/categories/${edit.id}`,{name:label,parentId:edit.parentId||null,active:edit.active});else if(edit.kind==='brand')request=this.http.put(`/api/v1/brands/${edit.id}`,{name:label,description:edit.description.trim(),active:edit.active});else request=this.http.put(`/api/v1/attribute-definitions/${edit.id}`,{label,active:edit.active});this.catalogEditorBusy=true;this.catalogEditorError='';request.subscribe({next:()=>{this.catalogEditorBusy=false;this.catalogEditorDialogRef?.nativeElement.close();this.load();this.error=''},error:e=>{this.catalogEditorBusy=false;this.catalogEditorError=e.error?.detail??this.t('catalogEditFailure')}})}
   toggleAttribute(row: AttributeDefinition): void {
     this.http.put(`/api/v1/attribute-definitions/${row.id}`, { label: row.label, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, 'Could not change attribute status.') });
   }

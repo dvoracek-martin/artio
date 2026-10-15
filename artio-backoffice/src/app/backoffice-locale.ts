@@ -65,6 +65,9 @@ const COPY = {
     inventoryAdjustEyebrow: 'INVENTORY CONTROL', inventoryAdjustTitle: 'Set on-hand balance',
     inventoryAdjustDescription: 'This replaces the absolute on-hand quantity. Reserved stock remains committed.',
     inventoryAdjustBusy: 'Saving stock adjustment…', inventoryAdjustConfirm: 'Set quantity', inventoryAdjustFailure: 'Could not update inventory.',
+    catalogEditEyebrow: 'CATALOG DATA', categoryEditTitle: 'Edit category', brandEditTitle: 'Edit brand', attributeEditTitle: 'Rename attribute',
+    catalogName: 'Name', catalogParent: 'Parent category', catalogTopLevel: 'Top-level category', catalogDescription: 'Description', catalogAttributeLabel: 'Attribute label',
+    catalogEditBusy: 'Saving catalog data…', catalogEditSave: 'Save changes', catalogEditRequired: 'Enter a value before saving.', catalogEditFailure: 'Could not save catalog data.',
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -118,6 +121,9 @@ const COPY = {
     inventoryAdjustEyebrow: 'LAGERBESTAND', inventoryAdjustTitle: 'Bestand festlegen',
     inventoryAdjustDescription: 'Dadurch wird die verfügbare Gesamtmenge ersetzt. Reservierter Bestand bleibt gebunden.',
     inventoryAdjustBusy: 'Bestandskorrektur wird gespeichert…', inventoryAdjustConfirm: 'Menge festlegen', inventoryAdjustFailure: 'Bestand konnte nicht aktualisiert werden.',
+    catalogEditEyebrow: 'KATALOGDATEN', categoryEditTitle: 'Kategorie bearbeiten', brandEditTitle: 'Marke bearbeiten', attributeEditTitle: 'Attribut umbenennen',
+    catalogName: 'Name', catalogParent: 'Übergeordnete Kategorie', catalogTopLevel: 'Oberste Kategorie', catalogDescription: 'Beschreibung', catalogAttributeLabel: 'Attributbezeichnung',
+    catalogEditBusy: 'Katalogdaten werden gespeichert…', catalogEditSave: 'Änderungen speichern', catalogEditRequired: 'Geben Sie vor dem Speichern einen Wert ein.', catalogEditFailure: 'Katalogdaten konnten nicht gespeichert werden.',
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -171,6 +177,9 @@ const COPY = {
     inventoryAdjustEyebrow: 'CONTROLLO SCORTE', inventoryAdjustTitle: 'Imposta la quantità disponibile',
     inventoryAdjustDescription: 'Questo sostituisce la quantità totale disponibile. Le scorte riservate restano impegnate.',
     inventoryAdjustBusy: 'Salvataggio della rettifica…', inventoryAdjustConfirm: 'Imposta quantità', inventoryAdjustFailure: 'Impossibile aggiornare le scorte.',
+    catalogEditEyebrow: 'DATI CATALOGO', categoryEditTitle: 'Modifica categoria', brandEditTitle: 'Modifica marca', attributeEditTitle: 'Rinomina attributo',
+    catalogName: 'Nome', catalogParent: 'Categoria principale', catalogTopLevel: 'Categoria principale senza genitori', catalogDescription: 'Descrizione', catalogAttributeLabel: 'Etichetta attributo',
+    catalogEditBusy: 'Salvataggio dei dati catalogo…', catalogEditSave: 'Salva modifiche', catalogEditRequired: 'Inserisci un valore prima di salvare.', catalogEditFailure: 'Impossibile salvare i dati catalogo.',
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -223,7 +232,10 @@ const COPY = {
     loyaltyAdjustLicenseRequired: 'Les nouveaux ajustements nécessitent une licence Enterprise LOYALTY.', loyaltyAdjustFailure: 'Impossible d’ajuster les points de fidélité.',
     inventoryAdjustEyebrow: 'GESTION DES STOCKS', inventoryAdjustTitle: 'Définir le stock disponible',
     inventoryAdjustDescription: 'Cette action remplace la quantité totale disponible. Le stock réservé reste engagé.',
-    inventoryAdjustBusy: 'Enregistrement de l’ajustement…', inventoryAdjustConfirm: 'Définir la quantité', inventoryAdjustFailure: 'Impossible de modifier le stock.'
+    inventoryAdjustBusy: 'Enregistrement de l’ajustement…', inventoryAdjustConfirm: 'Définir la quantité', inventoryAdjustFailure: 'Impossible de modifier le stock.',
+    catalogEditEyebrow: 'DONNÉES DU CATALOGUE', categoryEditTitle: 'Modifier la catégorie', brandEditTitle: 'Modifier la marque', attributeEditTitle: 'Renommer l’attribut',
+    catalogName: 'Nom', catalogParent: 'Catégorie parente', catalogTopLevel: 'Catégorie de premier niveau', catalogDescription: 'Description', catalogAttributeLabel: 'Libellé de l’attribut',
+    catalogEditBusy: 'Enregistrement des données du catalogue…', catalogEditSave: 'Enregistrer les modifications', catalogEditRequired: 'Saisissez une valeur avant l’enregistrement.', catalogEditFailure: 'Impossible d’enregistrer les données du catalogue.'
   }
 } as const;
 
