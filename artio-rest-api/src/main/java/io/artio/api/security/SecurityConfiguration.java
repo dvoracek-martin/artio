@@ -68,14 +68,66 @@ public class SecurityConfiguration {
                 .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")))
             .authorizeHttpRequests(auth -> auth
                 .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/products", "/api/v1/products", "/api/products/drafts", "/api/v1/products/drafts")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRODUCT_CREATE")
+                .requestMatchers(HttpMethod.POST, "/api/products/*/duplicate", "/api/v1/products/*/duplicate",
+                        "/api/admin/catalog/products/import", "/api/v1/admin/catalog/products/import")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRODUCT_CREATE", "PERMISSION_PRODUCT_EDIT")
+                .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/v1/products/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRODUCT_EDIT")
+                .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/v1/products/**", "/api/variants/**", "/api/v1/variants/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRODUCT_EDIT")
+                .requestMatchers(HttpMethod.DELETE, "/api/products/*/media/**", "/api/v1/products/*/media/**",
+                        "/api/products/*/publication-schedule", "/api/v1/products/*/publication-schedule")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRODUCT_EDIT")
+                .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/v1/products/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRODUCT_DELETE")
+                .requestMatchers(HttpMethod.POST, "/api/categories/**", "/api/brands/**", "/api/attributes/**",
+                        "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**",
+                        "/api/attribute-definitions/**", "/api/v1/attribute-definitions/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_CATEGORY_MANAGE")
+                .requestMatchers(HttpMethod.PUT, "/api/categories/**", "/api/brands/**", "/api/attributes/**",
+                        "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**",
+                        "/api/attribute-definitions/**", "/api/v1/attribute-definitions/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_CATEGORY_MANAGE")
+                .requestMatchers(HttpMethod.DELETE, "/api/categories/**", "/api/brands/**", "/api/attributes/**",
+                        "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**",
+                        "/api/attribute-definitions/**", "/api/v1/attribute-definitions/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_CATEGORY_MANAGE")
+                .requestMatchers(HttpMethod.POST, "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**",
+                        "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRICING_MANAGE")
+                .requestMatchers(HttpMethod.PUT, "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**",
+                        "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRICING_MANAGE")
+                .requestMatchers(HttpMethod.DELETE, "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**",
+                        "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_PRICING_MANAGE")
+                .requestMatchers(HttpMethod.POST, "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
+                        "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_INVENTORY_MANAGE")
+                .requestMatchers(HttpMethod.PUT, "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
+                        "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_INVENTORY_MANAGE")
+                .requestMatchers(HttpMethod.DELETE, "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
+                        "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_INVENTORY_MANAGE")
+                .requestMatchers(HttpMethod.GET, "/api/warehouses/**", "/api/stock/**", "/api/orders/*/inventory-reservations",
+                        "/api/inventory/**", "/api/v1/warehouses/**", "/api/v1/stock/**", "/api/v1/inventory/**",
+                        "/api/v1/orders/*/inventory-reservations")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_INVENTORY_MANAGE")
+                .requestMatchers(HttpMethod.POST, "/api/admin/orders/*/fraud-assessment", "/api/v1/admin/orders/*/fraud-assessment")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_ANALYTICS_VIEW")
+                .requestMatchers("/api/admin/orders/**", "/api/v1/admin/orders/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_ORDER_FULFILL")
+                .requestMatchers(HttpMethod.GET, "/api/admin/analytics/**", "/api/v1/admin/analytics/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_ANALYTICS_VIEW")
                 .requestMatchers(HttpMethod.POST, "/api/products/**", "/api/categories/**", "/api/brands/**", "/api/attributes/**", "/api/bundles", "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**", "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
                         "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles", "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**", "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/products/**", "/api/variants/**", "/api/categories/**", "/api/brands/**", "/api/attributes/**", "/api/bundles/**", "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**", "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
                         "/api/v1/products/**", "/api/v1/variants/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**", "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/products/**", "/api/categories/**", "/api/brands/**", "/api/attributes/**", "/api/bundles/**", "/api/prices/**", "/api/discount-rules/**", "/api/tax-rules/**", "/api/warehouses/**", "/api/stocks/**", "/api/inventory/**",
                         "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**", "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**").hasAnyRole("ADMIN", "SUPERADMIN")
-                .requestMatchers(HttpMethod.GET, "/api/warehouses/**", "/api/stock/**", "/api/orders/*/inventory-reservations",
-                        "/api/inventory/**", "/api/v1/warehouses/**", "/api/v1/stock/**", "/api/v1/inventory/**", "/api/v1/orders/*/inventory-reservations").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/admin/reports/**", "/api/v1/admin/reports/**")
                         .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_REPORTS_VIEW")
                 .requestMatchers("/api/admin/users/**", "/api/v1/admin/users/**")

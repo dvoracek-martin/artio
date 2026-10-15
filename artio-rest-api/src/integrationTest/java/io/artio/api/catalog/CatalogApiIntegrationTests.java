@@ -163,7 +163,7 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void persistedAdminPermissionsTakeEffectImmediatelyOnReportsAndUserAdministration() {
+    void persistedAdminPermissionsTakeEffectImmediatelyAcrossAdminDomains() {
         jdbc.update("UPDATE users SET permissions='REPORTS_VIEW' WHERE id=?", adminUserId);
 
         var reports = adminExchange("/api/v1/admin/reports?days=7", HttpMethod.GET, null, Map.class);
@@ -181,6 +181,39 @@ class CatalogApiIntegrationTests {
         jdbc.update("UPDATE users SET permissions='NONE' WHERE id=?", adminUserId);
         var allDenied = adminExchange("/api/v1/admin/users", HttpMethod.GET, null, ApiError.class);
         assertThat(allDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        var productCreateDenied = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Restricted item", null, "RESTRICTED-1"), ApiError.class);
+        var categoryDenied = adminExchange("/api/v1/categories", HttpMethod.POST, Map.of("name", "Restricted"), ApiError.class);
+        var pricingDenied = adminExchange("/api/v1/prices", HttpMethod.POST, Map.of(), ApiError.class);
+        assertThat(productCreateDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(categoryDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(pricingDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='PRODUCT_CREATE' WHERE id=?", adminUserId);
+        var productCreated = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Restricted item", null, "R-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT)), ProductResponse.class);
+        var productEditDenied = adminExchange("/api/v1/products/{id}", HttpMethod.PUT,
+                new ProductRequest("Changed item", null, "UNCHANGED-SKU"), ApiError.class, productCreated.getBody().id());
+        var categoryStillDenied = adminExchange("/api/v1/categories", HttpMethod.POST, Map.of("name", "Restricted"), ApiError.class);
+        var ordersDenied = adminExchange("/api/v1/admin/orders?page=0&size=10", HttpMethod.GET, null, Map.class);
+        assertThat(productCreated.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(productEditDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(categoryStillDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(ordersDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='INVENTORY_MANAGE' WHERE id=?", adminUserId);
+        var inventoryAllowed = adminExchange("/api/v1/warehouses", HttpMethod.GET, null, Map[].class);
+        var productsNoLongerAllowed = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Another item", null, "RESTRICTED-2"), ApiError.class);
+        assertThat(inventoryAllowed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(productsNoLongerAllowed.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='ORDER_FULFILL' WHERE id=?", adminUserId);
+        var ordersAllowed = adminExchange("/api/v1/admin/orders?page=0&size=10", HttpMethod.GET, null, Map.class);
+        var inventoryDenied = adminExchange("/api/v1/warehouses", HttpMethod.GET, null, ApiError.class);
+        assertThat(ordersAllowed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(inventoryDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
