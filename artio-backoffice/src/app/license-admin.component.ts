@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { BackofficeLocale, BackofficeTextKey, backofficeText, currentBackofficeLocale, setBackofficeLocale } from './backoffice-locale';
 
 type LicenseStatus = {
   installationId: string; edition: string; state: string; features: string[];
@@ -16,25 +17,30 @@ type LicenseStatus = {
   imports: [CommonModule, FormsModule],
   template: `
     <section class="panel">
-      <div class="panel-heading"><div><p class="eyebrow">EDITION &amp; ENTITLEMENTS</p><h2>Artio license</h2></div><button class="link-button" type="button" (click)="load()" [disabled]="loading">Refresh status</button></div>
-      <p class="muted">Community keeps commerce, plugin management and existing customer obligations available. Loyalty, subscriptions and advanced reports need their matching Enterprise feature.</p>
-      <p *ngIf="loading" class="muted" role="status">Loading license status…</p>
+      <div class="panel-heading"><div><p class="eyebrow">{{t('edition')}} &amp; {{t('availableFeatures')}}</p><h2>{{t('licenseTitle')}}</h2></div>
+        <div class="license-controls"><label>{{t('language')}} <select [value]="locale" (change)="changeLocale($event)"><option value="de">Deutsch</option><option value="it">Italiano</option><option value="fr">Français</option><option value="en">English</option></select></label><button class="link-button" type="button" (click)="load()" [disabled]="loading">{{t('refreshStatusButton')}}</button></div>
+      </div>
+      <p class="muted">{{t('communityLicenseHelp')}}</p>
+      <p *ngIf="loading" class="muted" role="status">{{t('loadingLicense')}}</p>
       <p *ngIf="error" class="error" role="alert">{{error}}</p>
       <ng-container *ngIf="status as license">
-        <div class="metrics compact-metrics"><article><span>Edition</span><strong>{{license.edition}}</strong><small>{{license.state}}</small></article><article><span>Verification</span><strong>{{license.verificationStatus}}</strong><small>{{license.refreshConfigured?'Issuer refresh configured':'Local import only'}}</small></article></div>
-        <div class="table-panel"><h3>Installation</h3><p><code>{{license.installationId}}</code></p><p>Available features: <strong>{{license.features.length?license.features.join(', '):'None · Community capabilities remain available'}}</strong></p><p *ngIf="license.expiresAt">Valid until {{license.expiresAt | date:'medium'}}<span *ngIf="license.graceUntil"> · Grace ends {{license.graceUntil | date:'medium'}}</span></p><p *ngIf="!license.expiresAt" class="muted">No active Enterprise entitlement is installed.</p></div>
-        <div class="table-panel"><h3>Controlled refresh</h3><p>Refresh result: {{license.refreshStatus}}<span *ngIf="license.lastRefreshSuccessAt"> · Last success {{license.lastRefreshSuccessAt | date:'medium'}}</span><span *ngIf="license.lastRefreshAttemptAt && !license.lastRefreshSuccessAt"> · Last attempt {{license.lastRefreshAttemptAt | date:'medium'}}</span></p><button class="secondary" type="button" (click)="refresh()" [disabled]="!license.refreshConfigured || license.refreshInProgress || refreshing">{{refreshing||license.refreshInProgress?'Refreshing…':'Refresh from issuer'}}</button><small *ngIf="!license.refreshConfigured" class="muted">No issuer URL is configured. Import a signed license document below.</small></div>
+        <div class="metrics compact-metrics"><article><span>{{t('edition')}}</span><strong>{{license.edition}}</strong><small>{{license.state}}</small></article><article><span>{{t('verification')}}</span><strong>{{license.verificationStatus}}</strong><small>{{license.refreshConfigured?t('issuerConfigured'):t('localImportOnly')}}</small></article></div>
+        <div class="table-panel"><h3>{{t('installation')}}</h3><p><code>{{license.installationId}}</code></p><p>{{t('availableFeatures')}}: <strong>{{featureNames(license.features)}}</strong></p>
+          <p *ngIf="license.expiresAt">{{t('validUntil')}} {{formatDate(license.expiresAt)}}<span *ngIf="license.graceUntil"> · {{t('graceEnds')}} {{formatDate(license.graceUntil)}}</span></p><p *ngIf="!license.expiresAt" class="muted">{{t('noActiveEntitlement')}}</p>
+        </div>
+        <div class="table-panel"><h3>{{t('refreshStatus')}}</h3><p>{{t('refreshResult')}}: {{license.refreshStatus}}<span *ngIf="license.lastRefreshSuccessAt"> · {{t('lastSuccess')}} {{formatDate(license.lastRefreshSuccessAt)}}</span><span *ngIf="license.lastRefreshAttemptAt && !license.lastRefreshSuccessAt"> · {{t('lastAttempt')}} {{formatDate(license.lastRefreshAttemptAt)}}</span></p><button class="secondary" type="button" (click)="refresh()" [disabled]="!license.refreshConfigured || license.refreshInProgress || refreshing">{{refreshing||license.refreshInProgress?t('refreshing'):t('refreshIssuer')}}</button><small *ngIf="!license.refreshConfigured" class="muted">{{t('noIssuerConfigured')}}</small></div>
       </ng-container>
     </section>
-    <section class="panel"><p class="eyebrow">OWNER ACTION</p><h2>Install signed entitlement</h2><p class="muted">Select the signed JSON envelope provided for this installation. Artio verifies it against the configured public trust keys. The file and its contents are not stored in the browser after installation.</p>
-      <label>Signed entitlement JSON<input #licenseFile type="file" accept="application/json,.json" (change)="readFile($event)" [disabled]="installing"></label>
+    <section class="panel"><p class="eyebrow">{{t('ownerAction')}}</p><h2>{{t('installEntitlement')}}</h2><p class="muted">{{t('installExplanation')}}</p>
+      <label>{{t('signedFile')}}<input #licenseFile type="file" accept="application/json,.json" (change)="readFile($event)" [disabled]="installing"></label>
       <p class="muted" *ngIf="selectedFile">{{selectedFile.name}} · {{selectedFile.size}} bytes</p>
       <p *ngIf="installError" class="error" role="alert">{{installError}}</p>
-      <button class="primary" type="button" (click)="install(licenseFile)" [disabled]="!document || installing">{{installing?'Verifying…':'Verify and install'}}</button>
+      <button class="primary" type="button" (click)="install(licenseFile)" [disabled]="!document || installing">{{installing?t('verifying'):t('verifyInstall')}}</button>
     </section>`
 })
 export class LicenseAdminComponent {
   private readonly http = inject(HttpClient);
+  locale: BackofficeLocale = currentBackofficeLocale();
   status: LicenseStatus | null = null;
   error = '';
   installError = '';
@@ -46,11 +52,26 @@ export class LicenseAdminComponent {
 
   constructor() { this.load(); }
 
+  t(key: BackofficeTextKey): string { return backofficeText(this.locale, key); }
+  changeLocale(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'de' || value === 'it' || value === 'fr' || value === 'en') { this.locale = value; setBackofficeLocale(value); }
+  }
+  formatDate(value: string): string {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(this.locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  }
+  featureNames(features: string[]): string {
+    if (!features.length) return this.t('noEnterpriseFeatures');
+    const names: Record<string, BackofficeTextKey> = { LOYALTY: 'featureLoyalty', SUBSCRIPTIONS: 'featureSubscriptions', ADVANCED_REPORTING: 'featureAdvancedReporting' };
+    return features.map(feature => names[feature] ? this.t(names[feature]) : feature).join(', ');
+  }
+
   load(): void {
     this.loading = true;
     this.http.get<LicenseStatus>('/api/v1/admin/system/license').subscribe({
       next: status => { this.status = status; this.loading = false; this.error = ''; },
-      error: response => { this.loading = false; this.error = response.error?.message ?? 'Could not read license status.'; }
+      error: () => { this.loading = false; this.error = this.t('licenseLoadError'); }
     });
   }
 
@@ -61,15 +82,15 @@ export class LicenseAdminComponent {
     this.selectedFile = null;
     this.installError = '';
     if (!file) return;
-    if (file.size > 65536) { this.installError = 'The signed license file exceeds 64 KiB.'; input.value = ''; return; }
+    if (file.size > 65536) { this.installError = this.t('fileTooLarge'); input.value = ''; return; }
     this.selectedFile = file;
     const reader = new FileReader();
     reader.onload = () => {
       const value = reader.result;
-      if (typeof value !== 'string') { this.installError = 'Could not read the signed license file as text.'; return; }
+      if (typeof value !== 'string') { this.installError = this.t('fileReadError'); return; }
       this.document = value;
     };
-    reader.onerror = () => { this.installError = 'Could not read the selected license file.'; this.selectedFile = null; };
+    reader.onerror = () => { this.installError = this.t('fileSelectedReadError'); this.selectedFile = null; };
     reader.readAsText(file, 'UTF-8');
   }
 
@@ -79,7 +100,7 @@ export class LicenseAdminComponent {
     this.installError = '';
     this.http.post<LicenseStatus>('/api/v1/admin/system/license', this.document, { headers: { 'Content-Type': 'application/json' } }).subscribe({
       next: status => { this.status = status; this.document = ''; this.selectedFile = null; fileInput.value = ''; this.installing = false; this.installError = ''; },
-      error: response => { this.installing = false; this.installError = response.error?.message ?? 'The signed license was rejected. Existing license status is unchanged.'; }
+      error: () => { this.installing = false; this.installError = this.t('rejectedLicense'); }
     });
   }
 
@@ -88,7 +109,7 @@ export class LicenseAdminComponent {
     this.refreshing = true;
     this.http.post<LicenseStatus>('/api/v1/admin/system/license/refresh', {}).subscribe({
       next: status => { this.status = status; this.refreshing = false; },
-      error: response => { this.refreshing = false; this.error = response.error?.message ?? 'Could not request license refresh.'; }
+      error: () => { this.refreshing = false; this.error = this.t('refreshError'); }
     });
   }
 }

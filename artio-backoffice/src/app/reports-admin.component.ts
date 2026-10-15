@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, OnDestroy, inject } from '@angular/core';
 import { Subscription } from 'rxjs';
+import { BackofficeLocale, BackofficeTextKey, backofficeText, currentBackofficeLocale, setBackofficeLocale } from './backoffice-locale';
 
 type FeatureAvailability = { edition: string; state: string; features: string[]; expiresAt: string | null; graceUntil: string | null };
 type StandardReport = {
@@ -21,30 +22,31 @@ type AdvancedReport = {
   imports: [CommonModule],
   template: `
     <section class="panel">
-      <div class="panel-heading"><div><p class="eyebrow">OPERATIONAL REPORTS</p><h2>Store performance</h2></div>
-        <label>Period <select [value]="days" (change)="changeDays($event)"><option *ngFor="let option of periods" [value]="option">Last {{option}} days</option></select></label>
+      <div class="panel-heading"><div><p class="eyebrow">{{t('reportsEyebrow')}}</p><h2>{{t('reportsTitle')}}</h2></div>
+        <div class="report-controls"><label>{{t('period')}} <select [value]="days" (change)="changeDays($event)"><option *ngFor="let option of periods" [value]="option">{{periodLabel(option)}}</option></select></label>
+        <label>{{t('language')}} <select [value]="locale" (change)="changeLocale($event)"><option value="de">Deutsch</option><option value="it">Italiano</option><option value="fr">Français</option><option value="en">English</option></select></label></div>
       </div>
-      <p class="muted">Order activity follows the order creation date. Each monetary figure stays in its recorded currency.</p>
-      <p *ngIf="loading" class="muted" role="status">Loading reports…</p>
+      <p class="muted">{{t('reportActivityHelp')}}</p>
+      <p *ngIf="loading" class="muted" role="status">{{t('loadingReports')}}</p>
       <p *ngIf="error" class="error" role="alert">{{error}}</p>
       <ng-container *ngIf="!loading && report">
-        <div class="metrics compact-metrics"><article><span>Orders created</span><strong>{{report.orders}}</strong><small>Selected period</small></article><article><span>Customers active</span><strong>{{report.activeCustomers}}</strong><small>With an order in this period</small></article></div>
-        <div class="table-panel"><h3>Captured and refunded by currency</h3>
-          <table class="report-table" *ngIf="report.salesByCurrency.length; else noSales"><thead><tr><th scope="col">CURRENCY</th><th scope="col">ORDERS</th><th scope="col">CUSTOMERS</th><th scope="col">CAPTURED</th><th scope="col">REFUNDED</th><th scope="col">NET CAPTURED</th></tr></thead>
+        <div class="metrics compact-metrics"><article><span>{{t('ordersCreated')}}</span><strong>{{report.orders}}</strong><small>{{t('selectedPeriod')}}</small></article><article><span>{{t('customersActive')}}</span><strong>{{report.activeCustomers}}</strong><small>{{t('withOrder')}}</small></article></div>
+        <div class="table-panel"><h3>{{t('capturedRefunded')}}</h3>
+          <table class="report-table" *ngIf="report.salesByCurrency.length; else noSales"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('orders')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th></tr></thead>
             <tbody><tr *ngFor="let row of report.salesByCurrency"><td>{{row.currency}}</td><td>{{row.orders}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td><strong>{{money(row.netCapturedAmount,row.currency)}}</strong></td></tr></tbody></table>
-          <ng-template #noSales><p class="empty">No orders were created during this period.</p></ng-template>
+          <ng-template #noSales><p class="empty">{{t('noOrders')}}</p></ng-template>
         </div>
-        <div class="table-panel"><h3>Order status</h3><table *ngIf="report.ordersByStatus.length; else noStatuses"><thead><tr><th scope="col">STATUS</th><th scope="col">ORDERS</th></tr></thead><tbody><tr *ngFor="let row of report.ordersByStatus"><td>{{row.status}}</td><td>{{row.orders}}</td></tr></tbody></table><ng-template #noStatuses><p class="empty">No order activity to show.</p></ng-template></div>
+        <div class="table-panel"><h3>{{t('orderStatus')}}</h3><table *ngIf="report.ordersByStatus.length; else noStatuses"><thead><tr><th scope="col">{{t('status')}}</th><th scope="col">{{t('orders')}}</th></tr></thead><tbody><tr *ngFor="let row of report.ordersByStatus"><td>{{row.status}}</td><td>{{row.orders}}</td></tr></tbody></table><ng-template #noStatuses><p class="empty">{{t('noActivity')}}</p></ng-template></div>
       </ng-container>
     </section>
     <section class="panel">
-      <div class="panel-heading"><div><p class="eyebrow">ENTERPRISE</p><h2>Advanced reports</h2></div><span class="pill" [class.inactive]="!advancedAvailable">{{advancedAvailable?'Available':'Enterprise license required'}}</span></div>
-      <p class="muted">Ranked variants cover fully captured orders in the selected period. Customer lifetime values include successful payment history before the end of the period.</p>
-      <p *ngIf="!advancedAvailable" class="empty">Advanced reports require the ADVANCED_REPORTING entitlement. Standard reports remain available.</p>
+      <div class="panel-heading"><div><p class="eyebrow">{{t('enterprise')}}</p><h2>{{t('advancedReports')}}</h2></div><span class="pill" [class.inactive]="!advancedAvailable">{{t(advancedAvailable?'advancedAvailable':'enterpriseRequired')}}</span></div>
+      <p class="muted">{{t('advancedExplanation')}}</p>
+      <p *ngIf="!advancedAvailable" class="empty">{{t('advancedRequiredText')}}</p>
       <p *ngIf="advancedError" class="error" role="alert">{{advancedError}}</p>
       <ng-container *ngIf="advancedAvailable && advanced">
-        <div class="table-panel"><h3>Top variants by currency</h3><table class="report-table" *ngIf="advanced.topVariants.length; else noVariants"><thead><tr><th scope="col">RANK</th><th scope="col">PRODUCT / VARIANT</th><th scope="col">SKU</th><th scope="col">CURRENCY</th><th scope="col">UNITS</th><th scope="col">RECORDED LINE VALUE</th></tr></thead><tbody><tr *ngFor="let row of advanced.topVariants"><td>{{row.rank}}</td><td>{{row.productName||row.productId||'Historical product'}} · {{row.variantName||row.variantId}}</td><td>{{row.sku||'—'}}</td><td>{{row.currency}}</td><td>{{row.unitsOnCapturedOrders}}</td><td>{{money(row.recordedLineValue,row.currency)}}</td></tr></tbody></table><ng-template #noVariants><p class="empty">No fully captured positive value orders in this period.</p></ng-template><small class="muted">Recorded line value uses the original stored line prices and quantities. It is not net captured revenue and does not allocate refunds.</small></div>
-        <div class="table-panel"><h3>Customer lifetime value by currency</h3><table class="report-table" *ngIf="advanced.customerLifetimeValues.length; else noLifetime"><thead><tr><th scope="col">CURRENCY</th><th scope="col">CUSTOMERS</th><th scope="col">CAPTURED</th><th scope="col">REFUNDED</th><th scope="col">NET CAPTURED</th><th scope="col">AVERAGE NET</th></tr></thead><tbody><tr *ngFor="let row of advanced.customerLifetimeValues"><td>{{row.currency}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td>{{money(row.netCapturedAmount,row.currency)}}</td><td>{{money(row.averageNetCapturedValue,row.currency)}}</td></tr></tbody></table><ng-template #noLifetime><p class="empty">No successful payment history is available before the period end.</p></ng-template></div>
+        <div class="table-panel"><h3>{{t('topVariants')}}</h3><table class="report-table" *ngIf="advanced.topVariants.length; else noVariants"><thead><tr><th scope="col">{{t('rank')}}</th><th scope="col">{{t('productVariant')}}</th><th scope="col">{{t('sku')}}</th><th scope="col">{{t('currency')}}</th><th scope="col">{{t('units')}}</th><th scope="col">{{t('recordedLineValue')}}</th></tr></thead><tbody><tr *ngFor="let row of advanced.topVariants"><td>{{row.rank}}</td><td>{{row.productName||row.productId||t('historicalProduct')}} · {{row.variantName||row.variantId}}</td><td>{{row.sku||'—'}}</td><td>{{row.currency}}</td><td>{{row.unitsOnCapturedOrders}}</td><td>{{money(row.recordedLineValue,row.currency)}}</td></tr></tbody></table><ng-template #noVariants><p class="empty">{{t('noVariants')}}</p></ng-template><small class="muted">{{t('recordedLineValueHelp')}}</small></div>
+        <div class="table-panel"><h3>{{t('lifetimeValue')}}</h3><table class="report-table" *ngIf="advanced.customerLifetimeValues.length; else noLifetime"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th><th scope="col">{{t('averageNet')}}</th></tr></thead><tbody><tr *ngFor="let row of advanced.customerLifetimeValues"><td>{{row.currency}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td>{{money(row.netCapturedAmount,row.currency)}}</td><td>{{money(row.averageNetCapturedValue,row.currency)}}</td></tr></tbody></table><ng-template #noLifetime><p class="empty">{{t('noLifetime')}}</p></ng-template></div>
       </ng-container>
     </section>`
 })
@@ -53,6 +55,7 @@ export class ReportsAdminComponent implements OnDestroy {
   private request?: Subscription;
   private generation = 0;
   readonly periods = [7, 30, 90, 365];
+  locale: BackofficeLocale = currentBackofficeLocale();
   days = 30;
   loading = false;
   error = '';
@@ -73,8 +76,15 @@ export class ReportsAdminComponent implements OnDestroy {
     this.load();
   }
 
+  t(key: BackofficeTextKey): string { return backofficeText(this.locale, key); }
+  periodLabel(days: number): string { return this.t('periodLast').replace('{days}', String(days)); }
+  changeLocale(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'de' || value === 'it' || value === 'fr' || value === 'en') { this.locale = value; setBackofficeLocale(value); }
+  }
+
   money(amount: number, currency: string): string {
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount); }
+    try { return new Intl.NumberFormat(this.locale, { style: 'currency', currency }).format(amount); }
     catch { return `${amount} ${currency}`; }
   }
 
@@ -96,7 +106,7 @@ export class ReportsAdminComponent implements OnDestroy {
       error: error => {
         if (generation !== this.generation) return;
         this.loading = false;
-        this.error = error.status === 401 || error.status === 403 ? 'Administrator access is required to view reports.' : 'Could not load edition availability.';
+        this.error = error.status === 401 || error.status === 403 ? this.t('administratorRequired') : this.t('loadEditionError');
       }
     });
   }
@@ -104,14 +114,14 @@ export class ReportsAdminComponent implements OnDestroy {
   private loadStandard(generation: number): void {
     this.http.get<StandardReport>(`/api/v1/admin/reports?days=${this.days}`).subscribe({
       next: report => { if (generation === this.generation) { this.report = report; this.loading = false; } },
-      error: error => { if (generation === this.generation) { this.loading = false; this.error = error.error?.message ?? 'Could not load standard reports.'; } }
+      error: () => { if (generation === this.generation) { this.loading = false; this.error = this.t('loadStandardError'); } }
     });
   }
 
   private loadAdvanced(generation: number): void {
     this.http.get<AdvancedReport>(`/api/v1/admin/reports/advanced?days=${this.days}`).subscribe({
       next: report => { if (generation === this.generation) this.advanced = report; },
-      error: error => { if (generation === this.generation) this.advancedError = error.error?.message ?? 'Advanced reports are currently unavailable.'; }
+      error: () => { if (generation === this.generation) this.advancedError = this.t('advancedUnavailable'); }
     });
   }
 }

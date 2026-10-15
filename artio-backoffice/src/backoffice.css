@@ -181,6 +181,8 @@ artio-sellable-select{display:block;min-width:200px}.create-form>artio-sellable-
 .report-table { min-width: 680px; }
 .table-panel { max-width: 100%; }
 .panel-heading { gap: 12px; }
+.report-controls, .license-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.report-controls > label, .license-controls > label { display: grid; gap: 6px; }
 @media (max-width: 650px) {
   .panel-heading { align-items: flex-start; flex-wrap: wrap; }
   .panel-heading > label { display: grid; gap: 6px; }
