@@ -1,0 +1,48 @@
+import { CommonModule } from '@angular/common';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { BackofficeLocale } from './backoffice-locale';
+import { ordersAdminText } from './orders-admin-locale';
+
+export type OrdersAdminAction =
+  | { type: 'search' } | { type: 'export' } | { type: 'page'; page: number }
+  | { type: 'view'; order: any } | { type: 'ship'; order: any }
+  | { type: 'label'; order: any } | { type: 'deliver'; order: any }
+  | { type: 'tracking'; order: any } | { type: 'close' }
+  | { type: 'refund'; payment: any } | { type: 'return'; item: any; action: 'review' | 'receive'; approve: boolean; restock: boolean }
+  | { type: 'createShipment'; trackingNumber: string; lines: any[] }
+  | { type: 'note'; note: string };
+
+@Component({
+  selector: 'artio-orders-admin', standalone: true, imports: [CommonModule, FormsModule],
+  template: `
+<section><div class="panel"><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p class="muted">{{t('intro')}}</p>
+<form class="toolbar" (ngSubmit)="emit({type:'search'})"><input [ngModel]="query" (ngModelChange)="queryChange.emit($event)" name="orderQuery" maxlength="200" [placeholder]="t('query')" [attr.aria-label]="t('query')"><select [ngModel]="status" (ngModelChange)="statusChange.emit($event)" name="orderStatus" [attr.aria-label]="t('allStatuses')"><option value="">{{t('allStatuses')}}</option>@for (value of statuses; track value) { <option [value]="value">{{t('status_'+value)}}</option> }</select><button class="primary">{{t('search')}}</button><button type="button" class="link-button" (click)="emit({type:'export'})">{{t('export')}}</button></form>
+@if (loading) { <p class="muted" role="status">{{t('loading')}}</p> }
+@if (error) { <p class="error" role="alert">{{error}}</p> }
+@if (!loading && !error) { <p class="muted">{{t('count',{count:total,page:page+1,pages:pages||1})}}</p> }
+@for (order of orders; track order.id) { <div class="row"><span class="row-main"><strong>{{order.id}}</strong><small>{{t('status_'+order.status)}} · {{order.createdAt | date:'medium'}} · {{order.customerEmail}} {{order.trackingNumber?'· '+order.trackingNumber:''}}</small></span><b>{{order.total}} {{order.currency}}</b><button class="link-button" (click)="emit({type:'view',order})">{{t('details')}}</button>@if (order.status==='PAID' || order.status==='CONFIRMED') { <button class="link-button" (click)="emit({type:'ship',order})">{{order.shippingMethodId?t('createLabelShip'):t('ship')}}</button> }@if (order.shippingLabelAvailable) { <button class="link-button" (click)="emit({type:'label',order})">{{t('shippingLabel')}}</button> }@if (order.status==='SHIPPED') { <button class="link-button" (click)="emit({type:'deliver',order})">{{t('markDelivered')}}</button> }@if (order.trackingNumber && order.status==='SHIPPED') { <button class="link-button" (click)="emit({type:'tracking',order})">{{t('refreshTracking')}}</button> }</div> }
+@if (!loading && !error && !orders.length) { <p class="empty" role="status">{{t('empty')}}</p> }
+<div class="toolbar"><button class="link-button" [disabled]="page===0" (click)="emit({type:'page',page:page-1})">{{t('previous')}}</button><button class="link-button" [disabled]="page+1>=pages" (click)="emit({type:'page',page:page+1})">{{t('next')}}</button></div></div>
+@if (detailLoading) { <p class="muted" role="status">{{t('loadingDetail')}}</p> }
+@if (selectedOrder) { <div class="panel"><div class="panel-heading"><div><p class="eyebrow">{{t('detailEyebrow')}}</p><h2>{{selectedOrder.id}}</h2></div><button class="link-button" (click)="emit({type:'close'})">{{t('close')}}</button></div><p><strong>{{t('status_'+selectedOrder.status)}}</strong> · {{selectedOrder.customerEmail}} · {{selectedOrder.createdAt | date:'medium'}}</p><p>{{t('subtotal')}} {{selectedOrder.subtotal}} + {{t('tax')}} {{selectedOrder.tax}} + {{t('shipping')}} {{selectedOrder.shipping}} = <strong>{{selectedOrder.total}} {{selectedOrder.currency}}</strong></p><p>{{t('shipTo')}}: {{selectedOrder.shippingAddress}}</p><p>{{t('billTo')}}: {{selectedOrder.billingAddress}}</p>@if (selectedOrder.trackingNumber) { <p>{{t('tracking')}}: {{selectedOrder.trackingNumber}} · {{selectedOrder.shipmentReference}}</p> }
+<h3>{{t('items')}}</h3>@for (line of selectedOrder.lines; track line.id) { <div class="row"><span>{{line.variantId}} {{line.bundleId?'· bundle '+line.bundleId:''}} · {{t('quantity')}} {{line.quantity}}</span><b>{{line.unitPrice}} {{line.currency}}</b></div> }
+<h3>{{t('shipments')}}</h3>@for (shipment of shipments; track shipment.id) { <div class="row"><span>{{shipment.trackingNumber}} · {{shipment.items.length}} {{t('lines')}}</span><small>{{t('status_'+shipment.orderStatus)}}</small></div> }
+@if (selectedOrder.status==='PAID' || selectedOrder.status==='CONFIRMED' || selectedOrder.status==='PARTIALLY_SHIPPED') { <form class="create-form" (ngSubmit)="createShipment()"><label>{{t('trackingNumber')}}<input [ngModel]="trackingNumber" (ngModelChange)="trackingNumberChange.emit($event)" name="shipmentTracking" maxlength="255" required></label>@for (line of selectedOrder.lines; track line.id) { <div class="row"><span class="row-main">{{line.variantId}} · {{t('shippedOf',{shipped:line.shippedQuantity,quantity:line.quantity})}}</span><label>{{t('shipNow')}}<input type="number" min="0" step="0.0001" [max]="line.quantity-line.shippedQuantity" [(ngModel)]="line.shipQuantity" [name]="'ship-'+line.id"></label></div> }<button class="primary" [disabled]="!trackingNumber.trim()">{{t('createShipment')}}</button></form> }
+<h3>{{t('payments')}}</h3>@for (payment of selectedOrder.payments; track payment.id) { <div class="row"><span>{{payment.method}} · {{payment.status}} · {{payment.providerReference}} · {{t('refunded')}} {{payment.refundedAmount}} {{payment.currency}}</span><b>{{payment.amount}} {{payment.currency}}</b>@if (payment.status==='CAPTURED' || payment.status==='PARTIALLY_REFUNDED') { <button type="button" class="link-button" (click)="emit({type:'refund',payment})">{{refundLabel}}</button> }</div> }
+<h3>{{t('returns')}}</h3>@for (item of returns; track item.id) { <div class="row"><span class="row-main"><strong>{{item.status}}</strong><small>{{item.reason}} · {{item.createdAt | date:'medium'}} · @for (line of item.items; track line.orderItemId) { <span>{{line.quantity}} × {{line.orderItemId}} </span> }</small>@if (item.staffNote) { <small>{{t('staffNote')}}: {{item.staffNote}}</small> }</span>@if (item.status==='REQUESTED') { <button type="button" class="link-button" (click)="returnAction(item,'review',true,false)">{{t('approve')}}</button><button type="button" class="link-button" (click)="returnAction(item,'review',false,false)">{{t('reject')}}</button> }@if (item.status==='APPROVED') { @if (warehouses.length) { <label>{{t('warehouse')}}<select [(ngModel)]="item.receiveWarehouseId" [name]="'return-warehouse-'+item.id"><option value="">{{t('noRestocking')}}</option>@for (warehouse of warehouses; track warehouse.id) { <option [value]="warehouse.id">{{warehouse.name}} · {{warehouse.code}}</option> }</select></label><button class="link-button" [disabled]="!item.receiveWarehouseId" (click)="returnAction(item,'receive',true,true)">{{t('receiveRestock')}}</button> }<button class="link-button" (click)="returnAction(item,'receive',false,false)">{{t('receiveWithoutRestock')}}</button> }</div> }
+@if (!returns.length) { <p class="muted">{{t('noReturns')}}</p> }<details><summary>{{t('taxSnapshot')}}</summary><pre>{{selectedOrder.taxSnapshot | json}}</pre></details><h3>{{t('timeline')}}</h3>@for (event of timeline; track event.id) { <div class="row"><span class="row-main"><strong>{{event.eventType}}</strong><small>{{event.message}} · {{event.occurredAt | date:'medium'}}</small></span><span class="muted">{{event.customerVisible?t('customerVisible'):t('internal')}}</span></div> }<form class="toolbar" (ngSubmit)="addNote()"><input [ngModel]="note" (ngModelChange)="noteChange.emit($event)" name="orderNote" maxlength="2000" [placeholder]="t('internalNote')" [attr.aria-label]="t('internalNote')"><button class="primary" [disabled]="!note.trim()">{{t('addNote')}}</button></form></div> }
+</section>`,
+})
+export class OrdersAdminComponent {
+  @Input() locale: BackofficeLocale = 'en'; @Input() orders: any[] = []; @Input() loading = false; @Input() error = '';
+  @Input() page = 0; @Input() total = 0; @Input() pages = 0; @Input() statuses: string[] = [];
+  @Input() selectedOrder: any = null; @Input() detailLoading = false; @Input() shipments: any[] = []; @Input() returns: any[] = []; @Input() warehouses: any[] = []; @Input() timeline: any[] = [];
+  @Input() refundLabel = 'Refund'; @Input() query = ''; @Output() queryChange = new EventEmitter<string>(); @Input() status = ''; @Output() statusChange = new EventEmitter<string>();
+  @Input() trackingNumber = ''; @Output() trackingNumberChange = new EventEmitter<string>(); @Input() note = ''; @Output() noteChange = new EventEmitter<string>(); @Output() action = new EventEmitter<OrdersAdminAction>();
+  emit(action: OrdersAdminAction): void { this.action.emit(action); }
+  t(key: string, values: Record<string, string | number> = {}): string { return ordersAdminText(this.locale, key, values); }
+  createShipment(): void { this.emit({ type: 'createShipment', trackingNumber: this.trackingNumber.trim(), lines: (this.selectedOrder?.lines ?? []).filter((line: any) => Number(line.shipQuantity) > 0) }); }
+  addNote(): void { if (this.note.trim()) this.emit({ type: 'note', note: this.note.trim() }); }
+  returnAction(item: any, action: 'review' | 'receive', approve: boolean, restock: boolean): void { this.emit({ type: 'return', item, action, approve, restock }); }
+}
