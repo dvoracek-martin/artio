@@ -1,6 +1,6 @@
-import { CommonModule } from '@angular/common';
+
 import { HttpClient } from '@angular/common/http';
-import { Component, OnDestroy, inject } from '@angular/core';
+import { Component, OnDestroy, inject, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { BackofficeLocale, BackofficeTextKey, backofficeText, currentBackofficeLocale, setBackofficeLocale } from './backoffice-locale';
 
@@ -17,37 +17,70 @@ type AdvancedReport = {
 };
 
 @Component({
-  selector: 'artio-reports-admin',
-  standalone: true,
-  imports: [CommonModule],
-  template: `
+    selector: 'artio-reports-admin',
+    imports: [],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `
     <section class="panel">
       <div class="panel-heading"><div><p class="eyebrow">{{t('reportsEyebrow')}}</p><h2>{{t('reportsTitle')}}</h2></div>
-        <div class="report-controls"><label>{{t('period')}} <select [value]="days" (change)="changeDays($event)"><option *ngFor="let option of periods" [value]="option">{{periodLabel(option)}}</option></select></label>
-        <label>{{t('language')}} <select [value]="locale" (change)="changeLocale($event)"><option value="de">Deutsch</option><option value="it">Italiano</option><option value="fr">Français</option><option value="en">English</option></select></label></div>
-      </div>
-      <p class="muted">{{t('reportActivityHelp')}}</p>
-      <p *ngIf="loading" class="muted" role="status">{{t('loadingReports')}}</p>
-      <p *ngIf="error" class="error" role="alert">{{error}}</p>
-      <ng-container *ngIf="!loading && report">
-        <div class="metrics compact-metrics"><article><span>{{t('ordersCreated')}}</span><strong>{{report.orders}}</strong><small>{{t('selectedPeriod')}}</small></article><article><span>{{t('customersActive')}}</span><strong>{{report.activeCustomers}}</strong><small>{{t('withOrder')}}</small></article></div>
-        <div class="table-panel"><h3>{{t('capturedRefunded')}}</h3>
-          <table class="report-table" *ngIf="report.salesByCurrency.length; else noSales"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('orders')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th></tr></thead>
-            <tbody><tr *ngFor="let row of report.salesByCurrency"><td>{{row.currency}}</td><td>{{row.orders}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td><strong>{{money(row.netCapturedAmount,row.currency)}}</strong></td></tr></tbody></table>
-          <ng-template #noSales><p class="empty">{{t('noOrders')}}</p></ng-template>
-        </div>
-        <div class="table-panel"><h3>{{t('orderStatus')}}</h3><table *ngIf="report.ordersByStatus.length; else noStatuses"><thead><tr><th scope="col">{{t('status')}}</th><th scope="col">{{t('orders')}}</th></tr></thead><tbody><tr *ngFor="let row of report.ordersByStatus"><td>{{row.status}}</td><td>{{row.orders}}</td></tr></tbody></table><ng-template #noStatuses><p class="empty">{{t('noActivity')}}</p></ng-template></div>
-      </ng-container>
+      <div class="report-controls"><label>{{t('period')}} <select [value]="days" (change)="changeDays($event)">@for (option of periods; track option) {
+        <option [value]="option">{{periodLabel(option)}}</option>
+      }</select></label>
+      <label>{{t('language')}} <select [value]="locale" (change)="changeLocale($event)"><option value="de">Deutsch</option><option value="it">Italiano</option><option value="fr">Français</option><option value="en">English</option></select></label></div>
+    </div>
+    <p class="muted">{{t('reportActivityHelp')}}</p>
+    @if (loading) {
+      <p class="muted" role="status">{{t('loadingReports')}}</p>
+    }
+    @if (error) {
+      <p class="error" role="alert">{{error}}</p>
+    }
+    @if (!loading && report) {
+      <div class="metrics compact-metrics"><article><span>{{t('ordersCreated')}}</span><strong>{{report.orders}}</strong><small>{{t('selectedPeriod')}}</small></article><article><span>{{t('customersActive')}}</span><strong>{{report.activeCustomers}}</strong><small>{{t('withOrder')}}</small></article></div>
+      <div class="table-panel"><h3>{{t('capturedRefunded')}}</h3>
+      @if (report.salesByCurrency.length) {
+        <table class="report-table"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('orders')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th></tr></thead>
+        <tbody>@for (row of report.salesByCurrency; track row) {
+          <tr><td>{{row.currency}}</td><td>{{row.orders}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td><strong>{{money(row.netCapturedAmount,row.currency)}}</strong></td></tr>
+        }</tbody></table>
+      } @else {
+        <p class="empty">{{t('noOrders')}}</p>
+      }
+    </div>
+    <div class="table-panel"><h3>{{t('orderStatus')}}</h3>@if (report.ordersByStatus.length) {
+    <table><thead><tr><th scope="col">{{t('status')}}</th><th scope="col">{{t('orders')}}</th></tr></thead><tbody>@for (row of report.ordersByStatus; track row) {
+    <tr><td>{{row.status}}</td><td>{{row.orders}}</td></tr>
+    }</tbody></table>
+    } @else {
+      <p class="empty">{{t('noActivity')}}</p>
+    }</div>
+    }
     </section>
     <section class="panel">
       <div class="panel-heading"><div><p class="eyebrow">{{t('enterprise')}}</p><h2>{{t('advancedReports')}}</h2></div><span class="pill" [class.inactive]="!advancedAvailable">{{t(advancedAvailable?'advancedAvailable':'enterpriseRequired')}}</span></div>
       <p class="muted">{{t('advancedExplanation')}}</p>
-      <p *ngIf="!advancedAvailable" class="empty">{{t('advancedRequiredText')}}</p>
-      <p *ngIf="advancedError" class="error" role="alert">{{advancedError}}</p>
-      <ng-container *ngIf="advancedAvailable && advanced">
-        <div class="table-panel"><h3>{{t('topVariants')}}</h3><table class="report-table" *ngIf="advanced.topVariants.length; else noVariants"><thead><tr><th scope="col">{{t('rank')}}</th><th scope="col">{{t('productVariant')}}</th><th scope="col">{{t('sku')}}</th><th scope="col">{{t('currency')}}</th><th scope="col">{{t('units')}}</th><th scope="col">{{t('recordedLineValue')}}</th></tr></thead><tbody><tr *ngFor="let row of advanced.topVariants"><td>{{row.rank}}</td><td>{{row.productName||row.productId||t('historicalProduct')}} · {{row.variantName||row.variantId}}</td><td>{{row.sku||'—'}}</td><td>{{row.currency}}</td><td>{{row.unitsOnCapturedOrders}}</td><td>{{money(row.recordedLineValue,row.currency)}}</td></tr></tbody></table><ng-template #noVariants><p class="empty">{{t('noVariants')}}</p></ng-template><small class="muted">{{t('recordedLineValueHelp')}}</small></div>
-        <div class="table-panel"><h3>{{t('lifetimeValue')}}</h3><table class="report-table" *ngIf="advanced.customerLifetimeValues.length; else noLifetime"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th><th scope="col">{{t('averageNet')}}</th></tr></thead><tbody><tr *ngFor="let row of advanced.customerLifetimeValues"><td>{{row.currency}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td>{{money(row.netCapturedAmount,row.currency)}}</td><td>{{money(row.averageNetCapturedValue,row.currency)}}</td></tr></tbody></table><ng-template #noLifetime><p class="empty">{{t('noLifetime')}}</p></ng-template></div>
-      </ng-container>
+      @if (!advancedAvailable) {
+        <p class="empty">{{t('advancedRequiredText')}}</p>
+      }
+      @if (advancedError) {
+        <p class="error" role="alert">{{advancedError}}</p>
+      }
+      @if (advancedAvailable && advanced) {
+        <div class="table-panel"><h3>{{t('topVariants')}}</h3>@if (advanced.topVariants.length) {
+        <table class="report-table"><thead><tr><th scope="col">{{t('rank')}}</th><th scope="col">{{t('productVariant')}}</th><th scope="col">{{t('sku')}}</th><th scope="col">{{t('currency')}}</th><th scope="col">{{t('units')}}</th><th scope="col">{{t('recordedLineValue')}}</th></tr></thead><tbody>@for (row of advanced.topVariants; track row) {
+        <tr><td>{{row.rank}}</td><td>{{row.productName||row.productId||t('historicalProduct')}} · {{row.variantName||row.variantId}}</td><td>{{row.sku||'—'}}</td><td>{{row.currency}}</td><td>{{row.unitsOnCapturedOrders}}</td><td>{{money(row.recordedLineValue,row.currency)}}</td></tr>
+      }</tbody></table>
+    } @else {
+      <p class="empty">{{t('noVariants')}}</p>
+      }<small class="muted">{{t('recordedLineValueHelp')}}</small></div>
+      <div class="table-panel"><h3>{{t('lifetimeValue')}}</h3>@if (advanced.customerLifetimeValues.length) {
+      <table class="report-table"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th><th scope="col">{{t('averageNet')}}</th></tr></thead><tbody>@for (row of advanced.customerLifetimeValues; track row) {
+      <tr><td>{{row.currency}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td>{{money(row.netCapturedAmount,row.currency)}}</td><td>{{money(row.averageNetCapturedValue,row.currency)}}</td></tr>
+    }</tbody></table>
+    } @else {
+      <p class="empty">{{t('noLifetime')}}</p>
+    }</div>
+    }
     </section>`
 })
 export class ReportsAdminComponent implements OnDestroy {

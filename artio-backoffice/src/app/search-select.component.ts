@@ -1,29 +1,52 @@
-import { CommonModule } from '@angular/common';
-import { Component, ElementRef, EventEmitter, HostListener, Input, Output, forwardRef, inject } from '@angular/core';
+
+import { Component, ElementRef, EventEmitter, HostListener, Input, Output, forwardRef, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ControlValueAccessor, FormsModule, NG_VALUE_ACCESSOR } from '@angular/forms';
 
 export type SelectOption = { value: string; label: string; detail?: string; disabled?: boolean };
 let nextSelectId = 0;
 @Component({
-  selector: 'artio-search-select', standalone: true, imports: [CommonModule, FormsModule],
-  providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SearchSelectComponent), multi: true }],
-  template: `
+    selector: 'artio-search-select', imports: [FormsModule],
+    providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SearchSelectComponent), multi: true }],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `
     <div class="search-select" [class.is-open]="open" [class.is-disabled]="disabled">
       <button type="button" class="search-select-trigger" [id]="id" [disabled]="disabled" [attr.aria-label]="label" [attr.aria-describedby]="id+'-selection'" [attr.aria-expanded]="open" [attr.aria-controls]="id+'-options'" aria-haspopup="listbox" (click)="toggle()" (keydown.arrowdown)="openMenu($event)">
-        <span class="select-values"><ng-container *ngIf="multiple; else single"><span class="select-chip" *ngFor="let option of selectedOptions; trackBy: optionValue">{{option.label}}</span><span *ngIf="!values.length" class="select-placeholder">{{placeholder}}</span></ng-container><ng-template #single><span [class.select-placeholder]="!values.length">{{selectedLabel}}</span></ng-template></span><span aria-hidden="true">⌄</span>
-      </button>
-      <span class="sr-only" [id]="id+'-selection'">{{selectionSummary}}</span>
-      <div *ngIf="open" class="search-select-popover" [style.left.px]="position.left" [style.top.px]="position.top" [style.width.px]="position.width" [style.max-height.px]="position.height">
-        <div class="select-search"><span aria-hidden="true">⌕</span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="'Search '+label" [placeholder]="'Search '+label.toLowerCase()+'…'" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
-        <p *ngIf="loading" class="select-no-results" role="status">Loading options…</p>
-        <div class="select-selection-bar" *ngIf="multiple"><span>{{values.length}} selected</span><button type="button" (click)="clear()" [disabled]="!values.length">Clear</button></div>
-        <div class="select-options" [style.max-height.px]="position.height-(multiple?130:65)" [id]="id+'-options'" role="listbox" [attr.aria-label]="label" [attr.aria-multiselectable]="multiple">
-          <button type="button" class="select-option" *ngFor="let option of filtered; let index=index; trackBy: optionValue" role="option" [disabled]="option.disabled" [attr.aria-selected]="values.includes(option.value)" [class.is-selected]="values.includes(option.value)" (click)="choose(option.value)" (keydown.arrowdown)="focusOption($event,index+1)" (keydown.arrowup)="focusOption($event,index-1)" (keydown.escape)="close()">
-            <span class="select-check" [class.multiple]="multiple" aria-hidden="true">{{values.includes(option.value)?'✓':''}}</span><span><strong>{{option.label}}</strong><small *ngIf="option.detail">{{option.detail}}</small></span>
-          </button><p *ngIf="!filtered.length" class="select-no-results">No matching options.</p>
+        <span class="select-values">@if (multiple) {
+          @for (option of selectedOptions; track optionValue($index, option)) {
+            <span class="select-chip">{{option.label}}</span>
+            }@if (!values.length) {
+            <span class="select-placeholder">{{placeholder}}</span>
+          }
+        } @else {
+          <span [class.select-placeholder]="!values.length">{{selectedLabel}}</span>
+          }</span><span aria-hidden="true">⌄</span>
+        </button>
+        <span class="sr-only" [id]="id+'-selection'">{{selectionSummary}}</span>
+        @if (open) {
+          <div class="search-select-popover" [style.left.px]="position.left" [style.top.px]="position.top" [style.width.px]="position.width" [style.max-height.px]="position.height">
+            <div class="select-search"><span aria-hidden="true">⌕</span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="'Search '+label" [placeholder]="'Search '+label.toLowerCase()+'…'" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
+            @if (loading) {
+              <p class="select-no-results" role="status">Loading options…</p>
+            }
+            @if (multiple) {
+              <div class="select-selection-bar"><span>{{values.length}} selected</span><button type="button" (click)="clear()" [disabled]="!values.length">Clear</button></div>
+            }
+            <div class="select-options" [style.max-height.px]="position.height-(multiple?130:65)" [id]="id+'-options'" role="listbox" [attr.aria-label]="label" [attr.aria-multiselectable]="multiple">
+              @for (option of filtered; track optionValue(index, option); let index = $index) {
+                <button type="button" class="select-option" role="option" [disabled]="option.disabled" [attr.aria-selected]="values.includes(option.value)" [class.is-selected]="values.includes(option.value)" (click)="choose(option.value)" (keydown.arrowdown)="focusOption($event,index+1)" (keydown.arrowup)="focusOption($event,index-1)" (keydown.escape)="close()">
+                  <span class="select-check" [class.multiple]="multiple" aria-hidden="true">{{values.includes(option.value)?'✓':''}}</span><span><strong>{{option.label}}</strong>@if (option.detail) {
+                  <small>{{option.detail}}</small>
+                }</span>
+              </button>
+              }@if (!filtered.length) {
+              <p class="select-no-results">No matching options.</p>
+            }
+          </div>
+          @if (multiple) {
+            <button type="button" class="select-done" (click)="close()">Done · {{values.length}} selected</button>
+          }
         </div>
-        <button *ngIf="multiple" type="button" class="select-done" (click)="close()">Done · {{values.length}} selected</button>
-      </div>
+      }
     </div>`
 })
 export class SearchSelectComponent implements ControlValueAccessor {

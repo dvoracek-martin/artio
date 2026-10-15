@@ -1,42 +1,96 @@
 <section class="product-wizard">
   <div class="page-intro"><div><p class="eyebrow">CATALOG / NEW PRODUCT</p><h2>A great product starts here.</h2><p>Add the details, give it a home and make it look its best.</p></div><button type="button" class="secondary" [disabled]="busy" (click)="cancel.emit()">{{productId ? 'Return to products' : 'Cancel'}}</button></div>
-  <ol class="wizard-steps" aria-label="Product creation progress"><li *ngFor="let label of steps; let index=index" [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{index===0?'Name & identity':index===1?'Categories & attributes':index===2?'Upload & arrange':'One last look'}}</small></div></li></ol>
-  <p *ngIf="loading" class="notice" role="status">Loading your catalog…</p>
-  <div *ngIf="error" class="notice error" role="alert">{{error}} <button *ngIf="!categories.length && step===0" class="link-button" (click)="loadOptions()">Reload catalog options</button></div>
-  <div class="wizard-layout" *ngIf="!loading">
-    <div class="panel wizard-main">
-      <p class="eyebrow">STEP {{step+1}} OF 4</p><h2 id="wizard-heading" tabindex="-1">{{steps[step]}}</h2>
-      <form *ngIf="step===0" #essentials="ngForm" (ngSubmit)="essentials.valid && next()" class="wizard-form">
-        <label>Product name <span>Required</span><input name="name" [(ngModel)]="draft.name" maxlength="500" placeholder="e.g. Studio desk lamp" required autofocus></label>
-        <label>Product SKU <span>Required</span><input name="sku" [ngModel]="draft.sku" (ngModelChange)="setSku($event)" pattern="[A-Z0-9-]{3,50}" maxlength="50" placeholder="STUDIO-LAMP-001" aria-describedby="sku-help" required><small id="sku-help">A unique code. 3–50 uppercase letters, numbers or hyphens.</small></label>
-        <label>Description<textarea name="description" [(ngModel)]="draft.description" rows="5" maxlength="5000" placeholder="What makes this product special?"></textarea><small>{{draft.description.length}} / 5,000 characters</small></label>
-        <div class="field-divider"><h3>Your first variant</h3><p>Every product needs a sellable variant. Add more options later.</p></div>
-        <div class="form-grid"><label>Variant name<input name="variantName" [(ngModel)]="draft.variantName" maxlength="250" required></label><label>Variant SKU<input name="variantSku" [(ngModel)]="draft.variantSku" pattern="[A-Z0-9-]{3,50}" maxlength="50" required></label></div>
-        <div class="wizard-footer"><span>Next: find its place in your catalog</span><button class="primary">Continue <span>→</span></button></div>
-      </form>
-      <form *ngIf="step===1" #organization="ngForm" (ngSubmit)="organization.valid && next()" class="wizard-form">
-        <fieldset class="category-picker"><legend>Categories <small>Choose at least one</small></legend><artio-search-select label="Product categories" name="categories" [options]="categoryOptions" [(ngModel)]="draft.categoryIds" [multiple]="true" placeholder="Choose categories"></artio-search-select><p *ngIf="!categories.length" class="muted">No active categories yet. Create your first category below.</p><button *ngIf="!categories.length" type="button" class="secondary" (click)="loadOptions()">Reload categories</button></fieldset>
-        <details class="new-category"><summary>＋ Create a category</summary><div><label>Category name<input name="newCategory" [(ngModel)]="categoryName" maxlength="120" placeholder="e.g. Lighting"></label><button type="button" class="secondary" [disabled]="!categoryName.trim() || creatingCategory" (click)="createCategory()">{{creatingCategory?'Creating…':'Create & select'}}</button></div></details>
-        <div class="setup-field"><span>Brand · Optional</span><artio-search-select label="Product brand" name="brand" [(ngModel)]="draft.brandId" [options]="brandOptions" placeholder="No brand"></artio-search-select></div>
-        <div *ngIf="attributes.length" class="field-divider"><h3>Product attributes</h3><p>Help shoppers understand the details.</p></div>
-        <label *ngFor="let attribute of attributes">{{attribute.label}} <span>{{attribute.required?'Required':'Optional'}}</span><select *ngIf="attribute.type==='BOOLEAN'" [name]="attribute.code" [(ngModel)]="draft.attributes[attribute.code]" [required]="attribute.required"><option value="">Choose a value</option><option value="true">Yes</option><option value="false">No</option></select><input *ngIf="attribute.type!=='BOOLEAN'" [type]="attribute.type==='NUMBER'?'number':'text'" step="any" [name]="attribute.code" [(ngModel)]="draft.attributes[attribute.code]" [required]="attribute.required"></label>
+  <ol class="wizard-steps" aria-label="Product creation progress">@for (label of steps; track label; let index = $index) {
+    <li [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{index===0?'Name & identity':index===1?'Categories & attributes':index===2?'Upload & arrange':'One last look'}}</small></div></li>
+  }</ol>
+  @if (loading) {
+    <p class="notice" role="status">Loading your catalog…</p>
+  }
+  @if (error) {
+    <div class="notice error" role="alert">{{error}} @if (!categories.length && step===0) {
+      <button class="link-button" (click)="loadOptions()">Reload catalog options</button>
+    }</div>
+  }
+  @if (!loading) {
+    <div class="wizard-layout">
+      <div class="panel wizard-main">
+        <p class="eyebrow">STEP {{step+1}} OF 4</p><h2 id="wizard-heading" tabindex="-1">{{steps[step]}}</h2>
+        @if (step===0) {
+          <form #essentials="ngForm" (ngSubmit)="essentials.valid && next()" class="wizard-form">
+            <label>Product name <span>Required</span><input name="name" [(ngModel)]="draft.name" maxlength="500" placeholder="e.g. Studio desk lamp" required autofocus></label>
+            <label>Product SKU <span>Required</span><input name="sku" [ngModel]="draft.sku" (ngModelChange)="setSku($event)" pattern="[A-Z0-9-]{3,50}" maxlength="50" placeholder="STUDIO-LAMP-001" aria-describedby="sku-help" required><small id="sku-help">A unique code. 3–50 uppercase letters, numbers or hyphens.</small></label>
+            <label>Description<textarea name="description" [(ngModel)]="draft.description" rows="5" maxlength="5000" placeholder="What makes this product special?"></textarea><small>{{draft.description.length}} / 5,000 characters</small></label>
+            <div class="field-divider"><h3>Your first variant</h3><p>Every product needs a sellable variant. Add more options later.</p></div>
+            <div class="form-grid"><label>Variant name<input name="variantName" [(ngModel)]="draft.variantName" maxlength="250" required></label><label>Variant SKU<input name="variantSku" [(ngModel)]="draft.variantSku" pattern="[A-Z0-9-]{3,50}" maxlength="50" required></label></div>
+            <div class="wizard-footer"><span>Next: find its place in your catalog</span><button class="primary">Continue <span>→</span></button></div>
+          </form>
+        }
+        @if (step===1) {
+          <form #organization="ngForm" (ngSubmit)="organization.valid && next()" class="wizard-form">
+            <fieldset class="category-picker"><legend>Categories <small>Choose at least one</small></legend><artio-search-select label="Product categories" name="categories" [options]="categoryOptions" [(ngModel)]="draft.categoryIds" [multiple]="true" placeholder="Choose categories"></artio-search-select>@if (!categories.length) {
+            <p class="muted">No active categories yet. Create your first category below.</p>
+            }@if (!categories.length) {
+            <button type="button" class="secondary" (click)="loadOptions()">Reload categories</button>
+          }</fieldset>
+          <details class="new-category"><summary>＋ Create a category</summary><div><label>Category name<input name="newCategory" [(ngModel)]="categoryName" maxlength="120" placeholder="e.g. Lighting"></label><button type="button" class="secondary" [disabled]="!categoryName.trim() || creatingCategory" (click)="createCategory()">{{creatingCategory?'Creating…':'Create & select'}}</button></div></details>
+          <div class="setup-field"><span>Brand · Optional</span><artio-search-select label="Product brand" name="brand" [(ngModel)]="draft.brandId" [options]="brandOptions" placeholder="No brand"></artio-search-select></div>
+          @if (attributes.length) {
+            <div class="field-divider"><h3>Product attributes</h3><p>Help shoppers understand the details.</p></div>
+          }
+          @for (attribute of attributes; track attribute) {
+            <label>{{attribute.label}} <span>{{attribute.required?'Required':'Optional'}}</span>@if (attribute.type==='BOOLEAN') {
+            <select [name]="attribute.code" [(ngModel)]="draft.attributes[attribute.code]" [required]="attribute.required"><option value="">Choose a value</option><option value="true">Yes</option><option value="false">No</option></select>
+            }@if (attribute.type!=='BOOLEAN') {
+            <input [type]="attribute.type==='NUMBER'?'number':'text'" step="any" [name]="attribute.code" [(ngModel)]="draft.attributes[attribute.code]" [required]="attribute.required">
+          }</label>
+        }
         <div class="wizard-footer"><button class="secondary" type="button" (click)="back()">← Back</button><button class="primary">Continue →</button></div>
       </form>
-      <div *ngIf="step===2" class="wizard-form">
+    }
+    @if (step===2) {
+      <div class="wizard-form">
         <p class="muted">The first image is your cover. You can reorder images and add accessible descriptions below.</p>
         <label class="upload-zone" (dragover)="$event.preventDefault()" (drop)="drop($event)"><span class="upload-symbol">↑</span><strong>Drop your product images here</strong><span>or <em>browse files</em></span><small>JPEG or PNG · up to 10 MiB each · up to 100 images</small><input type="file" accept="image/jpeg,image/png" multiple (change)="selectImages($event)" aria-label="Choose product images"></label>
-        <div class="wizard-image-grid"><article *ngFor="let image of images; let index=index"><div class="image-preview"><img [src]="image.url" [alt]="image.alt"><span class="cover-badge" *ngIf="index===0">Cover image</span></div><label>Alternative text<input [(ngModel)]="image.alt" maxlength="500" [attr.aria-label]="'Alternative text for image '+(index+1)"></label><div class="image-actions"><button class="secondary" (click)="moveImage(index,-1)" [disabled]="index===0" aria-label="Move image earlier">←</button><button class="secondary" (click)="moveImage(index,1)" [disabled]="index===images.length-1" aria-label="Move image later">→</button><button class="link-button danger" (click)="removeImage(index)">Remove</button></div></article></div>
-        <div class="wizard-footer"><button class="secondary" (click)="back()">← Back</button><button class="primary" (click)="next()">{{images.length?'Review product':'Continue without images'}} →</button></div>
-      </div>
-      <div *ngIf="step===3" class="wizard-form">
-        <div class="review-section"><div><h3>Product details</h3><button class="link-button" [disabled]="busy || !!productId" (click)="edit(0)">Edit</button></div><dl><dt>Name</dt><dd>{{draft.name}}</dd><dt>Product SKU</dt><dd>{{draft.sku}}</dd><dt>Variant</dt><dd>{{draft.variantName}} · {{draft.variantSku}}</dd><dt>Description</dt><dd class="review-description">{{draft.description || 'No description'}}</dd></dl></div>
-        <div class="review-section"><div><h3>Organization</h3><button class="link-button" [disabled]="busy || !!productId" (click)="edit(1)">Edit</button></div><dl><dt>Categories</dt><dd>{{selectedCategories}}</dd><dt>Brand</dt><dd>{{brandName}}</dd><ng-container *ngFor="let attribute of attributes"><dt>{{attribute.label}}</dt><dd>{{draft.attributes[attribute.code] || 'Not set'}}</dd></ng-container></dl></div>
-        <div class="review-section"><div><h3>{{images.length}} product images</h3><button class="link-button" [disabled]="busy || !!productId" (click)="edit(2)">Edit</button></div><div class="review-images"><div *ngFor="let image of images; let index=index"><img [src]="image.url" [alt]="image.alt"><button *ngIf="productId && !image.uploaded && !busy" class="link-button danger" (click)="removeImage(index)" [attr.aria-label]="'Remove pending image '+(index+1)">Remove pending</button><small *ngIf="productId && image.uploaded">Uploaded ✓</small></div></div><label *ngIf="productId && !busy" class="replacement-images">Add replacement images<input type="file" accept="image/jpeg,image/png" multiple (change)="selectImages($event)"></label></div>
-        <label class="publish-choice"><input type="checkbox" [(ngModel)]="publish" [disabled]="busy"><div><strong>Activate after creating</strong><small>Leave off to save a draft. A price and stock are managed separately before the product can be purchased.</small></div></label>
-        <p class="muted" *ngIf="productId">Draft saved. Retry continues with the remaining images and activation.</p><p class="notice" *ngIf="busy" role="status" aria-live="polite">{{progress}}</p>
-        <div class="wizard-footer"><button class="secondary" [disabled]="busy || !!productId" (click)="back()">← Back</button><button class="primary" [disabled]="busy" (click)="save()">{{busy?'Saving…':productId?'Retry remaining steps':publish?'Create & activate':'Create product draft'}} <span>↗</span></button></div>
-      </div>
-    </div>
-    <aside class="wizard-preview"><div class="panel"><p class="eyebrow">PRODUCT PREVIEW</p><div class="preview-art"><img *ngIf="images.length" [src]="images[0].url" [alt]="images[0].alt"><span *ngIf="!images.length">{{draft.name ? draft.name.charAt(0).toUpperCase() : '✳'}}</span></div><span class="pill inactive">Draft</span><h3>{{draft.name || 'Your next great product'}}</h3><code>{{draft.sku || 'PRODUCT-SKU'}}</code><p>{{draft.description || 'Your product story will appear here.'}}</p><div class="preview-category" *ngIf="selectedCategories">{{selectedCategories}}</div></div><div class="wizard-tip"><span>✧</span><div><strong>A little detail goes a long way.</strong><p>Clear names, thoughtful descriptions and beautiful images help shoppers choose with confidence.</p></div></div></aside>
+        <div class="wizard-image-grid">@for (image of images; track image; let index = $index) {
+          <article><div class="image-preview"><img [src]="image.url" [alt]="image.alt">@if (index===0) {
+            <span class="cover-badge">Cover image</span>
+            }</div><label>Alternative text<input [(ngModel)]="image.alt" maxlength="500" [attr.aria-label]="'Alternative text for image '+(index+1)"></label><div class="image-actions"><button class="secondary" (click)="moveImage(index,-1)" [disabled]="index===0" aria-label="Move image earlier">←</button><button class="secondary" (click)="moveImage(index,1)" [disabled]="index===images.length-1" aria-label="Move image later">→</button><button class="link-button danger" (click)="removeImage(index)">Remove</button></div></article>
+          }</div>
+          <div class="wizard-footer"><button class="secondary" (click)="back()">← Back</button><button class="primary" (click)="next()">{{images.length?'Review product':'Continue without images'}} →</button></div>
+        </div>
+      }
+      @if (step===3) {
+        <div class="wizard-form">
+          <div class="review-section"><div><h3>Product details</h3><button class="link-button" [disabled]="busy || !!productId" (click)="edit(0)">Edit</button></div><dl><dt>Name</dt><dd>{{draft.name}}</dd><dt>Product SKU</dt><dd>{{draft.sku}}</dd><dt>Variant</dt><dd>{{draft.variantName}} · {{draft.variantSku}}</dd><dt>Description</dt><dd class="review-description">{{draft.description || 'No description'}}</dd></dl></div>
+          <div class="review-section"><div><h3>Organization</h3><button class="link-button" [disabled]="busy || !!productId" (click)="edit(1)">Edit</button></div><dl><dt>Categories</dt><dd>{{selectedCategories}}</dd><dt>Brand</dt><dd>{{brandName}}</dd>@for (attribute of attributes; track attribute) {
+          <dt>{{attribute.label}}</dt><dd>{{draft.attributes[attribute.code] || 'Not set'}}</dd>
+        }</dl></div>
+        <div class="review-section"><div><h3>{{images.length}} product images</h3><button class="link-button" [disabled]="busy || !!productId" (click)="edit(2)">Edit</button></div><div class="review-images">@for (image of images; track image; let index = $index) {
+        <div><img [src]="image.url" [alt]="image.alt">@if (productId && !image.uploaded && !busy) {
+          <button class="link-button danger" (click)="removeImage(index)" [attr.aria-label]="'Remove pending image '+(index+1)">Remove pending</button>
+          }@if (productId && image.uploaded) {
+          <small>Uploaded ✓</small>
+        }</div>
+      }</div>@if (productId && !busy) {
+      <label class="replacement-images">Add replacement images<input type="file" accept="image/jpeg,image/png" multiple (change)="selectImages($event)"></label>
+    }</div>
+    <label class="publish-choice"><input type="checkbox" [(ngModel)]="publish" [disabled]="busy"><div><strong>Activate after creating</strong><small>Leave off to save a draft. A price and stock are managed separately before the product can be purchased.</small></div></label>
+    @if (productId) {
+      <p class="muted">Draft saved. Retry continues with the remaining images and activation.</p>
+      }@if (busy) {
+      <p class="notice" role="status" aria-live="polite">{{progress}}</p>
+    }
+    <div class="wizard-footer"><button class="secondary" [disabled]="busy || !!productId" (click)="back()">← Back</button><button class="primary" [disabled]="busy" (click)="save()">{{busy?'Saving…':productId?'Retry remaining steps':publish?'Create & activate':'Create product draft'}} <span>↗</span></button></div>
   </div>
+}
+</div>
+<aside class="wizard-preview"><div class="panel"><p class="eyebrow">PRODUCT PREVIEW</p><div class="preview-art">@if (images.length) {
+<img [src]="images[0].url" [alt]="images[0].alt">
+}@if (!images.length) {
+<span>{{draft.name ? draft.name.charAt(0).toUpperCase() : '✳'}}</span>
+}</div><span class="pill inactive">Draft</span><h3>{{draft.name || 'Your next great product'}}</h3><code>{{draft.sku || 'PRODUCT-SKU'}}</code><p>{{draft.description || 'Your product story will appear here.'}}</p>@if (selectedCategories) {
+<div class="preview-category">{{selectedCategories}}</div>
+}</div><div class="wizard-tip"><span>✧</span><div><strong>A little detail goes a long way.</strong><p>Clear names, thoughtful descriptions and beautiful images help shoppers choose with confidence.</p></div></div></aside>
+</div>
+}
 </section>

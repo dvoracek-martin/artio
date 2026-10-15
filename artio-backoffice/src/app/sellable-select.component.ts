@@ -1,6 +1,6 @@
-import { CommonModule } from '@angular/common';
+
 import { HttpClient } from '@angular/common/http';
-import { Component, DestroyRef, Input, forwardRef, inject } from '@angular/core';
+import { Component, DestroyRef, Input, forwardRef, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ControlValueAccessor, FormsModule, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, catchError, debounceTime, distinctUntilChanged, forkJoin, map, of, startWith, switchMap, tap } from 'rxjs';
@@ -8,9 +8,10 @@ import { SearchSelectComponent, SelectOption } from './search-select.component';
 
 type Variant = { id: string; productId: string; name: string; sku: string; active: boolean };
 @Component({
-  selector: 'artio-sellable-select', standalone: true, imports: [CommonModule, FormsModule, SearchSelectComponent],
-  providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SellableSelectComponent), multi: true }],
-  template: `<artio-search-select [ngModel]="value" (ngModelChange)="select($event)" [ngModelOptions]="{standalone:true}" [label]="label" [options]="options" [multiple]="multiple" [disabled]="disabled" [loading]="loading" placeholder="Search products or SKUs" (search)="query.next($event)"></artio-search-select><small class="picker-help" *ngIf="!error">Search by product name or product SKU to select a variant.</small><small class="picker-error" *ngIf="error" role="alert">{{error}} <button type="button" class="link-button" (click)="reload()">Retry</button></small>`
+    selector: 'artio-sellable-select', imports: [FormsModule, SearchSelectComponent],
+    providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SellableSelectComponent), multi: true }],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `<artio-search-select [ngModel]="value" (ngModelChange)="select($event)" [ngModelOptions]="{standalone:true}" [label]="label" [options]="options" [multiple]="multiple" [disabled]="disabled" [loading]="loading" placeholder="Search products or SKUs" (search)="query.next($event)"></artio-search-select>@if (!error) {<small class="picker-help">Search by product name or product SKU to select a variant.</small>}@if (error) {<small class="picker-error" role="alert">{{error}} <button type="button" class="link-button" (click)="reload()">Retry</button></small>}`
 })
 export class SellableSelectComponent implements ControlValueAccessor {
   @Input() label = 'Product variant';

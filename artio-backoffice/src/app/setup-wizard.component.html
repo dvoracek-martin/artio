@@ -2,55 +2,79 @@
   <aside class="setup-story">
     <a class="brand">artio<span> / setup</span></a>
     <div class="setup-story-copy"><p class="eyebrow">YOUR NEXT CHAPTER</p><h1>Good things<br>start here<span>.</span></h1><p>A few thoughtful steps. A store that’s yours.</p></div>
-    <ol class="setup-navigation" aria-label="Installation progress"><li *ngFor="let label of steps; let index=index" [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{descriptions[index]}}</small></div></li></ol>
+    <ol class="setup-navigation" aria-label="Installation progress">@for (label of steps; track label; let index = $index) {
+      <li [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{descriptions[index]}}</small></div></li>
+    }</ol>
     <p class="setup-story-footer">Build. Plugin. Scale. Grow.</p>
   </aside>
   <main class="setup-workspace">
-    <header class="setup-topbar"><span>ARTIO COMMERCE / FIRST-RUN SETUP</span><span *ngIf="developerMode" class="badge">Developer mode</span><span *ngIf="saved && step<5" class="setup-saved" role="status">Settings saved ✓</span></header>
-    <div class="setup-progress" role="progressbar" [attr.aria-valuenow]="progress" aria-valuemin="0" aria-valuemax="100" aria-label="Installation progress"><span [style.width.%]="progress"></span></div>
-    <section class="setup-stage" *ngIf="step<5">
+    <header class="setup-topbar"><span>ARTIO COMMERCE / FIRST-RUN SETUP</span>@if (developerMode) {
+    <span class="badge">Developer mode</span>
+    }@if (saved && step<5) {
+    <span class="setup-saved" role="status">Settings saved ✓</span>
+  }</header>
+  <div class="setup-progress" role="progressbar" [attr.aria-valuenow]="progress" aria-valuemin="0" aria-valuemax="100" aria-label="Installation progress"><span [style.width.%]="progress"></span></div>
+  @if (step<5) {
+    <section class="setup-stage">
       <p class="eyebrow">STEP {{step+1}} OF 5 · {{steps[step]}}</p>
       <h2 id="setup-step-heading" tabindex="-1">{{step===0?'Let’s build your store.':step===1?'Make yourself at home.':step===2?'Built for your world.':step===3?'You’re in charge.':'One last look.'}}</h2>
       <p class="setup-description">{{step===0?'Welcome to Artio. We’ll guide you from a fresh installation to your own commerce workspace.':step===1?'Give your store a name and a place on the web.':step===2?'Start with Switzerland, or adjust the settings to suit your business.':step===3?'Create the owner account you’ll use to run your store.': 'Review your settings. You can go back and adjust anything before launching.'}}</p>
-      <div id="setup-error" *ngIf="error" class="notice error" role="alert" tabindex="-1">{{error}}</div>
-      <form *ngIf="step===0" #welcome="ngForm" (ngSubmit)="welcome.valid && next()" class="wizard-form setup-form">
-        <div class="setup-feature-grid"><article><span>01</span><strong>Your identity</strong><p>A store name and regional defaults.</p></article><article><span>02</span><strong>Your workspace</strong><p>Secure owner access to your backoffice.</p></article></div>
-        <label>Installation setup token<input [(ngModel)]="token" (ngModelChange)="saved=false" name="token" type="password" autocomplete="off" required aria-describedby="setup-token-help"><small id="setup-token-help">{{developerMode?'Your local development token is already filled in.':'Use the one-time token generated for this installation.'}}</small></label>
-        <details class="setup-help" *ngIf="!developerMode"><summary>Where do I find the token?</summary><p>On the server, run:</p><code>docker compose exec rest-api cat /run/artio-secrets/setup-token</code><p>The token authorizes this installation. It stays in memory while this wizard is open.</p></details>
-        <div class="setup-footer"><span>About 3 minutes · {{developerMode?'Demo values prefilled':'Five guided steps'}}</span><button class="primary" [disabled]="busy">{{busy?'Verifying…':'Let’s get started'}} →</button></div>
-      </form>
-      <form *ngIf="step===1" #store="ngForm" (ngSubmit)="store.valid && next()" class="wizard-form setup-form">
-        <label>Store name <span>Required</span><input [(ngModel)]="draft.storeName" (ngModelChange)="saved=false" name="storeName" maxlength="100" required placeholder="Your store name"><small>This name appears throughout your workspace.</small></label>
-        <label>Store URL <span>Optional</span><input [(ngModel)]="draft.externalBaseUrl" (ngModelChange)="saved=false" name="externalBaseUrl" type="url" placeholder="https://shop.example.com"><small>You can add your public store URL later in System Settings.</small></label>
-        <div class="setup-context"><span>✧</span><p>Your catalog starts with a clean slate. Add products, images and categories once setup is complete.</p></div>
-        <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy">Continue →</button></div>
-      </form>
-      <form *ngIf="step===2" #region="ngForm" (ngSubmit)="region.valid && next()" class="wizard-form setup-form">
-        <div class="setup-region-preset"><span>CH</span><div><strong>Switzerland distribution</strong><small>CHF · de-CH · Europe/Zurich</small></div><span class="pill">Included</span></div>
-        <div class="form-grid"><div class="setup-field"><span>Country</span><artio-search-select name="country" label="Country" [(ngModel)]="draft.countryCode" (ngModelChange)="saved=false" [options]="countryOptions"></artio-search-select></div><div class="setup-field"><span>Currency</span><artio-search-select name="currency" label="Currency" [(ngModel)]="draft.currencyCode" (ngModelChange)="saved=false" [options]="currencyOptions"></artio-search-select></div></div>
-        <div class="form-grid"><div class="setup-field"><span>Default locale</span><artio-search-select name="locale" label="Default locale" [(ngModel)]="draft.locale" (ngModelChange)="saved=false" [options]="localeOptions"></artio-search-select></div><div class="setup-field"><span>Time zone</span><artio-search-select name="timezone" label="Time zone" [(ngModel)]="draft.timezone" (ngModelChange)="saved=false" [options]="timezoneOptions"></artio-search-select></div></div>
-        <div class="setup-field"><span>Available languages</span><artio-search-select name="languages" label="Available languages" [(ngModel)]="selectedLanguages" (ngModelChange)="saved=false" [options]="languageOptions" [multiple]="true" placeholder="Select store languages"></artio-search-select><small>Select one or more languages for your product content.</small></div>
-        <div class="setup-context"><span>⬡</span><p>Payment and shipping plugins are managed separately after setup. No provider credentials are needed here.</p></div>
-        <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy">Continue →</button></div>
-      </form>
-      <form *ngIf="step===3" #owner="ngForm" (ngSubmit)="owner.valid && next()" class="wizard-form setup-form">
-        <label>Email<input [(ngModel)]="draft.email" (ngModelChange)="saved=false" name="email" type="email" autocomplete="username" required placeholder="you@example.com"></label>
-        <div class="form-grid"><label>First name<input [(ngModel)]="draft.firstName" (ngModelChange)="saved=false" name="firstName" maxlength="100" autocomplete="given-name" required></label><label>Last name<input [(ngModel)]="draft.lastName" (ngModelChange)="saved=false" name="lastName" maxlength="100" autocomplete="family-name" required></label></div>
-        <label>Password<input [(ngModel)]="password" (ngModelChange)="saved=false" name="password" [type]="showPassword?'text':'password'" minlength="16" maxlength="72" autocomplete="new-password" required><small>16–72 characters. Use a unique password or passphrase.</small></label>
-        <label>Confirm password<input [(ngModel)]="confirmation" (ngModelChange)="saved=false" name="confirmation" [type]="showPassword?'text':'password'" minlength="16" maxlength="72" autocomplete="new-password" required></label>
-        <label class="setup-checkbox"><input type="checkbox" name="showPassword" [(ngModel)]="showPassword" (ngModelChange)="saved=false"> Show passwords</label>
-        <div class="setup-context"><span>◇</span><p>{{developerMode?'Local demo credentials are prefilled for development only. You can replace them before continuing.':'Your owner account has full administrative access. Authenticator enrollment follows the first sign-in.'}}</p></div>
-        <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy">{{busy?'Saving settings…':'Review settings'}} →</button></div>
-      </form>
-      <div *ngIf="step===4" class="wizard-form setup-form">
-        <div class="review-section"><div><h3>Your store</h3><button class="link-button" [disabled]="busy" (click)="edit(1)">Edit</button></div><dl><dt>Name</dt><dd>{{draft.storeName}}</dd><dt>Store URL</dt><dd>{{draft.externalBaseUrl || 'Add later'}}</dd></dl></div>
-        <div class="review-section"><div><h3>Region & languages</h3><button class="link-button" [disabled]="busy" (click)="edit(2)">Edit</button></div><dl><dt>Country / currency</dt><dd>{{draft.countryCode}} / {{draft.currencyCode}}</dd><dt>Locale / time zone</dt><dd>{{draft.locale}} · {{draft.timezone}}</dd><dt>Languages</dt><dd>{{languages.join(', ')}}</dd></dl></div>
-        <div class="review-section"><div><h3>Owner account</h3><button class="link-button" [disabled]="busy" (click)="edit(3)">Edit</button></div><dl><dt>Name</dt><dd>{{draft.firstName}} {{draft.lastName}}</dd><dt>Email</dt><dd>{{draft.email}}</dd><dt>Access</dt><dd>Store owner · SUPERADMIN</dd></dl></div>
-        <p class="setup-description">Your password is sent only when you launch. Payment and shipping providers can be configured from your workspace.</p>
-        <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy" (click)="launch()">{{busy?'Setting up your store…':'Launch my workspace'}} ↗</button></div>
-      </div>
+      @if (error) {
+        <div id="setup-error" class="notice error" role="alert" tabindex="-1">{{error}}</div>
+      }
+      @if (step===0) {
+        <form #welcome="ngForm" (ngSubmit)="welcome.valid && next()" class="wizard-form setup-form">
+          <div class="setup-feature-grid"><article><span>01</span><strong>Your identity</strong><p>A store name and regional defaults.</p></article><article><span>02</span><strong>Your workspace</strong><p>Secure owner access to your backoffice.</p></article></div>
+          <label>Installation setup token<input [(ngModel)]="token" (ngModelChange)="saved=false" name="token" type="password" autocomplete="off" required aria-describedby="setup-token-help"><small id="setup-token-help">{{developerMode?'Your local development token is already filled in.':'Use the one-time token generated for this installation.'}}</small></label>
+          @if (!developerMode) {
+            <details class="setup-help"><summary>Where do I find the token?</summary><p>On the server, run:</p><code>docker compose exec rest-api cat /run/artio-secrets/setup-token</code><p>The token authorizes this installation. It stays in memory while this wizard is open.</p></details>
+          }
+          <div class="setup-footer"><span>About 3 minutes · {{developerMode?'Demo values prefilled':'Five guided steps'}}</span><button class="primary" [disabled]="busy">{{busy?'Verifying…':'Let’s get started'}} →</button></div>
+        </form>
+      }
+      @if (step===1) {
+        <form #store="ngForm" (ngSubmit)="store.valid && next()" class="wizard-form setup-form">
+          <label>Store name <span>Required</span><input [(ngModel)]="draft.storeName" (ngModelChange)="saved=false" name="storeName" maxlength="100" required placeholder="Your store name"><small>This name appears throughout your workspace.</small></label>
+          <label>Store URL <span>Optional</span><input [(ngModel)]="draft.externalBaseUrl" (ngModelChange)="saved=false" name="externalBaseUrl" type="url" placeholder="https://shop.example.com"><small>You can add your public store URL later in System Settings.</small></label>
+          <div class="setup-context"><span>✧</span><p>Your catalog starts with a clean slate. Add products, images and categories once setup is complete.</p></div>
+          <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy">Continue →</button></div>
+        </form>
+      }
+      @if (step===2) {
+        <form #region="ngForm" (ngSubmit)="region.valid && next()" class="wizard-form setup-form">
+          <div class="setup-region-preset"><span>CH</span><div><strong>Switzerland distribution</strong><small>CHF · de-CH · Europe/Zurich</small></div><span class="pill">Included</span></div>
+          <div class="form-grid"><div class="setup-field"><span>Country</span><artio-search-select name="country" label="Country" [(ngModel)]="draft.countryCode" (ngModelChange)="saved=false" [options]="countryOptions"></artio-search-select></div><div class="setup-field"><span>Currency</span><artio-search-select name="currency" label="Currency" [(ngModel)]="draft.currencyCode" (ngModelChange)="saved=false" [options]="currencyOptions"></artio-search-select></div></div>
+          <div class="form-grid"><div class="setup-field"><span>Default locale</span><artio-search-select name="locale" label="Default locale" [(ngModel)]="draft.locale" (ngModelChange)="saved=false" [options]="localeOptions"></artio-search-select></div><div class="setup-field"><span>Time zone</span><artio-search-select name="timezone" label="Time zone" [(ngModel)]="draft.timezone" (ngModelChange)="saved=false" [options]="timezoneOptions"></artio-search-select></div></div>
+          <div class="setup-field"><span>Available languages</span><artio-search-select name="languages" label="Available languages" [(ngModel)]="selectedLanguages" (ngModelChange)="saved=false" [options]="languageOptions" [multiple]="true" placeholder="Select store languages"></artio-search-select><small>Select one or more languages for your product content.</small></div>
+          <div class="setup-context"><span>⬡</span><p>Payment and shipping plugins are managed separately after setup. No provider credentials are needed here.</p></div>
+          <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy">Continue →</button></div>
+        </form>
+      }
+      @if (step===3) {
+        <form #owner="ngForm" (ngSubmit)="owner.valid && next()" class="wizard-form setup-form">
+          <label>Email<input [(ngModel)]="draft.email" (ngModelChange)="saved=false" name="email" type="email" autocomplete="username" required placeholder="you@example.com"></label>
+          <div class="form-grid"><label>First name<input [(ngModel)]="draft.firstName" (ngModelChange)="saved=false" name="firstName" maxlength="100" autocomplete="given-name" required></label><label>Last name<input [(ngModel)]="draft.lastName" (ngModelChange)="saved=false" name="lastName" maxlength="100" autocomplete="family-name" required></label></div>
+          <label>Password<input [(ngModel)]="password" (ngModelChange)="saved=false" name="password" [type]="showPassword?'text':'password'" minlength="16" maxlength="72" autocomplete="new-password" required><small>16–72 characters. Use a unique password or passphrase.</small></label>
+          <label>Confirm password<input [(ngModel)]="confirmation" (ngModelChange)="saved=false" name="confirmation" [type]="showPassword?'text':'password'" minlength="16" maxlength="72" autocomplete="new-password" required></label>
+          <label class="setup-checkbox"><input type="checkbox" name="showPassword" [(ngModel)]="showPassword" (ngModelChange)="saved=false"> Show passwords</label>
+          <div class="setup-context"><span>◇</span><p>{{developerMode?'Local demo credentials are prefilled for development only. You can replace them before continuing.':'Your owner account has full administrative access. Authenticator enrollment follows the first sign-in.'}}</p></div>
+          <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy">{{busy?'Saving settings…':'Review settings'}} →</button></div>
+        </form>
+      }
+      @if (step===4) {
+        <div class="wizard-form setup-form">
+          <div class="review-section"><div><h3>Your store</h3><button class="link-button" [disabled]="busy" (click)="edit(1)">Edit</button></div><dl><dt>Name</dt><dd>{{draft.storeName}}</dd><dt>Store URL</dt><dd>{{draft.externalBaseUrl || 'Add later'}}</dd></dl></div>
+          <div class="review-section"><div><h3>Region & languages</h3><button class="link-button" [disabled]="busy" (click)="edit(2)">Edit</button></div><dl><dt>Country / currency</dt><dd>{{draft.countryCode}} / {{draft.currencyCode}}</dd><dt>Locale / time zone</dt><dd>{{draft.locale}} · {{draft.timezone}}</dd><dt>Languages</dt><dd>{{languages.join(', ')}}</dd></dl></div>
+          <div class="review-section"><div><h3>Owner account</h3><button class="link-button" [disabled]="busy" (click)="edit(3)">Edit</button></div><dl><dt>Name</dt><dd>{{draft.firstName}} {{draft.lastName}}</dd><dt>Email</dt><dd>{{draft.email}}</dd><dt>Access</dt><dd>Store owner · SUPERADMIN</dd></dl></div>
+          <p class="setup-description">Your password is sent only when you launch. Payment and shipping providers can be configured from your workspace.</p>
+          <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← Back</button><button class="primary" [disabled]="busy" (click)="launch()">{{busy?'Setting up your store…':'Launch my workspace'}} ↗</button></div>
+        </div>
+      }
     </section>
-    <section *ngIf="step===5" class="setup-stage setup-success"><span class="setup-success-mark">✓</span><p class="eyebrow">READY FOR YOUR NEXT CHAPTER</p><h2 id="setup-step-heading" tabindex="-1">Your workspace is ready.</h2><p class="setup-description">Sign in to start building your catalog and bring your store to life.</p><div class="setup-next"><span>01</span><div><strong>Add your first product</strong><p>Use the guided product wizard for categories and images.</p></div><span>02</span><div><strong>Make it ready to sell</strong><p>Set prices, receive stock and configure your providers.</p></div></div><button class="primary" (click)="finish()">Continue to sign in ↗</button></section>
-    <footer class="setup-security-note">Your setup token and password are never saved in browser storage.</footer>
-  </main>
+  }
+  @if (step===5) {
+    <section class="setup-stage setup-success"><span class="setup-success-mark">✓</span><p class="eyebrow">READY FOR YOUR NEXT CHAPTER</p><h2 id="setup-step-heading" tabindex="-1">Your workspace is ready.</h2><p class="setup-description">Sign in to start building your catalog and bring your store to life.</p><div class="setup-next"><span>01</span><div><strong>Add your first product</strong><p>Use the guided product wizard for categories and images.</p></div><span>02</span><div><strong>Make it ready to sell</strong><p>Set prices, receive stock and configure your providers.</p></div></div><button class="primary" (click)="finish()">Continue to sign in ↗</button></section>
+  }
+  <footer class="setup-security-note">Your setup token and password are never saved in browser storage.</footer>
+</main>
 </div>

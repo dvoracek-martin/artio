@@ -1,6 +1,6 @@
-import { CommonModule } from '@angular/common';
+
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, EventEmitter, OnDestroy, OnInit, Output, inject } from '@angular/core';
+import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { firstValueFrom, forkJoin } from 'rxjs';
@@ -11,8 +11,9 @@ type Attribute = { code: string; label: string; type: string; required: boolean;
 type ImageDraft = { file: File; url: string; alt: string; uploaded: boolean };
 
 @Component({
-  selector: 'artio-product-wizard', standalone: true, imports: [CommonModule, FormsModule, SearchSelectComponent],
-  templateUrl: './product-wizard.component.html'
+    selector: 'artio-product-wizard', imports: [FormsModule, SearchSelectComponent],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    templateUrl: './product-wizard.component.html'
 })
 export class ProductWizardComponent implements OnInit, OnDestroy {
   @Output() cancel = new EventEmitter<void>();

@@ -1,6 +1,6 @@
-import { CommonModule } from '@angular/common';
+
 import { HttpClient } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BackofficeLocale, BackofficeTextKey, backofficeText, currentBackofficeLocale, setBackofficeLocale } from './backoffice-locale';
 
@@ -12,30 +12,50 @@ type LicenseStatus = {
 };
 
 @Component({
-  selector: 'artio-license-admin',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
-  template: `
+    selector: 'artio-license-admin',
+    imports: [FormsModule],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `
     <section class="panel">
       <div class="panel-heading"><div><p class="eyebrow">{{t('edition')}} &amp; {{t('availableFeatures')}}</p><h2>{{t('licenseTitle')}}</h2></div>
-        <div class="license-controls"><label>{{t('language')}} <select [value]="locale" (change)="changeLocale($event)"><option value="de">Deutsch</option><option value="it">Italiano</option><option value="fr">Français</option><option value="en">English</option></select></label><button class="link-button" type="button" (click)="load()" [disabled]="loading">{{t('refreshStatusButton')}}</button></div>
-      </div>
-      <p class="muted">{{t('communityLicenseHelp')}}</p>
-      <p *ngIf="loading" class="muted" role="status">{{t('loadingLicense')}}</p>
-      <p *ngIf="error" class="error" role="alert">{{error}}</p>
-      <ng-container *ngIf="status as license">
-        <div class="metrics compact-metrics"><article><span>{{t('edition')}}</span><strong>{{license.edition}}</strong><small>{{license.state}}</small></article><article><span>{{t('verification')}}</span><strong>{{license.verificationStatus}}</strong><small>{{license.refreshConfigured?t('issuerConfigured'):t('localImportOnly')}}</small></article></div>
-        <div class="table-panel"><h3>{{t('installation')}}</h3><p><code>{{license.installationId}}</code></p><p>{{t('availableFeatures')}}: <strong>{{featureNames(license.features)}}</strong></p>
-          <p *ngIf="license.expiresAt">{{t('validUntil')}} {{formatDate(license.expiresAt)}}<span *ngIf="license.graceUntil"> · {{t('graceEnds')}} {{formatDate(license.graceUntil)}}</span></p><p *ngIf="!license.expiresAt" class="muted">{{t('noActiveEntitlement')}}</p>
-        </div>
-        <div class="table-panel"><h3>{{t('refreshStatus')}}</h3><p>{{t('refreshResult')}}: {{license.refreshStatus}}<span *ngIf="license.lastRefreshSuccessAt"> · {{t('lastSuccess')}} {{formatDate(license.lastRefreshSuccessAt)}}</span><span *ngIf="license.lastRefreshAttemptAt && !license.lastRefreshSuccessAt"> · {{t('lastAttempt')}} {{formatDate(license.lastRefreshAttemptAt)}}</span></p><button class="secondary" type="button" (click)="refresh()" [disabled]="!license.refreshConfigured || license.refreshInProgress || refreshing">{{refreshing||license.refreshInProgress?t('refreshing'):t('refreshIssuer')}}</button><small *ngIf="!license.refreshConfigured" class="muted">{{t('noIssuerConfigured')}}</small></div>
-      </ng-container>
+      <div class="license-controls"><label>{{t('language')}} <select [value]="locale" (change)="changeLocale($event)"><option value="de">Deutsch</option><option value="it">Italiano</option><option value="fr">Français</option><option value="en">English</option></select></label><button class="link-button" type="button" (click)="load()" [disabled]="loading">{{t('refreshStatusButton')}}</button></div>
+    </div>
+    <p class="muted">{{t('communityLicenseHelp')}}</p>
+    @if (loading) {
+      <p class="muted" role="status">{{t('loadingLicense')}}</p>
+    }
+    @if (error) {
+      <p class="error" role="alert">{{error}}</p>
+    }
+    @if (status; as license) {
+      <div class="metrics compact-metrics"><article><span>{{t('edition')}}</span><strong>{{license.edition}}</strong><small>{{license.state}}</small></article><article><span>{{t('verification')}}</span><strong>{{license.verificationStatus}}</strong><small>{{license.refreshConfigured?t('issuerConfigured'):t('localImportOnly')}}</small></article></div>
+      <div class="table-panel"><h3>{{t('installation')}}</h3><p><code>{{license.installationId}}</code></p><p>{{t('availableFeatures')}}: <strong>{{featureNames(license.features)}}</strong></p>
+      @if (license.expiresAt) {
+        <p>{{t('validUntil')}} {{formatDate(license.expiresAt)}}@if (license.graceUntil) {
+          <span> · {{t('graceEnds')}} {{formatDate(license.graceUntil)}}</span>
+        }</p>
+        }@if (!license.expiresAt) {
+        <p class="muted">{{t('noActiveEntitlement')}}</p>
+      }
+    </div>
+    <div class="table-panel"><h3>{{t('refreshStatus')}}</h3><p>{{t('refreshResult')}}: {{license.refreshStatus}}@if (license.lastRefreshSuccessAt) {
+    <span> · {{t('lastSuccess')}} {{formatDate(license.lastRefreshSuccessAt)}}</span>
+    }@if (license.lastRefreshAttemptAt && !license.lastRefreshSuccessAt) {
+    <span> · {{t('lastAttempt')}} {{formatDate(license.lastRefreshAttemptAt)}}</span>
+    }</p><button class="secondary" type="button" (click)="refresh()" [disabled]="!license.refreshConfigured || license.refreshInProgress || refreshing">{{refreshing||license.refreshInProgress?t('refreshing'):t('refreshIssuer')}}</button>@if (!license.refreshConfigured) {
+    <small class="muted">{{t('noIssuerConfigured')}}</small>
+    }</div>
+    }
     </section>
     <section class="panel"><p class="eyebrow">{{t('ownerAction')}}</p><h2>{{t('installEntitlement')}}</h2><p class="muted">{{t('installExplanation')}}</p>
-      <label>{{t('signedFile')}}<input #licenseFile type="file" accept="application/json,.json" (change)="readFile($event)" [disabled]="installing"></label>
-      <p class="muted" *ngIf="selectedFile">{{selectedFile.name}} · {{selectedFile.size}} bytes</p>
-      <p *ngIf="installError" class="error" role="alert">{{installError}}</p>
-      <button class="primary" type="button" (click)="install(licenseFile)" [disabled]="!document || installing">{{installing?t('verifying'):t('verifyInstall')}}</button>
+    <label>{{t('signedFile')}}<input #licenseFile type="file" accept="application/json,.json" (change)="readFile($event)" [disabled]="installing"></label>
+    @if (selectedFile) {
+      <p class="muted">{{selectedFile.name}} · {{selectedFile.size}} bytes</p>
+    }
+    @if (installError) {
+      <p class="error" role="alert">{{installError}}</p>
+    }
+    <button class="primary" type="button" (click)="install(licenseFile)" [disabled]="!document || installing">{{installing?t('verifying'):t('verifyInstall')}}</button>
     </section>`
 })
 export class LicenseAdminComponent {

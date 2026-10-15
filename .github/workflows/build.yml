@@ -18,7 +18,7 @@ jobs:
           java-version: '21'
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: |
             artio-storefront/package-lock.json
@@ -34,6 +34,10 @@ jobs:
           done
       - name: Require Docker for PostgreSQL integration tests
         run: docker info
+      - name: Audit frontend dependencies
+        run: |
+          npm --registry=https://registry.npmjs.org audit --audit-level=moderate --prefix artio-storefront
+          npm --registry=https://registry.npmjs.org audit --audit-level=moderate --prefix artio-backoffice
       - name: Build, run tests and generate coverage
         run: ./gradlew --no-daemon clean build integrationTest jacocoTestReport
       - name: Build API container

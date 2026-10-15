@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { SellableSelectComponent } from './sellable-select.component';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
@@ -11,15 +11,19 @@ type Movement = { id: string; type: string; onHandDelta: number; reservedDelta: 
 type LowStock = { warehouseId: string; sellableId: string; available: number; threshold: number };
 
 @Component({
-  selector: 'artio-inventory-admin',
-  standalone: true,
-  imports: [CommonModule, FormsModule, SellableSelectComponent, SearchSelectComponent],
-  template: `
+    selector: 'artio-inventory-admin',
+    imports: [CommonModule, FormsModule, SellableSelectComponent, SearchSelectComponent],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `
     <section>
-      <div class="panel" *ngIf="lowStock.length">
-        <div class="panel-heading"><div><p class="eyebrow">REPLENISHMENT</p><h2>Low stock</h2></div><button class="link-button" (click)="loadLowStock()">Refresh</button></div>
-        <div class="row" *ngFor="let row of lowStock"><span class="row-main"><strong>{{row.sellableId}}</strong><small>{{warehouseName(row.warehouseId)}} · {{row.available}} available · threshold {{row.threshold}}</small></span><button class="link-button" (click)="openLowStock(row)">Manage</button></div>
-      </div>
+      @if (lowStock.length) {
+        <div class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">REPLENISHMENT</p><h2>Low stock</h2></div><button class="link-button" (click)="loadLowStock()">Refresh</button></div>
+          @for (row of lowStock; track row) {
+            <div class="row"><span class="row-main"><strong>{{row.sellableId}}</strong><small>{{warehouseName(row.warehouseId)}} · {{row.available}} available · threshold {{row.threshold}}</small></span><button class="link-button" (click)="openLowStock(row)">Manage</button></div>
+          }
+        </div>
+      }
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">STOCK LOCATIONS</p><h2>Warehouses</h2></div><button class="link-button" (click)="loadWarehouses()">Refresh</button></div>
         <form class="create-form" (ngSubmit)="createWarehouse()">
@@ -28,36 +32,53 @@ type LowStock = { warehouseId: string; sellableId: string; available: number; th
           <input [(ngModel)]="warehouseDraft.location" name="warehouseLocation" maxlength="300" placeholder="Location" required>
           <button class="primary" [disabled]="busy">Add warehouse</button>
         </form>
-        <div class="row" *ngFor="let warehouse of warehouses">
-          <span class="row-main"><strong>{{warehouse.name}} · {{warehouse.code}}</strong><small>{{warehouse.location}} · {{warehouse.active?'Active':'Inactive'}}</small></span>
-          <button class="link-button" (click)="selectWarehouse(warehouse)">{{selectedWarehouse?.id===warehouse.id?'Selected':'View stock'}}</button>
-        </div>
-        <div class="setup-field" *ngIf="warehouses.length"><span>Jump to warehouse</span><artio-search-select [ngModel]="selectedWarehouse?.id || ''" (ngModelChange)="chooseWarehouse($event)" label="Warehouse" [options]="warehouseOptions" placeholder="Choose a warehouse"></artio-search-select></div><p *ngIf="!warehouses.length" class="empty">Create a warehouse to start tracking inventory.</p>
+        @for (warehouse of warehouses; track warehouse) {
+          <div class="row">
+            <span class="row-main"><strong>{{warehouse.name}} · {{warehouse.code}}</strong><small>{{warehouse.location}} · {{warehouse.active?'Active':'Inactive'}}</small></span>
+            <button class="link-button" (click)="selectWarehouse(warehouse)">{{selectedWarehouse?.id===warehouse.id?'Selected':'View stock'}}</button>
+          </div>
+        }
+        @if (warehouses.length) {
+          <div class="setup-field"><span>Jump to warehouse</span><artio-search-select [ngModel]="selectedWarehouse?.id || ''" (ngModelChange)="chooseWarehouse($event)" label="Warehouse" [options]="warehouseOptions" placeholder="Choose a warehouse"></artio-search-select></div>
+          }@if (!warehouses.length) {
+          <p class="empty">Create a warehouse to start tracking inventory.</p>
+        }
       </div>
 
-      <ng-container *ngIf="selectedWarehouse">
+      @if (selectedWarehouse) {
         <div class="panel table-panel">
           <div class="panel-heading"><div><p class="eyebrow">{{selectedWarehouse.code}}</p><h2>{{selectedWarehouse.name}} stock</h2></div><button class="link-button" (click)="loadStock()">Refresh</button></div>
           <table><thead><tr><th>SELLABLE ID</th><th>ON HAND</th><th>RESERVED</th><th>AVAILABLE</th><th>ACTION</th></tr></thead><tbody>
-            <tr *ngFor="let row of stocks"><td><code>{{row.sellableId}}</code></td><td>{{row.onHand}}</td><td>{{row.reserved}}</td><td>{{row.available}}</td><td><button class="link-button" (click)="manage(row)">Receive / adjust / history</button></td></tr>
-          </tbody></table><p *ngIf="!stocks.length" class="empty">No stock records in this warehouse yet.</p>
-          <form class="create-form" (ngSubmit)="receive()"><artio-sellable-select [(ngModel)]="draft.sellableId" name="newSellableId" label="Stock receipt product variant"></artio-sellable-select><input [(ngModel)]="draft.quantity" name="newQuantity" type="number" min="0.0001" step="0.0001" placeholder="Receipt quantity" required><input [(ngModel)]="draft.reason" name="newReceiptReason" maxlength="500" placeholder="Receipt note (optional)"><button class="primary" [disabled]="busy">Receive stock</button></form>
-        </div>
-
-        <div *ngIf="selectedStock" class="panel">
-          <div class="panel-heading"><div><p class="eyebrow">STOCK CONTROL</p><h2>{{selectedStock.sellableId}}</h2></div><button class="link-button" (click)="selectedStock=null">Close</button></div>
-          <p>Current: {{selectedStock.onHand}} on hand · {{selectedStock.reserved}} reserved · {{selectedStock.available}} available</p>
-          <div class="create-form"><input [(ngModel)]="draft.quantity" name="managedQuantity" type="number" min="0" step="0.0001" placeholder="Quantity" required><input [(ngModel)]="draft.reason" name="adjustmentReason" maxlength="500" placeholder="Required adjustment reason"><button class="link-button" (click)="receiveManaged()">Receive this quantity</button><button class="primary" (click)="adjust()">Set on-hand quantity</button></div>
-          <h3>Movement history</h3>
-          <div class="row" *ngFor="let item of movements"><span class="row-main"><strong>{{item.type}} · Δ on hand {{item.onHandDelta}} · Δ reserved {{item.reservedDelta}}</strong><small>{{item.occurredAt | date:'medium'}} · now {{item.onHandAfter}} on hand / {{item.reservedAfter}} reserved · {{item.reason||'System movement'}}{{item.actorId?' · staff '+item.actorId:''}}</small></span></div>
-          <p *ngIf="!movements.length" class="empty">No stock movements recorded.</p>
-          <h3>Low-stock alert</h3>
-          <form class="create-form" (ngSubmit)="saveLowStockPolicy()"><input [(ngModel)]="policyDraft.threshold" name="lowStockThreshold" type="number" min="0" step="0.0001" placeholder="Alert when available is at or below" required><label><input type="checkbox" [(ngModel)]="policyDraft.active" name="lowStockActive"> Enabled</label><button class="primary" [disabled]="busy">Save threshold</button></form>
-        </div>
-      </ng-container>
-      <p class="error" *ngIf="error" role="alert">{{error}}</p>
+          @for (row of stocks; track row) {
+            <tr><td><code>{{row.sellableId}}</code></td><td>{{row.onHand}}</td><td>{{row.reserved}}</td><td>{{row.available}}</td><td><button class="link-button" (click)="manage(row)">Receive / adjust / history</button></td></tr>
+          }
+        </tbody></table>@if (!stocks.length) {
+        <p class="empty">No stock records in this warehouse yet.</p>
+      }
+      <form class="create-form" (ngSubmit)="receive()"><artio-sellable-select [(ngModel)]="draft.sellableId" name="newSellableId" label="Stock receipt product variant"></artio-sellable-select><input [(ngModel)]="draft.quantity" name="newQuantity" type="number" min="0.0001" step="0.0001" placeholder="Receipt quantity" required><input [(ngModel)]="draft.reason" name="newReceiptReason" maxlength="500" placeholder="Receipt note (optional)"><button class="primary" [disabled]="busy">Receive stock</button></form>
+    </div>
+    @if (selectedStock) {
+      <div class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">STOCK CONTROL</p><h2>{{selectedStock.sellableId}}</h2></div><button class="link-button" (click)="selectedStock=null">Close</button></div>
+        <p>Current: {{selectedStock.onHand}} on hand · {{selectedStock.reserved}} reserved · {{selectedStock.available}} available</p>
+        <div class="create-form"><input [(ngModel)]="draft.quantity" name="managedQuantity" type="number" min="0" step="0.0001" placeholder="Quantity" required><input [(ngModel)]="draft.reason" name="adjustmentReason" maxlength="500" placeholder="Required adjustment reason"><button class="link-button" (click)="receiveManaged()">Receive this quantity</button><button class="primary" (click)="adjust()">Set on-hand quantity</button></div>
+        <h3>Movement history</h3>
+        @for (item of movements; track item) {
+          <div class="row"><span class="row-main"><strong>{{item.type}} · Δ on hand {{item.onHandDelta}} · Δ reserved {{item.reservedDelta}}</strong><small>{{item.occurredAt | date:'medium'}} · now {{item.onHandAfter}} on hand / {{item.reservedAfter}} reserved · {{item.reason||'System movement'}}{{item.actorId?' · staff '+item.actorId:''}}</small></span></div>
+        }
+        @if (!movements.length) {
+          <p class="empty">No stock movements recorded.</p>
+        }
+        <h3>Low-stock alert</h3>
+        <form class="create-form" (ngSubmit)="saveLowStockPolicy()"><input [(ngModel)]="policyDraft.threshold" name="lowStockThreshold" type="number" min="0" step="0.0001" placeholder="Alert when available is at or below" required><label><input type="checkbox" [(ngModel)]="policyDraft.active" name="lowStockActive"> Enabled</label><button class="primary" [disabled]="busy">Save threshold</button></form>
+      </div>
+    }
+    }
+    @if (error) {
+      <p class="error" role="alert">{{error}}</p>
+    }
     </section>
-  `
+    `
 })
 export class InventoryAdminComponent {
   private readonly http = inject(HttpClient);

@@ -1,6 +1,6 @@
-import { CommonModule } from '@angular/common';
+
 import { HttpClient } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
 
@@ -10,10 +10,10 @@ type AttributeDefinition = { id: string; code: string; label: string; type: 'TEX
 type CatalogProduct = { id: string; name: string; sku: string; brandId: string | null; categoryIds: string[]; attributes: Record<string,string> };
 
 @Component({
-  selector: 'artio-catalog-metadata-admin',
-  standalone: true,
-  imports: [CommonModule, FormsModule, SearchSelectComponent],
-  template: `
+    selector: 'artio-catalog-metadata-admin',
+    imports: [FormsModule, SearchSelectComponent],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `
     <section>
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">CATALOG STRUCTURE</p><h2>Categories</h2></div><button class="link-button" (click)="load()">Refresh</button></div>
@@ -22,38 +22,64 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
           <artio-search-select [(ngModel)]="categoryDraft.parentId" name="categoryParent" label="Parent category" [options]="parentOptions" placeholder="Top-level category"></artio-search-select>
           <button class="primary">Add category</button>
         </form>
-        <div class="row" *ngFor="let category of categories"><span class="row-main"><strong>{{category.name}}</strong><small>{{category.parentId?'Child of '+categoryName(category.parentId):'Top level'}} · {{category.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editCategory(category)">Edit</button><button class="link-button" (click)="toggleCategory(category)">{{category.active?'Deactivate':'Activate'}}</button></div>
-        <p *ngIf="!categories.length" class="empty">No categories are configured.</p>
+        @for (category of categories; track category) {
+          <div class="row"><span class="row-main"><strong>{{category.name}}</strong><small>{{category.parentId?'Child of '+categoryName(category.parentId):'Top level'}} · {{category.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editCategory(category)">Edit</button><button class="link-button" (click)="toggleCategory(category)">{{category.active?'Deactivate':'Activate'}}</button></div>
+        }
+        @if (!categories.length) {
+          <p class="empty">No categories are configured.</p>
+        }
       </div>
 
-      <div class="panel" *ngIf="products.length">
-        <div class="panel-heading"><div><p class="eyebrow">PRODUCT CLASSIFICATION</p><h2>Assign catalog data</h2></div></div>
-        <div class="setup-field"><span>Product</span><artio-search-select [(ngModel)]="selectedProductId" name="metadataProduct" (ngModelChange)="selectProduct($event)" label="Product to classify" [options]="productOptions" placeholder="Choose a product"></artio-search-select></div>
-        <form *ngIf="selectedProduct" (ngSubmit)="saveProductMetadata()">
-          <div class="setup-field"><span>Brand</span><artio-search-select [(ngModel)]="productDraft.brandId" name="productBrand" label="Product brand" [options]="brandOptions" placeholder="No brand"></artio-search-select></div>
-          <h3>Categories</h3><artio-search-select [(ngModel)]="productDraft.categoryIds" name="productCategories" label="Product categories" [options]="categoryOptions" [multiple]="true" placeholder="Choose categories"></artio-search-select>
-          <h3>Attributes</h3><div *ngFor="let attribute of productAttributeDefinitions"><label>{{attribute.label}} · {{attribute.code}}<small>{{attribute.required?'Required':'Optional'}}{{attribute.active?'':' · inactive, retained read-only'}}</small><select *ngIf="attribute.type==='BOOLEAN'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [disabled]="!attribute.active"><option value="">Unset</option><option value="true">Yes</option><option value="false">No</option></select><input *ngIf="attribute.type!=='BOOLEAN'" [type]="attribute.type==='NUMBER'?'number':'text'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [required]="attribute.required&&attribute.active" [disabled]="!attribute.active"></label></div>
+      @if (products.length) {
+        <div class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">PRODUCT CLASSIFICATION</p><h2>Assign catalog data</h2></div></div>
+          <div class="setup-field"><span>Product</span><artio-search-select [(ngModel)]="selectedProductId" name="metadataProduct" (ngModelChange)="selectProduct($event)" label="Product to classify" [options]="productOptions" placeholder="Choose a product"></artio-search-select></div>
+          @if (selectedProduct) {
+            <form (ngSubmit)="saveProductMetadata()">
+              <div class="setup-field"><span>Brand</span><artio-search-select [(ngModel)]="productDraft.brandId" name="productBrand" label="Product brand" [options]="brandOptions" placeholder="No brand"></artio-search-select></div>
+              <h3>Categories</h3><artio-search-select [(ngModel)]="productDraft.categoryIds" name="productCategories" label="Product categories" [options]="categoryOptions" [multiple]="true" placeholder="Choose categories"></artio-search-select>
+              <h3>Attributes</h3>@for (attribute of productAttributeDefinitions; track attribute) {
+              <div><label>{{attribute.label}} · {{attribute.code}}<small>{{attribute.required?'Required':'Optional'}}{{attribute.active?'':' · inactive, retained read-only'}}</small>@if (attribute.type==='BOOLEAN') {
+              <select [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [disabled]="!attribute.active"><option value="">Unset</option><option value="true">Yes</option><option value="false">No</option></select>
+              }@if (attribute.type!=='BOOLEAN') {
+              <input [type]="attribute.type==='NUMBER'?'number':'text'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [required]="attribute.required&&attribute.active" [disabled]="!attribute.active">
+            }</label></div>
+          }
           <button class="primary">Save product classification</button>
         </form>
-        <p *ngIf="selectedProduct" class="muted">Inactive categories and definitions cannot be newly assigned. Existing inactive attribute values are preserved until the definition is reactivated.</p>
-      </div>
+      }
+      @if (selectedProduct) {
+        <p class="muted">Inactive categories and definitions cannot be newly assigned. Existing inactive attribute values are preserved until the definition is reactivated.</p>
+      }
+    </div>
+    }
 
-      <div class="panel">
-        <div class="panel-heading"><div><p class="eyebrow">MANUFACTURERS</p><h2>Brands</h2></div></div>
-        <form class="create-form" (ngSubmit)="createBrand()"><input [(ngModel)]="brandDraft.name" name="brandName" maxlength="160" placeholder="Brand name" required><input [(ngModel)]="brandDraft.description" name="brandDescription" maxlength="1000" placeholder="Description"><button class="primary">Add brand</button></form>
-        <div class="row" *ngFor="let brand of brands"><span class="row-main"><strong>{{brand.name}}</strong><small>{{brand.description}} · {{brand.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editBrand(brand)">Edit</button><button class="link-button" (click)="toggleBrand(brand)">{{brand.active?'Deactivate':'Activate'}}</button></div>
-        <p *ngIf="!brands.length" class="empty">No brands are configured.</p>
-      </div>
+    <div class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">MANUFACTURERS</p><h2>Brands</h2></div></div>
+      <form class="create-form" (ngSubmit)="createBrand()"><input [(ngModel)]="brandDraft.name" name="brandName" maxlength="160" placeholder="Brand name" required><input [(ngModel)]="brandDraft.description" name="brandDescription" maxlength="1000" placeholder="Description"><button class="primary">Add brand</button></form>
+      @for (brand of brands; track brand) {
+        <div class="row"><span class="row-main"><strong>{{brand.name}}</strong><small>{{brand.description}} · {{brand.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editBrand(brand)">Edit</button><button class="link-button" (click)="toggleBrand(brand)">{{brand.active?'Deactivate':'Activate'}}</button></div>
+      }
+      @if (!brands.length) {
+        <p class="empty">No brands are configured.</p>
+      }
+    </div>
 
-      <div class="panel">
-        <div class="panel-heading"><div><p class="eyebrow">PRODUCT DATA</p><h2>Attribute definitions</h2></div></div>
-        <form class="create-form" (ngSubmit)="createAttribute()"><input [(ngModel)]="attributeDraft.code" name="attributeCode" pattern="[A-Z][A-Z0-9_]{1,31}" maxlength="32" placeholder="CODE" required><input [(ngModel)]="attributeDraft.label" name="attributeLabel" maxlength="120" placeholder="Label" required><select [(ngModel)]="attributeDraft.type" name="attributeType"><option value="TEXT">Text</option><option value="NUMBER">Number</option><option value="BOOLEAN">Boolean</option></select><label><input type="checkbox" [(ngModel)]="attributeDraft.required" name="attributeRequired"> Required</label><button class="primary">Add attribute</button></form>
-        <div class="row" *ngFor="let attribute of attributes"><span class="row-main"><strong>{{attribute.label}} · {{attribute.code}}</strong><small>{{attribute.type}} · {{attribute.required?'Required':'Optional'}} · {{attribute.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editAttribute(attribute)">Rename</button><button class="link-button" (click)="toggleAttribute(attribute)">{{attribute.active?'Deactivate':'Activate'}}</button></div>
-        <p *ngIf="!attributes.length" class="empty">No attribute definitions are configured.</p>
-      </div>
-      <p class="error" *ngIf="error" role="alert">{{error}}</p>
+    <div class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">PRODUCT DATA</p><h2>Attribute definitions</h2></div></div>
+      <form class="create-form" (ngSubmit)="createAttribute()"><input [(ngModel)]="attributeDraft.code" name="attributeCode" pattern="[A-Z][A-Z0-9_]{1,31}" maxlength="32" placeholder="CODE" required><input [(ngModel)]="attributeDraft.label" name="attributeLabel" maxlength="120" placeholder="Label" required><select [(ngModel)]="attributeDraft.type" name="attributeType"><option value="TEXT">Text</option><option value="NUMBER">Number</option><option value="BOOLEAN">Boolean</option></select><label><input type="checkbox" [(ngModel)]="attributeDraft.required" name="attributeRequired"> Required</label><button class="primary">Add attribute</button></form>
+      @for (attribute of attributes; track attribute) {
+        <div class="row"><span class="row-main"><strong>{{attribute.label}} · {{attribute.code}}</strong><small>{{attribute.type}} · {{attribute.required?'Required':'Optional'}} · {{attribute.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editAttribute(attribute)">Rename</button><button class="link-button" (click)="toggleAttribute(attribute)">{{attribute.active?'Deactivate':'Activate'}}</button></div>
+      }
+      @if (!attributes.length) {
+        <p class="empty">No attribute definitions are configured.</p>
+      }
+    </div>
+    @if (error) {
+      <p class="error" role="alert">{{error}}</p>
+    }
     </section>
-  `
+    `
 })
 export class CatalogMetadataAdminComponent {
   private readonly http = inject(HttpClient);

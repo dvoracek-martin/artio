@@ -8,28 +8,28 @@
     "test": "ng test --watch=false"
   },
   "dependencies": {
-    "@angular/animations": "^17.3.12",
-    "@angular/common": "^17.3.12",
-    "@angular/compiler": "^17.3.12",
-    "@angular/core": "^17.3.12",
-    "@angular/forms": "^17.3.12",
-    "@angular/material": "^17.3.10",
-    "@angular/platform-browser": "^17.3.12",
-    "@angular/router": "^17.3.12",
+    "@angular/animations": "^22.2.3",
+    "@angular/common": "^22.2.3",
+    "@angular/compiler": "^22.2.3",
+    "@angular/core": "^22.2.3",
+    "@angular/forms": "^22.2.3",
+    "@angular/material": "^22.2.3",
+    "@angular/platform-browser": "^22.2.3",
+    "@angular/router": "^22.2.3",
     "qrcode": "^1.5.4",
     "rxjs": "~7.8.1",
     "tslib": "^2.6.2",
-    "zone.js": "~0.14.10"
+    "zone.js": "~0.15.1"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": "^17.3.12",
-    "@angular/cli": "^17.3.12",
-    "@angular/compiler-cli": "^17.3.12",
-    "@types/node": "20.14.10",
+    "@angular/build": "^22.2.2",
+    "@angular/cli": "^22.2.2",
+    "@angular/compiler-cli": "^22.2.3",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22.20.5",
     "@types/qrcode": "^1.5.6",
-    "autoprefixer": "^10.4.20",
     "postcss": "^8.4.41",
-    "tailwindcss": "^3.4.10",
-    "typescript": "~5.4.5"
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.3"
   }
 }

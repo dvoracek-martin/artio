@@ -1,15 +1,15 @@
-import { CommonModule } from '@angular/common';
+
 import { HttpClient } from '@angular/common/http';
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 type ProductMedia = { id: string; altText: string; position: number; contentUrl: string; width: number; height: number };
 
 @Component({
-  selector: 'artio-product-media-admin',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
-  template: `
+    selector: 'artio-product-media-admin',
+    imports: [FormsModule],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `
     <section class="panel" aria-labelledby="product-media-heading">
       <div class="panel-heading">
         <div><p class="eyebrow">CATALOG MEDIA</p><h2 id="product-media-heading">{{productName}} images</h2></div>
@@ -20,20 +20,28 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
         <label>Alternative text<input [(ngModel)]="altText" name="altText" maxlength="500" placeholder="Describe the image"></label>
         <button class="primary" [disabled]="!file || busy">{{busy?'Uploading…':'Upload image'}}</button>
       </form>
-      <p class="error" *ngIf="error" role="alert">{{error}}</p>
-      <div class="product-media-grid" *ngIf="items.length">
-        <article class="product-media-card" *ngFor="let item of items; let index=index">
-          <img [src]="item.contentUrl" [alt]="item.altText" width="240" height="180" loading="lazy">
-          <p>{{item.altText || 'No alternative text'}} · {{item.width}}×{{item.height}}</p>
-          <div class="row">
-            <label class="link-button">Replace<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden (change)="replace(item,$event)"></label>
-            <button type="button" class="link-button" [disabled]="index===0" [attr.aria-label]="'Move image '+(index+1)+' earlier'" (click)="move(index,-1)">← Earlier</button>
-            <button type="button" class="link-button" [disabled]="index===items.length-1" [attr.aria-label]="'Move image '+(index+1)+' later'" (click)="move(index,1)">Later →</button>
-            <button type="button" class="link-button danger" [attr.aria-label]="'Delete image '+(index+1)" (click)="remove(item)">Delete</button>
-          </div>
-        </article>
-      </div>
-      <p class="empty" *ngIf="!items.length">No product images yet.</p>
+      @if (error) {
+        <p class="error" role="alert">{{error}}</p>
+      }
+      @if (items.length) {
+        <div class="product-media-grid">
+          @for (item of items; track item; let index = $index) {
+            <article class="product-media-card">
+              <img [src]="item.contentUrl" [alt]="item.altText" width="240" height="180" loading="lazy">
+              <p>{{item.altText || 'No alternative text'}} · {{item.width}}×{{item.height}}</p>
+              <div class="row">
+                <label class="link-button">Replace<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden (change)="replace(item,$event)"></label>
+                <button type="button" class="link-button" [disabled]="index===0" [attr.aria-label]="'Move image '+(index+1)+' earlier'" (click)="move(index,-1)">← Earlier</button>
+                <button type="button" class="link-button" [disabled]="index===items.length-1" [attr.aria-label]="'Move image '+(index+1)+' later'" (click)="move(index,1)">Later →</button>
+                <button type="button" class="link-button danger" [attr.aria-label]="'Delete image '+(index+1)" (click)="remove(item)">Delete</button>
+              </div>
+            </article>
+          }
+        </div>
+      }
+      @if (!items.length) {
+        <p class="empty">No product images yet.</p>
+      }
     </section>`
 })
 export class ProductMediaAdminComponent implements OnChanges {

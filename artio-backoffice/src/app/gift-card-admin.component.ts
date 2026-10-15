@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CURRENCY_OPTIONS } from './commerce-options';
 import { SearchSelectComponent } from './search-select.component';
 import { FormsModule } from '@angular/forms';
@@ -9,10 +9,10 @@ type GiftCard = { id: string; initialBalance: number; balance: number; currency:
 type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId: string | null; amount: number; kind: string; createdAt: string };
 
 @Component({
-  selector: 'artio-gift-card-admin',
-  standalone: true,
-  imports: [CommonModule, FormsModule, SearchSelectComponent],
-  template: `
+    selector: 'artio-gift-card-admin',
+    imports: [CommonModule, FormsModule, SearchSelectComponent],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: `
     <section>
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">STORED VALUE</p><h2>Issue a gift card</h2></div></div>
@@ -22,30 +22,44 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
           <label>Expiry date (optional)<input type="date" [(ngModel)]="draft.expiresAt" name="expiresAt"></label>
           <button class="primary" [disabled]="busy">{{busy?'Issuing…':'Issue gift card'}}</button>
         </form>
-        <div *ngIf="issuedCode" class="notice" role="status"><strong>Copy this code now. It cannot be retrieved later.</strong><p><code>{{issuedCode}}</code></p><button class="link-button" (click)="copyCode()">Copy code</button><button class="link-button" (click)="issuedCode=null">Dismiss</button></div>
+        @if (issuedCode) {
+          <div class="notice" role="status"><strong>Copy this code now. It cannot be retrieved later.</strong><p><code>{{issuedCode}}</code></p><button class="link-button" (click)="copyCode()">Copy code</button><button class="link-button" (click)="issuedCode=null">Dismiss</button></div>
+        }
       </div>
 
       <div class="panel table-panel">
         <div class="panel-heading"><div><p class="eyebrow">CARD REGISTER</p><h2>Gift cards</h2></div><button class="link-button" (click)="load()">Refresh</button></div>
         <table><thead><tr><th>ISSUED</th><th>INITIAL</th><th>BALANCE</th><th>EXPIRY</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
-          <tbody><tr *ngFor="let card of cards">
+        <tbody>@for (card of cards; track card) {
+          <tr>
             <td><code>{{card.id}}</code></td><td>{{card.initialBalance}} {{card.currency}}</td><td>{{card.balance}} {{card.currency}}</td>
             <td>{{card.expiresAt ? (card.expiresAt | date:'mediumDate') : 'Never'}}</td><td>{{card.active?'Active':'Disabled'}}</td>
             <td><button class="link-button" (click)="toggle(card)">{{card.active?'Disable':'Enable'}}</button><button class="link-button" (click)="viewTransactions(card)">Ledger</button></td>
-          </tr></tbody>
-        </table>
-        <p *ngIf="!cards.length" class="empty">No gift cards have been issued.</p>
-      </div>
+          </tr>
+        }</tbody>
+      </table>
+      @if (!cards.length) {
+        <p class="empty">No gift cards have been issued.</p>
+      }
+    </div>
 
-      <div *ngIf="selectedCard" class="panel table-panel">
+    @if (selectedCard) {
+      <div class="panel table-panel">
         <div class="panel-heading"><div><p class="eyebrow">IMMUTABLE LEDGER</p><h2>Transactions · {{selectedCard.id}}</h2></div><button class="link-button" (click)="selectedCard=null">Close</button></div>
         <table><thead><tr><th>DATE</th><th>KIND</th><th>AMOUNT</th><th>ORDER / REFUND</th></tr></thead><tbody>
-          <tr *ngFor="let entry of transactions"><td>{{entry.createdAt | date:'medium'}}</td><td>{{entry.kind}}</td><td>{{entry.amount}} {{selectedCard.currency}}</td><td>{{entry.orderId||entry.paymentRefundId||'—'}}</td></tr>
-        </tbody></table><p *ngIf="!transactions.length" class="empty">No balance movements yet.</p>
-      </div>
-      <p class="error" *ngIf="error" role="alert">{{error}}</p>
+        @for (entry of transactions; track entry) {
+          <tr><td>{{entry.createdAt | date:'medium'}}</td><td>{{entry.kind}}</td><td>{{entry.amount}} {{selectedCard.currency}}</td><td>{{entry.orderId||entry.paymentRefundId||'—'}}</td></tr>
+        }
+      </tbody></table>@if (!transactions.length) {
+      <p class="empty">No balance movements yet.</p>
+    }
+    </div>
+    }
+    @if (error) {
+      <p class="error" role="alert">{{error}}</p>
+    }
     </section>
-  `
+    `
 })
 export class GiftCardAdminComponent {
   currencyOptions=CURRENCY_OPTIONS;

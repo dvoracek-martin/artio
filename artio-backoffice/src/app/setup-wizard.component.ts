@@ -1,6 +1,6 @@
-import { CommonModule } from '@angular/common';
+
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output, inject, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { COUNTRY_OPTIONS, CURRENCY_OPTIONS, LANGUAGE_OPTIONS, LOCALE_OPTIONS, TIMEZONE_OPTIONS } from './commerce-options';
 import { SearchSelectComponent } from './search-select.component';
@@ -8,8 +8,9 @@ import { firstValueFrom } from 'rxjs';
 
 type SetupDraft = { storeName: string; countryCode: string; currencyCode: string; locale: string; timezone: string; availableLanguages: string; externalBaseUrl: string; email: string; firstName: string; lastName: string };
 @Component({
-  selector: 'artio-setup-wizard', standalone: true, imports: [CommonModule, FormsModule, SearchSelectComponent],
-  templateUrl: './setup-wizard.component.html'
+    selector: 'artio-setup-wizard', imports: [FormsModule, SearchSelectComponent],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    templateUrl: './setup-wizard.component.html'
 })
 export class SetupWizardComponent implements OnInit {
   @Input() developerMode = false;
