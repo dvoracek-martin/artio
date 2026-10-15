@@ -37,7 +37,11 @@ const COPY = {
     returnRestockTitle: 'Receive and restock', returnReceiveTitle: 'Receive without restocking',
     returnCustomerReason: 'Reason', returnDialogWarehouse: 'Warehouse',
     returnDialogNote: 'Staff note', returnDialogBusy: 'Saving…',
-    returnDialogConfirm: 'Confirm', returnDialogWarehouseRequired: 'Select a warehouse.', returnDialogFailure: 'Update failed.'
+    returnDialogConfirm: 'Confirm', returnDialogWarehouseRequired: 'Select a warehouse.', returnDialogFailure: 'Update failed.',
+    shippingDialogEyebrow: 'ORDER FULFILLMENT', shippingDialogTitle: 'Ship order',
+    shippingLabelDescription: 'Create a carrier label and ship this order.', shippingManualDescription: 'Enter the tracking number to mark this order as shipped.',
+    shippingTrackingNumber: 'Tracking number', shippingDialogBusy: 'Shipping order…', shippingDialogConfirm: 'Confirm shipment',
+    shippingTrackingRequired: 'Enter a tracking number.', shippingDialogFailure: 'Could not ship this order.'
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -63,7 +67,11 @@ const COPY = {
     returnRestockTitle: 'Annehmen und einlagern', returnReceiveTitle: 'Ohne Einlagerung annehmen',
     returnCustomerReason: 'Grund', returnDialogWarehouse: 'Lager',
     returnDialogNote: 'Interne Notiz', returnDialogBusy: 'Wird gespeichert…',
-    returnDialogConfirm: 'Bestätigen', returnDialogWarehouseRequired: 'Lager auswählen.', returnDialogFailure: 'Aktualisierung fehlgeschlagen.'
+    returnDialogConfirm: 'Bestätigen', returnDialogWarehouseRequired: 'Lager auswählen.', returnDialogFailure: 'Aktualisierung fehlgeschlagen.',
+    shippingDialogEyebrow: 'BESTELLABWICKLUNG', shippingDialogTitle: 'Bestellung versenden',
+    shippingLabelDescription: 'Ein Versandetikett erstellen und die Bestellung versenden.', shippingManualDescription: 'Trackingnummer eingeben, um die Bestellung als versendet zu markieren.',
+    shippingTrackingNumber: 'Trackingnummer', shippingDialogBusy: 'Bestellung wird versendet…', shippingDialogConfirm: 'Versand bestätigen',
+    shippingTrackingRequired: 'Trackingnummer eingeben.', shippingDialogFailure: 'Bestellung konnte nicht versendet werden.'
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -89,7 +97,11 @@ const COPY = {
     returnRestockTitle: 'Ricevi e reintegra', returnReceiveTitle: 'Ricevi senza reintegrare',
     returnCustomerReason: 'Motivo', returnDialogWarehouse: 'Magazzino',
     returnDialogNote: 'Nota interna', returnDialogBusy: 'Salvataggio…',
-    returnDialogConfirm: 'Conferma', returnDialogWarehouseRequired: 'Scegli un magazzino.', returnDialogFailure: 'Aggiornamento non riuscito.'
+    returnDialogConfirm: 'Conferma', returnDialogWarehouseRequired: 'Scegli un magazzino.', returnDialogFailure: 'Aggiornamento non riuscito.',
+    shippingDialogEyebrow: 'EVASIONE ORDINI', shippingDialogTitle: 'Spedisci l’ordine',
+    shippingLabelDescription: 'Crea un’etichetta del corriere e spedisci l’ordine.', shippingManualDescription: 'Inserisci il numero di tracciamento per contrassegnare l’ordine come spedito.',
+    shippingTrackingNumber: 'Numero di tracciamento', shippingDialogBusy: 'Spedizione dell’ordine…', shippingDialogConfirm: 'Conferma spedizione',
+    shippingTrackingRequired: 'Inserisci un numero di tracciamento.', shippingDialogFailure: 'Impossibile spedire l’ordine.'
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -115,7 +127,11 @@ const COPY = {
     returnRestockTitle: 'Réceptionner et remettre en stock', returnReceiveTitle: 'Réceptionner sans remise en stock',
     returnCustomerReason: 'Motif', returnDialogWarehouse: 'Entrepôt',
     returnDialogNote: 'Note interne', returnDialogBusy: 'Enregistrement…',
-    returnDialogConfirm: 'Confirmer', returnDialogWarehouseRequired: 'Choisissez un entrepôt.', returnDialogFailure: 'Échec de la mise à jour.'
+    returnDialogConfirm: 'Confirmer', returnDialogWarehouseRequired: 'Choisissez un entrepôt.', returnDialogFailure: 'Échec de la mise à jour.',
+    shippingDialogEyebrow: 'TRAITEMENT DE COMMANDE', shippingDialogTitle: 'Expédier la commande',
+    shippingLabelDescription: 'Créer une étiquette transporteur et expédier cette commande.', shippingManualDescription: 'Saisissez le numéro de suivi pour marquer cette commande comme expédiée.',
+    shippingTrackingNumber: 'Numéro de suivi', shippingDialogBusy: 'Expédition de la commande…', shippingDialogConfirm: 'Confirmer l’expédition',
+    shippingTrackingRequired: 'Saisissez un numéro de suivi.', shippingDialogFailure: 'Impossible d’expédier cette commande.'
   }
 } as const;
 

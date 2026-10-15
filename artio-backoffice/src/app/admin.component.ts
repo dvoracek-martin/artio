@@ -25,7 +25,9 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
   <div class="login-page"><div class="login-card"><a class="brand">artio<span> / studio</span></a><p class="muted">Checking store setup…</p></div></div>
 }
 @if (!token && setupChecked && setupRequired) {
+  @defer (when setupChecked && setupRequired) {
   <artio-setup-wizard [developerMode]="developerMode" (completed)="setupFinished($event)"></artio-setup-wizard>
+  } @placeholder { <div class="login-page"><div class="login-card"><p class="muted">Preparing store setup…</p></div></div> }
 }
 @if (!token && setupChecked && !setupRequired) {
   <div class="login-page"><div class="login-card"><a class="brand">artio<span> / studio</span></a><p class="eyebrow">Commerce, thoughtfully run</p><h1>Welcome back.</h1><p class="muted">Sign in to manage your Artio store.</p><form (ngSubmit)="login()"><label>Email<input [(ngModel)]="email" name="email" type="email" autocomplete="username" required></label><label>Password<input [(ngModel)]="password" name="password" type="password" autocomplete="current-password" required></label>@if (!developerMode) {
@@ -57,7 +59,9 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
   }<div class="sidebar-bottom"><span class="avatar">{{email.charAt(0).toUpperCase()}}</span><div><strong>{{email}}</strong><small>Administrator</small></div><button class="logout" (click)="logout()">↪</button></div></aside>
   <main class="content" id="main-content" tabindex="-1"><header><div><p class="eyebrow">{{today | date:'EEEE, MMMM d'}}</p><h1>{{ title }}</h1></div><div class="header-actions"><a href="http://localhost:4200" target="_blank">View storefront ↗</a><span class="workspace-badge">Artio workspace</span></div></header>
   @if (tab==='reports') {
+    @defer (when tab==='reports') {
     <artio-reports-admin></artio-reports-admin>
+    } @placeholder { <p class="muted" role="status">Loading reports…</p> }
     }@if (tab==='overview') {
     <section><div class="welcome"><div><p class="eyebrow">YOUR STORE AT A GLANCE</p><h2>Your store. In focus.</h2><p>A calm view of what’s happening across your store today.</p></div><div class="welcome-mark">✳</div></div><div class="metrics"><article><span>Catalog products</span><strong>{{overviewProductTotal}}</strong><small>Across your catalogue</small></article><article><span>Bundles</span><strong>{{bundles.length}}</strong><small>In your collection</small></article><article><span>Orders</span><strong>{{overviewOrderTotal}}</strong><small>Across your store</small></article><article><span>Price entries</span><strong>{{prices.length}}</strong><small>Markets & channels</small></article></div><div class="panel"><div class="panel-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>Products in your catalogue</h2></div><button class="link-button" (click)="navigateTo('products')">View all →</button></div>@for (product of overviewProducts; track product) {
     <div class="row"><span class="dot-icon">{{product.name.charAt(0)}}</span><div class="row-main"><strong>{{product.name}}</strong><small>{{product.sku}}</small></div><span class="pill" [class.inactive]="!product.active">{{product.active?'Active':'Inactive'}}</span></div>
@@ -66,7 +70,9 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
   }</div></section>
 }
 @if (tab==='productNew') {
+  @defer (when tab==='productNew') {
   <artio-product-wizard (cancel)="navigateTo('products')" (created)="productCreated($event)"></artio-product-wizard>
+  } @placeholder { <p class="muted" role="status">Loading product editor…</p> }
 }
 @if (tab==='products') {
   <section class="catalog-page"><div class="page-intro"><div><p class="eyebrow">YOUR CATALOG</p><h2>Made to stand out.</h2><p>Build, organize and refine your product collection.</p></div><button class="primary" (click)="navigateTo('productNew')">＋ New product</button></div><div class="toolbar catalog-toolbar"><input #productCsvFile type="file" accept=".csv,text/csv" hidden (change)="importProducts($event)"><button class="link-button" (click)="productCsvFile.click()">Import CSV</button><button class="link-button" (click)="exportProducts()">Export CSV</button><label class="search">⌕ <input aria-label="Search products" [(ngModel)]="query" (keyup.enter)="resetCatalogPage()" placeholder="Search products"></label><button class="link-button" (click)="resetCatalogPage()">Search</button><select aria-label="Product status" [(ngModel)]="catalogState" (ngModelChange)="resetCatalogPage()"><option value="ALL">All products</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive drafts</option><option value="ARCHIVED">Archived</option></select><artio-search-select [(ngModel)]="catalogBrandId" (ngModelChange)="resetCatalogPage()" [options]="catalogBrandOptions" label="Filter by brand" placeholder="All brands"></artio-search-select><artio-search-select [(ngModel)]="catalogCategoryId" (ngModelChange)="resetCatalogPage()" [options]="catalogCategoryOptions" label="Filter by category" placeholder="All categories"></artio-search-select><select aria-label="Sort products by" [(ngModel)]="catalogSort" (ngModelChange)="resetCatalogPage()"><option value="updatedAt">Recently updated</option><option value="createdAt">Recently created</option><option value="name">Name</option><option value="sku">SKU</option></select><select aria-label="Sort direction" [(ngModel)]="catalogDirection" (ngModelChange)="resetCatalogPage()"><option value="desc">Descending</option><option value="asc">Ascending</option></select><button class="link-button" (click)="rebuildSearchIndex()">Rebuild search index</button></div>@if (searchIndexStatus) {
@@ -295,13 +301,13 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
 }</section>
 }
 @if (mediaProduct) {
-  <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null"></artio-product-media-admin>
+  @defer (when mediaProduct !== null) { <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null"></artio-product-media-admin> } @placeholder { <p class="muted" role="status">Loading product media…</p> }
   }@if (tab==='catalogData') {
-  <artio-catalog-metadata-admin></artio-catalog-metadata-admin>
+  @defer (when tab==='catalogData') { <artio-catalog-metadata-admin></artio-catalog-metadata-admin> } @placeholder { <p class="muted" role="status">Loading catalog data…</p> }
   }@if (tab==='inventory') {
-  <artio-inventory-admin></artio-inventory-admin>
+  @defer (when tab==='inventory') { <artio-inventory-admin></artio-inventory-admin> } @placeholder { <p class="muted" role="status">Loading inventory…</p> }
   }@if (tab==='giftCards') {
-  <artio-gift-card-admin></artio-gift-card-admin>
+  @defer (when tab==='giftCards') { <artio-gift-card-admin></artio-gift-card-admin> } @placeholder { <p class="muted" role="status">Loading gift cards…</p> }
   }@if (tab==='operations') {
   <section><div class="panel"><div class="panel-heading"><div><p class="eyebrow">DELIVERY HEALTH</p><h2>Outbox queues</h2></div><button class="link-button" (click)="loadOutbox()">Refresh</button></div>@if (outboxDiagnostics) {
   <div class="metrics"><article><span>Pending events</span><strong>{{outboxDiagnostics.eventPending}}</strong><small>{{outboxDiagnostics.eventStaleClaims}} stale claims</small></article><article><span>Dead events</span><strong>{{outboxDiagnostics.eventDead}}</strong><small>Review and replay below</small></article><article><span>Pending email</span><strong>{{outboxDiagnostics.emailPending}}</strong><small>{{outboxDiagnostics.emailStaleClaims}} stale claims</small></article><article><span>Dead email</span><strong>{{outboxDiagnostics.emailDead}}</strong><small>Requires operator review</small></article><article><span>Webhook receipts</span><strong>{{outboxDiagnostics.webhookUnprocessed}}</strong><small>{{outboxDiagnostics.webhookOlderThanRetention}} past retention</small></article></div>
@@ -393,17 +399,37 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
     </div>
   </form>
 </dialog>
+}@if (shippingDialogOrder) {
+<dialog #shippingDialog class="refund-dialog" aria-labelledby="shipping-dialog-title" aria-describedby="shipping-dialog-description" (cancel)="cancelShippingDialog($event)" (close)="shippingDialogClosed()">
+  <form class="refund-dialog-content" (ngSubmit)="submitShipping()">
+    <p class="eyebrow">{{t('shippingDialogEyebrow')}}</p>
+    <h2 id="shipping-dialog-title">{{t('shippingDialogTitle')}}</h2>
+    <p id="shipping-dialog-description" class="muted">{{shippingDialogOrder.shippingMethodId?t('shippingLabelDescription'):t('shippingManualDescription')}}</p>
+    <p class="refund-payment-summary"><strong>{{shippingDialogOrder.id}}</strong><span>{{shippingDialogOrder.customerEmail}}</span></p>
+    @if (!shippingDialogOrder.shippingMethodId) {
+      <label for="shipping-tracking-number">{{t('shippingTrackingNumber')}}</label>
+      <input id="shipping-tracking-number" name="shippingTrackingNumber" [(ngModel)]="shippingDialogTrackingNumber" maxlength="200" required [disabled]="shippingDialogBusy" autofocus>
+    }
+    @if (shippingDialogError) { <p class="error" role="alert">{{shippingDialogError}}</p> }
+    @if (shippingDialogBusy) { <p class="muted" role="status">{{t('shippingDialogBusy')}}</p> }
+    <div class="refund-dialog-actions">
+      <button type="button" class="secondary" [disabled]="shippingDialogBusy" (click)="closeShippingDialog()">{{t('refundCancel')}}</button>
+      <button type="submit" class="primary" [disabled]="shippingDialogBusy || (!shippingDialogOrder.shippingMethodId && !shippingDialogTrackingNumber.trim())">{{t('shippingDialogConfirm')}}</button>
+    </div>
+  </form>
+</dialog>
 }</main></div>
 }`
 })
 export class AdminComponent {
  @ViewChild('refundDialog') private refundDialogRef?:ElementRef<HTMLDialogElement>;
  @ViewChild('returnDialog') private returnDialogRef?:ElementRef<HTMLDialogElement>;
+ @ViewChild('shippingDialog') private shippingDialogRef?:ElementRef<HTMLDialogElement>;
  distributionPlugins:any[]=[];extensionCatalog:any[]=[];
  systemSettings:any={storeName:"Artio Store",countryCode:"CH",currencyCode:"CHF",locale:"de-CH",timezone:"Europe/Zurich",externalBaseUrl:"",distributionId:"switzerland-v1"};systemLanguages="de,fr,it,en";systemSelectedLanguages=["de","fr","it","en"];storeLanguageOptions=LANGUAGE_OPTIONS;countryOptions=COUNTRY_OPTIONS;currencyOptions=CURRENCY_OPTIONS;localeOptions=LOCALE_OPTIONS;timezoneOptions=TIMEZONE_OPTIONS;systemSettingsAudit:any[]=[];outboxDiagnostics:any=null;outboxDeadEvents:any[]=[];kafkaDeadLetters:any={dead:0,replayPending:0,replayed:0};kafkaDeadLetterItems:any[]=[];kafkaConsumerLag:any=null;setupChecked=false;setupRequired=false;developerMode=false;
  bundleTranslationBundle:any=null;bundleTranslationLocale='de';bundleTranslationDraft:any={name:'',optionGroupNames:{}};bundleGroups:any[]=[{code:'choices',name:'Choose your items',minimumSelections:1,maximumSelections:1,sellables:[]}];
  productImportReport:any=null;mediaProduct:Product|null=null;private ordersRequestVersion=0;private router=inject(Router);today=new Date();success='';navOpen=false;overviewProducts:Product[]=[];overviewProductTotal=0;overviewOrderTotal=0;private http=inject(HttpClient); token=localStorage.getItem('artio-admin-token'); email=localStorage.getItem('artio-admin-email')??'';password='';error='';extensionHealth='';searchIndexStatus='';tab='overview';query='';products:Product[]=[];ordersLoading=false;orderDetailLoading=false;ordersError='';catalogPage=0;catalogSize=25;catalogTotal=0;catalogState='ALL';catalogSort='updatedAt';catalogDirection='desc';catalogBrandId='';catalogCategoryId='';catalogBrands:any[]=[];catalogCategories:any[]=[];bundles:any[]=[];extensions:any[]=[];extensionAudit:any[]=[];extensionAuditFor:string|null=null;extensionInvocation={extensionPoint:'',operation:'health',payloadJson:'{}'};extensionInvocationResult:any=null;selectedExtension:any=null;extensionConfig:Record<string,any>={};extensionManifestJson='';prices:any[]=[];taxRules:any[]=[];sellableTaxCategories:any[]=[];taxAssignment={sellableId:'',category:'STANDARD'};orders:any[]=[];orderPage=0;orderSize=25;orderTotal=0;orderPages=0;ordersQuery='';ordersStatus='';orderStatuses=['PENDING','CONFIRMED','PAID','PARTIALLY_SHIPPED','SHIPPED','DELIVERED','CANCELLED','RETURNED'];selectedOrder:any=null;selectedReturns:any[]=[];orderWarehouses:any[]=[];selectedTimeline:any[]=[];orderNote='';selectedLoyalty:any=null;enterpriseFeatures:string[]=[];users:any[]=[];accessUser:any=null;accessRole='CUSTOMER';accessPermissions:string[]=[];permissionOptions=['PRODUCT_CREATE','PRODUCT_EDIT','PRODUCT_DELETE','CATEGORY_MANAGE','PRICING_MANAGE','INVENTORY_MANAGE','ORDER_FULFILL','USER_MANAGE','REPORTS_VIEW','ANALYTICS_VIEW'];usersQuery='';usersActivity='ALL';showBundle=false;showExtensionRegistration=false;showPrice=false;translationProduct:Product|null=null;translationLocale='de';translationDraft={name:'',description:'',seoSlug:'',seoTitle:'',seoDescription:''};bundleDraft:any={name:'',sku:'',type:'CONFIGURABLE',pricingMode:'COMPONENT_SUM',fixedAmount:0,currency:'CHF',discountPercentage:10};bundleMarketPrices:any[]=[];priceDraft:any={sellableId:'',amount:0,currency:'USD',market:'US',channel:'WEB',pricesIncludeTax:false};
- selectedShipments:any[]=[];shipmentTrackingNumber='';refundDialogPayment:any=null;refundDialogAmount='';refundDialogError='';refundSubmitting=false;returnDialogAction:any=null;returnDialogNote='';returnDialogError='';returnDialogBusy=false;mfaCode='';mfaSetupRequired=false;mfaEnrollment:any=null;mfaQrCode='';mfaCopied=false;mfaBackupCodes:string[]=[];
+  selectedShipments:any[]=[];shipmentTrackingNumber='';shippingDialogOrder:any=null;shippingDialogTrackingNumber='';shippingDialogError='';shippingDialogBusy=false;refundDialogPayment:any=null;refundDialogAmount='';refundDialogError='';refundSubmitting=false;returnDialogAction:any=null;returnDialogNote='';returnDialogError='';returnDialogBusy=false;mfaCode='';mfaSetupRequired=false;mfaEnrollment:any=null;mfaQrCode='';mfaCopied=false;mfaBackupCodes:string[]=[];
  get isSuperadmin():boolean{try{const payload=JSON.parse(atob((this.token??"").split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));return payload.role==="SUPERADMIN"}catch{return false}} get title():string{return ({system:"System Settings",reports:'Reports',overview:'Overview',products:'Products',productNew:'New product',catalogData:'Catalog data',bundles:'Bundles',extensions:'Extensions',pricing:'Pricing',inventory:'Inventory',orders:'Orders',users:'Customers',giftCards:'Gift cards',operations:'Operations'} as Record<string,string>)[this.tab]??'Overview'}
  navigateTo(tab:string):void{this.navOpen=false;this.router.navigateByUrl(tab==='productNew'?'/products/new':'/'+tab)}
  private syncRoute():void{const path=this.router.url.split('?')[0];const tab=path==='/products/new'?'productNew':path.slice(1);if(['overview','products','productNew','catalogData','bundles','extensions','pricing','inventory','orders','users','giftCards','operations','system','reports'].includes(tab))this.tab=tab;this.error='';this.success='';if(this.token&&!this.mfaSetupRequired){switch(this.tab){case 'overview':this.loadDashboard();break;case 'products':this.loadProducts();break;case 'bundles':this.loadBundles();break;case 'extensions':this.loadExtensions();break;case 'pricing':this.loadPrices();break;case 'orders':this.loadOrders();break;case 'users':this.loadUsers();break;case 'operations':this.loadOutbox();break;case 'system':if(this.isSuperadmin)this.loadSystemSettings();break;case 'reports':break;}}}
@@ -467,7 +493,12 @@ export class AdminComponent {
   editUserAccess(user:any):void{this.accessUser=user;this.accessRole=user.role;this.accessPermissions=[...(user.permissions??[])];this.error=''}
   setAccessPermission(event:Event,permission:string):void{const checked=(event.target as HTMLInputElement).checked;this.accessPermissions=checked?[...new Set([...this.accessPermissions,permission])]:this.accessPermissions.filter(value=>value!==permission)}
   saveUserAccess():void{if(!this.accessUser||!this.isSuperadmin)return;const user=this.accessUser;const persistPermissions=()=>{if(this.accessRole!=='ADMIN'){this.accessUser=null;this.loadUsers();return}this.http.put('/api/v1/admin/users/'+user.id+'/permissions',{permissions:this.accessPermissions}).subscribe({next:()=>{this.accessUser=null;this.loadUsers();this.error=''},error:e=>this.error=e.error?.message??e.error?.detail??'Could not save administrator permissions.'})};if(this.accessRole!==user.role){this.http.put('/api/v1/admin/users/'+user.id+'/role',{role:this.accessRole}).subscribe({next:()=>persistPermissions(),error:e=>this.error=e.error?.message??e.error?.detail??'Could not change account role.'});return}persistPermissions()}
- shipOrder(order:any):void{const trackingNumber=order.shippingMethodId?null:prompt('Tracking number');if(!order.shippingMethodId&&!trackingNumber)return;this.http.post(`/api/v1/admin/orders/${order.id}/ship`,{trackingNumber}).subscribe({next:()=>this.loadOrders(),error:e=>this.error=e.error?.message??e.error?.detail??'Could not ship this order.'})}
+ openShippingDialog(order:any):void{this.shippingDialogOrder=order;this.shippingDialogTrackingNumber='';this.shippingDialogError='';this.shippingDialogBusy=false;setTimeout(()=>{const dialog=this.shippingDialogRef?.nativeElement;if(this.shippingDialogOrder?.id===order.id&&dialog&&!dialog.open)dialog.showModal()},0)}
+ cancelShippingDialog(event:Event):void{if(this.shippingDialogBusy)event.preventDefault()}
+ shippingDialogClosed():void{if(this.shippingDialogBusy)return;this.shippingDialogOrder=null;this.shippingDialogTrackingNumber='';this.shippingDialogError=''}
+ closeShippingDialog():void{if(!this.shippingDialogBusy)this.shippingDialogRef?.nativeElement.close()}
+ submitShipping():void{const order=this.shippingDialogOrder;if(!order||this.shippingDialogBusy)return;const trackingNumber=order.shippingMethodId?null:this.shippingDialogTrackingNumber.trim();if(!order.shippingMethodId&&!trackingNumber){this.shippingDialogError=this.t('shippingTrackingRequired');return}this.shippingDialogBusy=true;this.shippingDialogError='';this.http.post(`/api/v1/admin/orders/${order.id}/ship`,{trackingNumber}).subscribe({next:()=>{this.shippingDialogBusy=false;this.shippingDialogRef?.nativeElement.close();this.loadOrders()},error:e=>{this.shippingDialogBusy=false;this.shippingDialogError=e.error?.message??e.error?.detail??this.t('shippingDialogFailure')}})}
+ shipOrder(order:any):void{this.openShippingDialog(order)}
  openShippingLabel(order:any):void{const popup=window.open('about:blank','_blank');if(!popup){this.error='Allow pop-ups to open the shipping label.';return}popup.opener=null;this.http.get(`/api/v1/admin/orders/${order.id}/label`,{responseType:'blob'}).subscribe({next:blob=>{const url=URL.createObjectURL(blob);popup.location.href=url;setTimeout(()=>URL.revokeObjectURL(url),60_000)},error:e=>{popup.close();this.error=e.error?.message??e.error?.detail??'Could not load the shipping label.'}})}
  deliverOrder(order:any):void{this.http.post(`/api/v1/admin/orders/${order.id}/deliver`,{}).subscribe({next:()=>this.loadOrders(),error:e=>this.error=e.error?.message??e.error?.detail??'Could not update this order.'})}
  refreshOrderTracking(order:any):void{this.http.post<any>(`/api/v1/admin/orders/${order.id}/tracking/refresh`,{}).subscribe({next:r=>{this.error='Carrier update: '+r.status+(r.lastLocation?' · '+r.lastLocation:'');this.loadOrders();if(this.selectedOrder?.id===order.id)this.viewOrder(order)},error:e=>this.error=e.error?.message??e.error?.detail??'Carrier tracking is not available for this shipping provider.'})}
