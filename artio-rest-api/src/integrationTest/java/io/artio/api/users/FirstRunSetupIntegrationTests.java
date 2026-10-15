@@ -117,6 +117,14 @@ class FirstRunSetupIntegrationTests {
         var customerRegistration = http.postForEntity("/api/v1/auth/register", Map.of(
                 "email", "customer@example.test", "password", "customer-password-123", "firstName", "Ada", "lastName", "Lovelace"), String.class);
         assertThat(customerRegistration.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        jdbc.update("DELETE FROM mfa_methods WHERE user_id=(SELECT id FROM users WHERE email='owner@example.test')");
+        jdbc.update("DELETE FROM users WHERE email='owner@example.test'");
+        var reopened = http.getForObject("/api/v1/setup/status", FirstRunSetupController.SetupStatus.class);
+        assertThat(reopened).isNotNull();
+        assertThat(reopened.required()).isTrue();
+        assertThat(reopened.complete()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT completed_at IS NULL FROM artio_first_run_setup WHERE singleton_id=true", Boolean.class)).isTrue();
     }
 
     private ResponseEntity<String> postWithToken(String path, String token, Object body) {

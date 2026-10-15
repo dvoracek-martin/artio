@@ -150,8 +150,11 @@ public class FirstRunSetupController {
         return valid;
     }
 
-    private boolean setupRequired() { return !administratorExists() && Boolean.TRUE.equals(jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM artio_first_run_setup WHERE singleton_id=true AND completed_at IS NULL)", Boolean.class)); }
+    private boolean setupRequired() {
+        if (administratorExists()) return false;
+        jdbc.update("UPDATE artio_first_run_setup SET completed_at=NULL,draft='{}'::jsonb,failed_attempts=0,locked_until=NULL,updated_at=now() WHERE singleton_id=true AND completed_at IS NOT NULL");
+        return true;
+    }
     private boolean administratorExists() { return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM users WHERE role IN ('ADMIN','SUPERADMIN'))", Boolean.class)); }
     private Map<String, String> loadDraft() {
         String draft = jdbc.queryForObject("SELECT draft::text FROM artio_first_run_setup WHERE singleton_id=true", String.class);
