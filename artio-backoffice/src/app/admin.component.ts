@@ -108,13 +108,13 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
   <ng-container #ordersAdminHost></ng-container>@if (ordersAdminLoading) { <p class="muted" role="status">{{ordersAdminLoadingText()}}</p> }
 }
 @if (mediaProduct) {
-  @defer (when mediaProduct !== null) { <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null"></artio-product-media-admin> } @placeholder { <p class="muted" role="status">Loading product media…</p> }
+  @defer (when mediaProduct !== null) { <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null"></artio-product-media-admin> } @placeholder { <p class="muted" role="status">{{t('loadingProductMedia')}}</p> }
   }@if (tab==='catalogData') {
-  @defer (when tab==='catalogData') { <artio-catalog-metadata-admin></artio-catalog-metadata-admin> } @placeholder { <p class="muted" role="status">Loading catalog data…</p> }
+  @defer (when tab==='catalogData') { <artio-catalog-metadata-admin></artio-catalog-metadata-admin> } @placeholder { <p class="muted" role="status">{{t('loadingCatalogData')}}</p> }
   }@if (tab==='inventory') {
-  @defer (when tab==='inventory') { <artio-inventory-admin></artio-inventory-admin> } @placeholder { <p class="muted" role="status">Loading inventory…</p> }
+  @defer (when tab==='inventory') { <artio-inventory-admin></artio-inventory-admin> } @placeholder { <p class="muted" role="status">{{t('loadingInventory')}}</p> }
   }@if (tab==='giftCards') {
-  @defer (when tab==='giftCards') { <artio-gift-card-admin></artio-gift-card-admin> } @placeholder { <p class="muted" role="status">Loading gift cards…</p> }
+  @defer (when tab==='giftCards') { <artio-gift-card-admin></artio-gift-card-admin> } @placeholder { <p class="muted" role="status">{{t('loadingGiftCards')}}</p> }
   }@if (tab==='operations') {
   <ng-container #operationsAdminHost></ng-container>@if (operationsAdminLoading) { <p class="muted" role="status">{{operationsAdminLoadingText()}}</p> }
 }@if (tab==='users') {
