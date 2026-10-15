@@ -2,6 +2,8 @@ package io.artio.api.notifications;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.artio.extensions.commerce.NotificationTransport.DeliveryResult;
+import io.artio.extensions.commerce.NotificationTransport.OutboundMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -9,6 +11,9 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Properties;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -22,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -124,6 +130,53 @@ class OrderCreatedNotificationConsumerIntegrationTests {
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_inbox WHERE consumer_name='order-notification-v1' AND event_id=?",
                     Integer.class, eventId)).isZero();
         }
+    }
+
+    @Test
+    void concurrentNotificationReplicasClaimAndDeliverEachOutboxMessageOnlyOnce() throws Exception {
+        jdbc.update("UPDATE notification_delivery_outbox SET status='SENT',locked_at=NULL WHERE status='PENDING'");
+        UUID userId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        UUID deliveryId = UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
+                userId, "replica-worker-" + userId + "@example.test", "unused-test-hash", "Replica", "Worker");
+        jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body) VALUES (?,?,?,?,?,?)",
+                deliveryId, "replica-test:" + deliveryId, userId, orderId, "Replica acceptance", "single delivery");
+
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        var transport = new io.artio.extensions.commerce.NotificationTransport() {
+            @Override public DeliveryResult deliver(OutboundMessage message) {
+                calls.incrementAndGet();
+                started.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("replica delivery timed out");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("replica delivery interrupted", interrupted);
+                }
+                return new DeliveryResult(true, "replica-acceptance", null, null);
+            }
+        };
+        var beanFactory = new StaticListableBeanFactory();
+        beanFactory.addBean("replicaAcceptanceTransport", transport);
+        var provider = beanFactory.getBeanProvider(io.artio.extensions.commerce.NotificationTransport.class);
+        var firstReplica = new OrderNotificationHandler(jdbc, provider, true);
+        var secondReplica = new OrderNotificationHandler(jdbc, provider, true);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(firstReplica::deliverPendingBatch);
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            var second = pool.submit(secondReplica::deliverPendingBatch);
+            second.get(5, TimeUnit.SECONDS);
+            release.countDown();
+            first.get(5, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+        }
+        assertThat(calls.get()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("SENT");
+        assertThat(jdbc.queryForObject("SELECT attempts FROM notification_delivery_outbox WHERE id=?", Integer.class, deliveryId)).isEqualTo(1);
     }
 
     private void send(UUID eventId, UUID orderId, String json) throws Exception {
