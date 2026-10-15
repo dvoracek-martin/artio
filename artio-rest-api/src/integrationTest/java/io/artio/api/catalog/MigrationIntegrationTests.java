@@ -48,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(10);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("35");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(11);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("36");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT valid_until FROM pricing_tax_rule WHERE id='00000000-0000-0000-0000-000000000038'")) {
             assertThat(result.next()).isTrue();
@@ -196,7 +196,7 @@ class MigrationIntegrationTests {
             jdbc.update(insertOrder, existingOrder, user, existingOrder.toString());
             var upgrade = Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword())
                     .locations("classpath:db/migration").load();
-            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(5);
+            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(6);
             var identity = jdbc.queryForObject("SELECT installation_id FROM artio_license_state", java.util.UUID.class);
             assertThat(identity).isNotNull();
             assertThat(jdbc.queryForObject("SELECT name FROM catalog_product WHERE id=?", String.class, product)).isEqualTo("Upgrade fixture");

@@ -1383,6 +1383,26 @@ class CatalogApiIntegrationTests {
                 io.artio.bundles.BundleQuote.class, fixedBundle.getBody().id());
         assertThat(fixedQuote.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(fixedQuote.getBody().totalPrice().amount()).isEqualByComparingTo("7.50");
+
+        var europeanPrice = adminExchange("/api/prices", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.PriceRequest(first.getBody().id(), "DE", "WEB",
+                        new BigDecimal("12.00"), "EUR", java.time.Instant.now().minusSeconds(60), null),
+                io.artio.api.pricing.PricingApplicationService.PriceView.class);
+        assertThat(europeanPrice.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var marketFixedBundle = adminExchange("/api/bundles", HttpMethod.POST,
+                new io.artio.api.bundles.BundleApplicationService.BundleRequest("Market fixed set", "BND-M-" + suffix,
+                        io.artio.bundles.BundleType.FIXED,
+                        List.of(new io.artio.api.bundles.BundleApplicationService.ComponentRequest(first.getBody().id(), BigDecimal.ONE)),
+                        List.of(), new io.artio.api.bundles.BundleApplicationService.PricingRuleRequest(
+                                io.artio.bundles.BundlePricingRule.Mode.FIXED_PRICE, new BigDecimal("7.50"), "USD", null,
+                                Map.of("DE", new io.artio.api.bundles.BundleApplicationService.MoneyRequest(new BigDecimal("8.25"), "EUR")))),
+                io.artio.api.bundles.BundleApplicationService.BundleView.class);
+        var germanQuote = http.postForEntity("/api/bundles/{id}/quote",
+                new io.artio.api.bundles.BundleApplicationService.BundleQuoteRequest(Map.of(), BigDecimal.ONE, "DE", "WEB", "DE"),
+                io.artio.bundles.BundleQuote.class, marketFixedBundle.getBody().id());
+        assertThat(germanQuote.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(germanQuote.getBody().totalPrice().amount()).isEqualByComparingTo("8.25");
+        assertThat(germanQuote.getBody().totalPrice().currency().getCurrencyCode()).isEqualTo("EUR");
     }
 
     @Test
@@ -1756,7 +1776,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
-        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33", "34", "35");
+        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33", "34", "35", "36");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
