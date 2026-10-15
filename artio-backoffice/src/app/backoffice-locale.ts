@@ -3,6 +3,7 @@ export type BackofficeLocale = 'de' | 'it' | 'fr' | 'en';
 const COPY = {
   en: {
     language: 'Language',
+    kafkaConsumerHealth: 'Consumer health', kafkaMessagesBehind: 'messages behind', kafkaPartition: 'PARTITION', kafkaCommitted: 'COMMITTED', kafkaEnd: 'END', kafkaLag: 'LAG', kafkaLagUnavailable: 'Consumer lag unavailable; verify Kafka broker and topic.',
     reportsEyebrow: 'OPERATIONAL REPORTS', reportsTitle: 'Store performance', period: 'Period', periodLast: 'Last {days} days',
     reportActivityHelp: 'Order activity follows the order creation date. Each monetary figure stays in its recorded currency.',
     ordersCreated: 'Orders created', selectedPeriod: 'Selected period', customersActive: 'Customers active', withOrder: 'With an order in this period',
@@ -29,6 +30,7 @@ const COPY = {
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
+    kafkaConsumerHealth: 'Zustand des Consumers', kafkaMessagesBehind: 'Nachrichten Rückstand', kafkaPartition: 'PARTITION', kafkaCommitted: 'BESTÄTIGT', kafkaEnd: 'ENDE', kafkaLag: 'RÜCKSTAND', kafkaLagUnavailable: 'Consumer-Lag nicht verfügbar; Kafka-Broker und Topic prüfen.',
     reportActivityHelp: 'Bestellaktivität richtet sich nach dem Erstellungsdatum. Jeder Geldbetrag bleibt in seiner Währung.', ordersCreated: 'Erstellte Bestellungen', selectedPeriod: 'Gewählter Zeitraum', customersActive: 'Aktive Kunden', withOrder: 'Mit einer Bestellung in diesem Zeitraum',
     capturedRefunded: 'Eingezogen und erstattet nach Währung', currency: 'WÄHRUNG', orders: 'BESTELLUNGEN', customers: 'KUNDEN', captured: 'EINGEZOGEN', refunded: 'ERSTATTET', netCaptured: 'NETTO EINGEZOGEN',
     noOrders: 'In diesem Zeitraum wurden keine Bestellungen erstellt.', orderStatus: 'Bestellstatus', status: 'STATUS', noActivity: 'Keine Bestellaktivität vorhanden.', enterprise: 'ENTERPRISE', advancedReports: 'Erweiterte Berichte', advancedAvailable: 'Verfügbar', enterpriseRequired: 'Enterprise-Lizenz erforderlich',
@@ -43,6 +45,7 @@ const COPY = {
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
+    kafkaConsumerHealth: 'Stato del consumer', kafkaMessagesBehind: 'messaggi in ritardo', kafkaPartition: 'PARTIZIONE', kafkaCommitted: 'CONFERMATO', kafkaEnd: 'FINE', kafkaLag: 'RITARDO', kafkaLagUnavailable: 'Lag del consumer non disponibile; verificare il broker Kafka e il topic.',
     reportActivityHelp: 'L’attività degli ordini segue la data di creazione. Ogni importo resta nella valuta registrata.', ordersCreated: 'Ordini creati', selectedPeriod: 'Periodo selezionato', customersActive: 'Clienti attivi', withOrder: 'Con un ordine nel periodo',
     capturedRefunded: 'Incassato e rimborsato per valuta', currency: 'VALUTA', orders: 'ORDINI', customers: 'CLIENTI', captured: 'INCASSATO', refunded: 'RIMBORSATO', netCaptured: 'INCASSATO NETTO',
     noOrders: 'Nessun ordine creato in questo periodo.', orderStatus: 'Stato degli ordini', status: 'STATO', noActivity: 'Nessuna attività degli ordini.', enterprise: 'ENTERPRISE', advancedReports: 'Report avanzati', advancedAvailable: 'Disponibile', enterpriseRequired: 'È richiesta una licenza Enterprise',
@@ -57,6 +60,7 @@ const COPY = {
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
+    kafkaConsumerHealth: 'État du consommateur', kafkaMessagesBehind: 'messages de retard', kafkaPartition: 'PARTITION', kafkaCommitted: 'VALIDÉ', kafkaEnd: 'FIN', kafkaLag: 'RETARD', kafkaLagUnavailable: 'Lag du consommateur indisponible ; vérifier le broker Kafka et le topic.',
     reportActivityHelp: 'L’activité suit la date de création de la commande. Chaque montant conserve sa devise enregistrée.', ordersCreated: 'Commandes créées', selectedPeriod: 'Période choisie', customersActive: 'Clients actifs', withOrder: 'Avec une commande pendant la période',
     capturedRefunded: 'Encaissé et remboursé par devise', currency: 'DEVISE', orders: 'COMMANDES', customers: 'CLIENTS', captured: 'ENCAISSÉ', refunded: 'REMBOURSÉ', netCaptured: 'ENCAISSÉ NET',
     noOrders: 'Aucune commande créée pendant cette période.', orderStatus: 'État des commandes', status: 'ÉTAT', noActivity: 'Aucune activité de commande à afficher.', enterprise: 'ENTERPRISE', advancedReports: 'Rapports avancés', advancedAvailable: 'Disponible', enterpriseRequired: 'Licence Enterprise requise',
