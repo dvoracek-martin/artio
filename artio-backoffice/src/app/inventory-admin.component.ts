@@ -1,9 +1,10 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy, ElementRef, ViewChild } from '@angular/core';
 import { SellableSelectComponent } from './sellable-select.component';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
+import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
 
 type Warehouse = { id: string; code: string; name: string; location: string; active: boolean };
 type Stock = { warehouseId: string; sellableId: string; onHand: number; reserved: number; available: number };
@@ -77,10 +78,28 @@ type LowStock = { warehouseId: string; sellableId: string; available: number; th
     @if (error) {
       <p class="error" role="alert">{{error}}</p>
     }
+    @if (adjustmentConfirmation) {
+      <dialog #adjustmentDialog class="refund-dialog" aria-labelledby="inventory-adjust-title" (cancel)="cancelAdjustmentDialog($event)" (close)="adjustmentDialogClosed()">
+        <form class="refund-dialog-content" (ngSubmit)="confirmAdjustment()">
+          <p class="eyebrow">{{t('inventoryAdjustEyebrow')}}</p>
+          <h2 id="inventory-adjust-title">{{t('inventoryAdjustTitle')}}</h2>
+          <p class="muted">{{t('inventoryAdjustDescription')}}</p>
+          <p class="refund-payment-summary"><strong>{{adjustmentConfirmation.body.quantity}}</strong><span>{{adjustmentConfirmation.sellableId}}</span></p>
+          @if (adjustmentDialogError) { <p class="error" role="alert">{{adjustmentDialogError}}</p> }
+          @if (adjustmentDialogBusy) { <p class="muted" role="status">{{t('inventoryAdjustBusy')}}</p> }
+          <div class="refund-dialog-actions">
+            <button type="button" class="secondary" [disabled]="adjustmentDialogBusy" (click)="closeAdjustmentDialog()">{{t('refundCancel')}}</button>
+            <button type="submit" class="primary" [disabled]="adjustmentDialogBusy">{{t('inventoryAdjustConfirm')}}</button>
+          </div>
+        </form>
+      </dialog>
+    }
     </section>
     `
 })
 export class InventoryAdminComponent {
+  @ViewChild('adjustmentDialog') private adjustmentDialogRef?:ElementRef<HTMLDialogElement>;
+  t(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
   private readonly http = inject(HttpClient);
   warehouses: Warehouse[] = [];
   stocks: Stock[] = [];
@@ -93,6 +112,9 @@ export class InventoryAdminComponent {
   draft = { sellableId: '', quantity: 1, reason: '' };
   busy = false;
   error = '';
+  adjustmentConfirmation:{warehouseId:string;sellableId:string;body:{quantity:number;reason:string|null}}|null=null;
+  adjustmentDialogBusy=false;
+  adjustmentDialogError='';
 
   get warehouseOptions():SelectOption[]{return this.warehouses.map(x=>({value:x.id,label:x.name,detail:x.code+' · '+x.location,disabled:!x.active}));}
   chooseWarehouse(id:string):void{const row=this.warehouses.find(x=>x.id===id);if(row)this.selectWarehouse(row);}
@@ -155,7 +177,17 @@ export class InventoryAdminComponent {
   private apply(method: 'POST' | 'PUT', sellableId: string, body: { quantity: number; reason: string | null }): void {
     if (!this.selectedWarehouse || !sellableId) return;
     if (!Number.isFinite(body.quantity) || body.quantity < 0 || method === 'POST' && body.quantity <= 0) { this.error = method === 'POST' ? 'Receipt quantity must be greater than zero.' : 'On-hand quantity must be zero or greater.'; return; }
-    if (method === 'PUT' && !window.confirm('Set the absolute on-hand balance to ' + body.quantity + '? Reserved stock will remain committed.')) return;
+    if (method === 'PUT') { this.adjustmentConfirmation={warehouseId:this.selectedWarehouse.id,sellableId,body};this.adjustmentDialogBusy=false;this.adjustmentDialogError='';setTimeout(()=>{if(this.adjustmentConfirmation&&!this.adjustmentDialogRef?.nativeElement.open)this.adjustmentDialogRef?.nativeElement.showModal()},0);return; }
+    this.performApply(method,sellableId,body);
+  }
+
+  cancelAdjustmentDialog(event:Event):void{if(this.adjustmentDialogBusy)event.preventDefault()}
+  adjustmentDialogClosed():void{if(this.adjustmentDialogBusy)return;this.adjustmentConfirmation=null;this.adjustmentDialogError=''}
+  closeAdjustmentDialog():void{if(!this.adjustmentDialogBusy)this.adjustmentDialogRef?.nativeElement.close()}
+  confirmAdjustment():void{if(!this.adjustmentConfirmation||this.adjustmentDialogBusy)return;const pending=this.adjustmentConfirmation;this.adjustmentDialogBusy=true;this.adjustmentDialogError='';this.http.put<Stock>(`/api/v1/warehouses/${pending.warehouseId}/stock/${pending.sellableId}`,pending.body).subscribe({next:row=>{this.adjustmentDialogBusy=false;this.adjustmentDialogRef?.nativeElement.close();this.error='';this.draft.sellableId=row.sellableId;this.selectedStock=row;this.loadStock();this.loadMovements();this.loadLowStock()},error:e=>{this.adjustmentDialogBusy=false;this.adjustmentDialogError=e.error?.detail??this.t('inventoryAdjustFailure')}})}
+
+  private performApply(method: 'POST' | 'PUT', sellableId: string, body: { quantity: number; reason: string | null }): void {
+    if (!this.selectedWarehouse || !sellableId) return;
     this.busy = true;
     const url = `/api/v1/warehouses/${this.selectedWarehouse.id}/stock/${sellableId}` + (method === 'POST' ? '/receipts' : '');
     const request = method === 'POST' ? this.http.post<Stock>(url, body) : this.http.put<Stock>(url, body);

@@ -62,6 +62,9 @@ const COPY = {
     loyaltyAdjustConfirm: 'Apply adjustment', loyaltyAdjustInvalidPoints: 'Enter a whole adjustment from -1,000,000 to 1,000,000, except zero.',
     loyaltyAdjustReasonRequired: 'Enter a reason for this audited adjustment.', loyaltyAdjustLicenseRequired: 'A LOYALTY Enterprise license is required for new adjustments.',
     loyaltyAdjustFailure: 'Could not adjust loyalty points.',
+    inventoryAdjustEyebrow: 'INVENTORY CONTROL', inventoryAdjustTitle: 'Set on-hand balance',
+    inventoryAdjustDescription: 'This replaces the absolute on-hand quantity. Reserved stock remains committed.',
+    inventoryAdjustBusy: 'Saving stock adjustment…', inventoryAdjustConfirm: 'Set quantity', inventoryAdjustFailure: 'Could not update inventory.',
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -112,6 +115,9 @@ const COPY = {
     loyaltyAdjustConfirm: 'Anpassung anwenden', loyaltyAdjustInvalidPoints: 'Geben Sie eine ganze Anpassung von -1.000.000 bis 1.000.000 außer null ein.',
     loyaltyAdjustReasonRequired: 'Geben Sie eine Begründung für diese protokollierte Anpassung ein.',
     loyaltyAdjustLicenseRequired: 'Neue Anpassungen erfordern eine LOYALTY Enterprise-Lizenz.', loyaltyAdjustFailure: 'Loyalty-Punkte konnten nicht angepasst werden.',
+    inventoryAdjustEyebrow: 'LAGERBESTAND', inventoryAdjustTitle: 'Bestand festlegen',
+    inventoryAdjustDescription: 'Dadurch wird die verfügbare Gesamtmenge ersetzt. Reservierter Bestand bleibt gebunden.',
+    inventoryAdjustBusy: 'Bestandskorrektur wird gespeichert…', inventoryAdjustConfirm: 'Menge festlegen', inventoryAdjustFailure: 'Bestand konnte nicht aktualisiert werden.',
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -162,6 +168,9 @@ const COPY = {
     loyaltyAdjustConfirm: 'Applica la modifica', loyaltyAdjustInvalidPoints: 'Inserisci un numero intero da -1.000.000 a 1.000.000, escluso zero.',
     loyaltyAdjustReasonRequired: 'Inserisci un motivo per questa modifica registrata.',
     loyaltyAdjustLicenseRequired: 'Le nuove modifiche richiedono una licenza Enterprise LOYALTY.', loyaltyAdjustFailure: 'Impossibile modificare i punti loyalty.',
+    inventoryAdjustEyebrow: 'CONTROLLO SCORTE', inventoryAdjustTitle: 'Imposta la quantità disponibile',
+    inventoryAdjustDescription: 'Questo sostituisce la quantità totale disponibile. Le scorte riservate restano impegnate.',
+    inventoryAdjustBusy: 'Salvataggio della rettifica…', inventoryAdjustConfirm: 'Imposta quantità', inventoryAdjustFailure: 'Impossibile aggiornare le scorte.',
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -211,7 +220,10 @@ const COPY = {
     loyaltyAdjustPoints: 'Ajustement des points', loyaltyAdjustReason: 'Motif d’audit', loyaltyAdjustBusy: 'Enregistrement de l’ajustement…',
     loyaltyAdjustConfirm: 'Appliquer l’ajustement', loyaltyAdjustInvalidPoints: 'Saisissez un entier de -1 000 000 à 1 000 000, sauf zéro.',
     loyaltyAdjustReasonRequired: 'Saisissez un motif pour cet ajustement audité.',
-    loyaltyAdjustLicenseRequired: 'Les nouveaux ajustements nécessitent une licence Enterprise LOYALTY.', loyaltyAdjustFailure: 'Impossible d’ajuster les points de fidélité.'
+    loyaltyAdjustLicenseRequired: 'Les nouveaux ajustements nécessitent une licence Enterprise LOYALTY.', loyaltyAdjustFailure: 'Impossible d’ajuster les points de fidélité.',
+    inventoryAdjustEyebrow: 'GESTION DES STOCKS', inventoryAdjustTitle: 'Définir le stock disponible',
+    inventoryAdjustDescription: 'Cette action remplace la quantité totale disponible. Le stock réservé reste engagé.',
+    inventoryAdjustBusy: 'Enregistrement de l’ajustement…', inventoryAdjustConfirm: 'Définir la quantité', inventoryAdjustFailure: 'Impossible de modifier le stock.'
   }
 } as const;
 
