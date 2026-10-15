@@ -55,6 +55,7 @@ public class SecurityConfiguration {
             AuthenticationSuccessHandler oauth2SuccessHandler,
             ApiVersioningFilter apiVersioningFilter,
             InstallationSetupGateFilter installationSetupGateFilter,
+            PersistedPermissionFilter persistedPermissionFilter,
             ObjectMapper objectMapper) throws Exception {
         var converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(jwt -> java.util.List.of(new SimpleGrantedAuthority("ROLE_" + jwt.getClaimAsString("role"))));
@@ -75,6 +76,10 @@ public class SecurityConfiguration {
                         "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/prices/**", "/api/v1/discount-rules/**", "/api/v1/tax-rules/**", "/api/v1/warehouses/**", "/api/v1/stocks/**", "/api/v1/inventory/**").hasAnyRole("ADMIN", "SUPERADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/warehouses/**", "/api/stock/**", "/api/orders/*/inventory-reservations",
                         "/api/inventory/**", "/api/v1/warehouses/**", "/api/v1/stock/**", "/api/v1/inventory/**", "/api/v1/orders/*/inventory-reservations").hasAnyRole("ADMIN", "SUPERADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/admin/reports/**", "/api/v1/admin/reports/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_REPORTS_VIEW")
+                .requestMatchers("/api/admin/users/**", "/api/v1/admin/users/**")
+                        .hasAnyAuthority("ROLE_SUPERADMIN", "PERMISSION_USER_MANAGE")
                 .requestMatchers(HttpMethod.GET, "/api/setup/status", "/api/v1/setup/status").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/setup/progress", "/api/setup/complete", "/api/setup/resume", "/api/v1/setup/progress", "/api/v1/setup/complete", "/api/v1/setup/resume",
                         "/api/auth/register", "/api/auth/login", "/api/payments/provider/webhook",
@@ -101,7 +106,8 @@ public class SecurityConfiguration {
                             "Access is denied")))
             .addFilterBefore(installationSetupGateFilter, BearerTokenAuthenticationFilter.class)
             .addFilterBefore(apiVersioningFilter, BearerTokenAuthenticationFilter.class)
-            .addFilterAfter(new PrivilegedMfaEnrollmentFilter(objectMapper), BearerTokenAuthenticationFilter.class);
+            .addFilterAfter(new PrivilegedMfaEnrollmentFilter(objectMapper), BearerTokenAuthenticationFilter.class)
+            .addFilterAfter(persistedPermissionFilter, PrivilegedMfaEnrollmentFilter.class);
         if(oauth2Enabled)http.oauth2Login(oauth->oauth.successHandler(oauth2SuccessHandler));
         return http.build();
     }
@@ -130,6 +136,11 @@ public class SecurityConfiguration {
     @Bean
     InstallationSetupGateFilter installationSetupGateFilter(JdbcTemplate jdbc, ObjectMapper mapper) {
         return new InstallationSetupGateFilter(jdbc, mapper);
+    }
+
+    @Bean
+    PersistedPermissionFilter persistedPermissionFilter(JdbcTemplate jdbc, ObjectMapper mapper) {
+        return new PersistedPermissionFilter(jdbc, mapper);
     }
 
 }

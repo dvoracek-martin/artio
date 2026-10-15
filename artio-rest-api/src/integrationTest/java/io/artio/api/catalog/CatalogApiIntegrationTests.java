@@ -163,6 +163,27 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void persistedAdminPermissionsTakeEffectImmediatelyOnReportsAndUserAdministration() {
+        jdbc.update("UPDATE users SET permissions='REPORTS_VIEW' WHERE id=?", adminUserId);
+
+        var reports = adminExchange("/api/v1/admin/reports?days=7", HttpMethod.GET, null, Map.class);
+        var usersDenied = adminExchange("/api/v1/admin/users", HttpMethod.GET, null, ApiError.class);
+        assertThat(reports.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(usersDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='USER_MANAGE' WHERE id=?", adminUserId);
+        var users = adminExchange("/api/v1/admin/users", HttpMethod.GET, null,
+                io.artio.api.users.UserController.UserView[].class);
+        var reportsDenied = adminExchange("/api/v1/admin/reports?days=7", HttpMethod.GET, null, ApiError.class);
+        assertThat(users.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(reportsDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='NONE' WHERE id=?", adminUserId);
+        var allDenied = adminExchange("/api/v1/admin/users", HttpMethod.GET, null, ApiError.class);
+        assertThat(allDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
     void partialShipmentsTrackLineQuantitiesAndAllocateOnlyWhatActuallyShips() {
         UUID orderId=UUID.randomUUID(),sellableId=UUID.randomUUID(),orderItemId=UUID.randomUUID();
         var warehouse=inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
@@ -1613,7 +1634,7 @@ class CatalogApiIntegrationTests {
     void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
-        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32");
+        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
