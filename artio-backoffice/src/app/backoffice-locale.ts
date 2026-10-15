@@ -68,6 +68,9 @@ const COPY = {
     catalogEditEyebrow: 'CATALOG DATA', categoryEditTitle: 'Edit category', brandEditTitle: 'Edit brand', attributeEditTitle: 'Rename attribute',
     catalogName: 'Name', catalogParent: 'Parent category', catalogTopLevel: 'Top-level category', catalogDescription: 'Description', catalogAttributeLabel: 'Attribute label',
     catalogEditBusy: 'Saving catalog data…', catalogEditSave: 'Save changes', catalogEditRequired: 'Enter a value before saving.', catalogEditFailure: 'Could not save catalog data.',
+    productEditorEyebrow: 'PRODUCT EDITOR', productEditorDuplicateTitle: 'Duplicate product', productEditorVariantCreateTitle: 'Add product variant', productEditorVariantEditTitle: 'Edit product variant', productEditorScheduleTitle: 'Schedule publication', productEditorSeoDialogTitle: 'Edit SEO metadata',
+    productEditorProductName: 'Unpublished copy name', productEditorVariantName: 'Variant name', productEditorSku: 'Unique SKU', productEditorOptions: 'Variant options JSON', productEditorPublishAt: 'Publish at local date and time', productEditorSlug: 'Canonical URL slug', productEditorSeoFieldTitle: 'SEO title', productEditorSeoDescription: 'SEO description',
+    productEditorBusy: 'Saving product…', productEditorSave: 'Save changes', productEditorRequired: 'Complete the required fields.', productEditorInvalidOptions: 'Options must be a JSON object with string values.', productEditorFutureDate: 'Choose a valid future publication time.', productEditorFailure: 'Could not save product changes.', productEditorDuplicateSuccess: 'Unpublished product copy created.',
   },
   de: {
     language: 'Sprache', reportsEyebrow: 'BETRIEBSBERICHTE', reportsTitle: 'Shop-Leistung', period: 'Zeitraum', periodLast: 'Letzte {days} Tage',
@@ -124,6 +127,9 @@ const COPY = {
     catalogEditEyebrow: 'KATALOGDATEN', categoryEditTitle: 'Kategorie bearbeiten', brandEditTitle: 'Marke bearbeiten', attributeEditTitle: 'Attribut umbenennen',
     catalogName: 'Name', catalogParent: 'Übergeordnete Kategorie', catalogTopLevel: 'Oberste Kategorie', catalogDescription: 'Beschreibung', catalogAttributeLabel: 'Attributbezeichnung',
     catalogEditBusy: 'Katalogdaten werden gespeichert…', catalogEditSave: 'Änderungen speichern', catalogEditRequired: 'Geben Sie vor dem Speichern einen Wert ein.', catalogEditFailure: 'Katalogdaten konnten nicht gespeichert werden.',
+    productEditorEyebrow: 'PRODUKTBEARBEITUNG', productEditorDuplicateTitle: 'Produkt duplizieren', productEditorVariantCreateTitle: 'Produktvariante hinzufügen', productEditorVariantEditTitle: 'Produktvariante bearbeiten', productEditorScheduleTitle: 'Veröffentlichung planen', productEditorSeoDialogTitle: 'SEO-Daten bearbeiten',
+    productEditorProductName: 'Name des unveröffentlichten Duplikats', productEditorVariantName: 'Variantenname', productEditorSku: 'Eindeutige SKU', productEditorOptions: 'Variantenoptionen als JSON', productEditorPublishAt: 'Lokaler Veröffentlichungszeitpunkt', productEditorSlug: 'Kanonischer URL-Slug', productEditorSeoFieldTitle: 'SEO-Titel', productEditorSeoDescription: 'SEO-Beschreibung',
+    productEditorBusy: 'Produkt wird gespeichert…', productEditorSave: 'Änderungen speichern', productEditorRequired: 'Füllen Sie die Pflichtfelder aus.', productEditorInvalidOptions: 'Optionen müssen ein JSON-Objekt mit Textwerten sein.', productEditorFutureDate: 'Wählen Sie einen gültigen zukünftigen Veröffentlichungszeitpunkt.', productEditorFailure: 'Produktänderungen konnten nicht gespeichert werden.', productEditorDuplicateSuccess: 'Unveröffentlichtes Produktduplikat erstellt.',
   },
   it: {
     language: 'Lingua', reportsEyebrow: 'REPORT OPERATIVI', reportsTitle: 'Andamento del negozio', period: 'Periodo', periodLast: 'Ultimi {days} giorni',
@@ -180,6 +186,9 @@ const COPY = {
     catalogEditEyebrow: 'DATI CATALOGO', categoryEditTitle: 'Modifica categoria', brandEditTitle: 'Modifica marca', attributeEditTitle: 'Rinomina attributo',
     catalogName: 'Nome', catalogParent: 'Categoria principale', catalogTopLevel: 'Categoria principale senza genitori', catalogDescription: 'Descrizione', catalogAttributeLabel: 'Etichetta attributo',
     catalogEditBusy: 'Salvataggio dei dati catalogo…', catalogEditSave: 'Salva modifiche', catalogEditRequired: 'Inserisci un valore prima di salvare.', catalogEditFailure: 'Impossibile salvare i dati catalogo.',
+    productEditorEyebrow: 'MODIFICA PRODOTTO', productEditorDuplicateTitle: 'Duplica prodotto', productEditorVariantCreateTitle: 'Aggiungi variante', productEditorVariantEditTitle: 'Modifica variante', productEditorScheduleTitle: 'Programma pubblicazione', productEditorSeoDialogTitle: 'Modifica dati SEO',
+    productEditorProductName: 'Nome della copia non pubblicata', productEditorVariantName: 'Nome variante', productEditorSku: 'SKU univoco', productEditorOptions: 'Opzioni variante in JSON', productEditorPublishAt: 'Data e ora locale di pubblicazione', productEditorSlug: 'Slug URL canonico', productEditorSeoFieldTitle: 'Titolo SEO', productEditorSeoDescription: 'Descrizione SEO',
+    productEditorBusy: 'Salvataggio del prodotto…', productEditorSave: 'Salva modifiche', productEditorRequired: 'Completa i campi obbligatori.', productEditorInvalidOptions: 'Le opzioni devono essere un oggetto JSON con valori testuali.', productEditorFutureDate: 'Scegli una data futura valida per la pubblicazione.', productEditorFailure: 'Impossibile salvare le modifiche del prodotto.', productEditorDuplicateSuccess: 'Copia non pubblicata del prodotto creata.',
   },
   fr: {
     language: 'Langue', reportsEyebrow: 'RAPPORTS OPÉRATIONNELS', reportsTitle: 'Performance de la boutique', period: 'Période', periodLast: '{days} derniers jours',
@@ -235,7 +244,10 @@ const COPY = {
     inventoryAdjustBusy: 'Enregistrement de l’ajustement…', inventoryAdjustConfirm: 'Définir la quantité', inventoryAdjustFailure: 'Impossible de modifier le stock.',
     catalogEditEyebrow: 'DONNÉES DU CATALOGUE', categoryEditTitle: 'Modifier la catégorie', brandEditTitle: 'Modifier la marque', attributeEditTitle: 'Renommer l’attribut',
     catalogName: 'Nom', catalogParent: 'Catégorie parente', catalogTopLevel: 'Catégorie de premier niveau', catalogDescription: 'Description', catalogAttributeLabel: 'Libellé de l’attribut',
-    catalogEditBusy: 'Enregistrement des données du catalogue…', catalogEditSave: 'Enregistrer les modifications', catalogEditRequired: 'Saisissez une valeur avant l’enregistrement.', catalogEditFailure: 'Impossible d’enregistrer les données du catalogue.'
+    catalogEditBusy: 'Enregistrement des données du catalogue…', catalogEditSave: 'Enregistrer les modifications', catalogEditRequired: 'Saisissez une valeur avant l’enregistrement.', catalogEditFailure: 'Impossible d’enregistrer les données du catalogue.',
+    productEditorEyebrow: 'MODIFICATION DU PRODUIT', productEditorDuplicateTitle: 'Dupliquer le produit', productEditorVariantCreateTitle: 'Ajouter une variante', productEditorVariantEditTitle: 'Modifier la variante', productEditorScheduleTitle: 'Programmer la publication', productEditorSeoDialogTitle: 'Modifier les données SEO',
+    productEditorProductName: 'Nom de la copie non publiée', productEditorVariantName: 'Nom de la variante', productEditorSku: 'SKU unique', productEditorOptions: 'Options de variante en JSON', productEditorPublishAt: 'Date et heure locale de publication', productEditorSlug: 'Slug URL canonique', productEditorSeoFieldTitle: 'Titre SEO', productEditorSeoDescription: 'Description SEO',
+    productEditorBusy: 'Enregistrement du produit…', productEditorSave: 'Enregistrer les modifications', productEditorRequired: 'Complétez les champs obligatoires.', productEditorInvalidOptions: 'Les options doivent être un objet JSON avec des valeurs texte.', productEditorFutureDate: 'Choisissez une date future valide pour la publication.', productEditorFailure: 'Impossible d’enregistrer les modifications du produit.', productEditorDuplicateSuccess: 'Copie non publiée du produit créée.'
   }
 } as const;
 
