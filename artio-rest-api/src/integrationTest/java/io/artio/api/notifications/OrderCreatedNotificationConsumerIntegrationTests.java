@@ -27,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -55,6 +56,7 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     @Autowired KafkaTemplate<String, String> kafka;
     @Autowired ObjectMapper mapper;
     @Autowired KafkaProperties kafkaProperties;
+    @Autowired KafkaListenerEndpointRegistry listenerRegistry;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -184,6 +186,37 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         awaitInbox(eventId);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
                 "order-email:" + orderId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM kafka_consumer_dead_letters "
+                        + "WHERE source_topic=? AND event_id=?", Integer.class, TOPIC, eventId.toString()))
+                .isZero();
+    }
+
+    @Test
+    void rejoinsNotificationConsumerGroupAndProcessesEventsAfterPartitionRebalance() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
+                userId, "rebalance-recovery-" + userId + "@example.test", "unused-test-hash", "Group", "Recovery");
+
+        var listener = listenerRegistry.getListenerContainers().stream().findFirst()
+                .orElseThrow(() -> new AssertionError("Order event listener container was not registered"));
+        listener.stop();
+        assertThat(listener.isRunning()).isFalse();
+
+        String json = mapper.writeValueAsString(Map.of("schemaVersion", 1, "eventId", eventId,
+                "type", "ORDER_CREATED", "occurredAt", Instant.now(), "orderId", orderId,
+                "userId", userId, "locale", "en"));
+        send(eventId, orderId, json);
+
+        // Stopping and rejoining the sole member forces Kafka to revoke and reassign its partition.
+        listener.start();
+        awaitInbox(eventId);
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
+                "order-email:" + orderId)).isEqualTo(1);
+        var lag = new KafkaConsumerLagController(kafkaProperties, TOPIC, "artio-notification-worker").consumerLag();
+        assertThat(lag.totalLag()).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM kafka_consumer_dead_letters "
                         + "WHERE source_topic=? AND event_id=?", Integer.class, TOPIC, eventId.toString()))
                 .isZero();
