@@ -4,6 +4,7 @@ import { Component, inject, ChangeDetectionStrategy, ElementRef, ViewChild } fro
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
 import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
+import { catalogText, CatalogTextKey } from './catalog-backoffice-locale';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
 type Brand = { id: string; name: string; description: string; active: boolean };
@@ -17,63 +18,64 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
     template: `
     <section>
       <div class="panel">
-        <div class="panel-heading"><div><p class="eyebrow">CATALOG STRUCTURE</p><h2>Categories</h2></div><button class="link-button" (click)="load()">Refresh</button></div>
+        <div class="panel-heading"><div><p class="eyebrow">{{ct('structure')}}</p><h2>{{ct('categories')}}</h2></div><button class="link-button" (click)="load()">{{ct('refresh')}}</button></div>
         <form class="create-form" (ngSubmit)="createCategory()">
-          <input [(ngModel)]="categoryDraft.name" name="categoryName" maxlength="120" placeholder="Category name" required>
-          <artio-search-select [(ngModel)]="categoryDraft.parentId" name="categoryParent" label="Parent category" [options]="parentOptions" placeholder="Top-level category"></artio-search-select>
-          <button class="primary">Add category</button>
+          <label class="sr-only" for="new-category-name">{{ct('categoryName')}}</label>
+          <input id="new-category-name" [(ngModel)]="categoryDraft.name" name="categoryName" maxlength="120" [placeholder]="ct('categoryName')" required>
+          <artio-search-select [(ngModel)]="categoryDraft.parentId" name="categoryParent" [label]="ct('parentCategory')" [options]="parentOptions" [placeholder]="ct('topLevel')"></artio-search-select>
+          <button class="primary">{{ct('addCategory')}}</button>
         </form>
         @for (category of categories; track category) {
-          <div class="row"><span class="row-main"><strong>{{category.name}}</strong><small>{{category.parentId?'Child of '+categoryName(category.parentId):'Top level'}} · {{category.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editCategory(category)">Edit</button><button class="link-button" (click)="toggleCategory(category)">{{category.active?'Deactivate':'Activate'}}</button></div>
+          <div class="row"><span class="row-main"><strong>{{category.name}}</strong><small>{{category.parentId?ct('childOf').replace('{name}',categoryName(category.parentId)):ct('topLevel')}} · {{category.active?ct('active'):ct('inactive')}}</small></span><button class="link-button" (click)="editCategory(category)">{{ct('edit')}}</button><button class="link-button" (click)="toggleCategory(category)">{{category.active?ct('deactivate'):ct('activate')}}</button></div>
         }
         @if (!categories.length) {
-          <p class="empty">No categories are configured.</p>
+          <p class="empty">{{ct('noCategories')}}</p>
         }
       </div>
 
       @if (products.length) {
         <div class="panel">
-          <div class="panel-heading"><div><p class="eyebrow">PRODUCT CLASSIFICATION</p><h2>Assign catalog data</h2></div></div>
-          <div class="setup-field"><span>Product</span><artio-search-select [(ngModel)]="selectedProductId" name="metadataProduct" (ngModelChange)="selectProduct($event)" label="Product to classify" [options]="productOptions" placeholder="Choose a product"></artio-search-select></div>
+          <div class="panel-heading"><div><p class="eyebrow">{{ct('classification')}}</p><h2>{{ct('assignData')}}</h2></div></div>
+          <div class="setup-field"><span>{{ct('product')}}</span><artio-search-select [(ngModel)]="selectedProductId" name="metadataProduct" (ngModelChange)="selectProduct($event)" [label]="ct('productToClassify')" [options]="productOptions" [placeholder]="ct('chooseProduct')"></artio-search-select></div>
           @if (selectedProduct) {
             <form (ngSubmit)="saveProductMetadata()">
-              <div class="setup-field"><span>Brand</span><artio-search-select [(ngModel)]="productDraft.brandId" name="productBrand" label="Product brand" [options]="brandOptions" placeholder="No brand"></artio-search-select></div>
-              <h3>Categories</h3><artio-search-select [(ngModel)]="productDraft.categoryIds" name="productCategories" label="Product categories" [options]="categoryOptions" [multiple]="true" placeholder="Choose categories"></artio-search-select>
-              <h3>Attributes</h3>@for (attribute of productAttributeDefinitions; track attribute) {
-              <div><label>{{attribute.label}} · {{attribute.code}}<small>{{attribute.required?'Required':'Optional'}}{{attribute.active?'':' · inactive, retained read-only'}}</small>@if (attribute.type==='BOOLEAN') {
-              <select [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [disabled]="!attribute.active"><option value="">Unset</option><option value="true">Yes</option><option value="false">No</option></select>
+              <div class="setup-field"><span>{{ct('brand')}}</span><artio-search-select [(ngModel)]="productDraft.brandId" name="productBrand" [label]="ct('productBrand')" [options]="brandOptions" [placeholder]="ct('noBrand')"></artio-search-select></div>
+              <h3>{{ct('categoriesLabel')}}</h3><artio-search-select [(ngModel)]="productDraft.categoryIds" name="productCategories" [label]="ct('categoriesLabel')" [options]="categoryOptions" [multiple]="true" [placeholder]="ct('chooseCategories')"></artio-search-select>
+              <h3>{{ct('attributes')}}</h3>@for (attribute of productAttributeDefinitions; track attribute) {
+              <div><label>{{attribute.label}} · {{attribute.code}}<small>{{attribute.required?ct('required'):ct('optional')}}{{attribute.active?'':' · '+ct('inactiveRetained')}}</small>@if (attribute.type==='BOOLEAN') {
+              <select [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [disabled]="!attribute.active"><option value="">{{ct('unset')}}</option><option value="true">{{ct('yes')}}</option><option value="false">{{ct('no')}}</option></select>
               }@if (attribute.type!=='BOOLEAN') {
               <input [type]="attribute.type==='NUMBER'?'number':'text'" [ngModel]="productDraft.attributes[attribute.code]||''" (ngModelChange)="setAttribute(attribute.code,$event)" [name]="'attribute-'+attribute.code" [required]="attribute.required&&attribute.active" [disabled]="!attribute.active">
             }</label></div>
           }
-          <button class="primary">Save product classification</button>
+          <button class="primary">{{ct('saveClassification')}}</button>
         </form>
       }
       @if (selectedProduct) {
-        <p class="muted">Inactive categories and definitions cannot be newly assigned. Existing inactive attribute values are preserved until the definition is reactivated.</p>
+        <p class="muted">{{ct('inactiveDefinitionsHelp')}}</p>
       }
     </div>
     }
 
     <div class="panel">
-      <div class="panel-heading"><div><p class="eyebrow">MANUFACTURERS</p><h2>Brands</h2></div></div>
-      <form class="create-form" (ngSubmit)="createBrand()"><input [(ngModel)]="brandDraft.name" name="brandName" maxlength="160" placeholder="Brand name" required><input [(ngModel)]="brandDraft.description" name="brandDescription" maxlength="1000" placeholder="Description"><button class="primary">Add brand</button></form>
+      <div class="panel-heading"><div><p class="eyebrow">{{ct('manufacturers')}}</p><h2>{{ct('brands')}}</h2></div></div>
+      <form class="create-form" (ngSubmit)="createBrand()"><label class="sr-only" for="new-brand-name">{{ct('brandName')}}</label><input id="new-brand-name" [(ngModel)]="brandDraft.name" name="brandName" maxlength="160" [placeholder]="ct('brandName')" required><label class="sr-only" for="new-brand-description">{{ct('description')}}</label><input id="new-brand-description" [(ngModel)]="brandDraft.description" name="brandDescription" maxlength="1000" [placeholder]="ct('description')"><button class="primary">{{ct('addBrand')}}</button></form>
       @for (brand of brands; track brand) {
-        <div class="row"><span class="row-main"><strong>{{brand.name}}</strong><small>{{brand.description}} · {{brand.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editBrand(brand)">Edit</button><button class="link-button" (click)="toggleBrand(brand)">{{brand.active?'Deactivate':'Activate'}}</button></div>
+        <div class="row"><span class="row-main"><strong>{{brand.name}}</strong><small>{{brand.description}} · {{brand.active?ct('active'):ct('inactive')}}</small></span><button class="link-button" (click)="editBrand(brand)">{{ct('edit')}}</button><button class="link-button" (click)="toggleBrand(brand)">{{brand.active?ct('deactivate'):ct('activate')}}</button></div>
       }
       @if (!brands.length) {
-        <p class="empty">No brands are configured.</p>
+        <p class="empty">{{ct('noBrands')}}</p>
       }
     </div>
 
     <div class="panel">
-      <div class="panel-heading"><div><p class="eyebrow">PRODUCT DATA</p><h2>Attribute definitions</h2></div></div>
-      <form class="create-form" (ngSubmit)="createAttribute()"><input [(ngModel)]="attributeDraft.code" name="attributeCode" pattern="[A-Z][A-Z0-9_]{1,31}" maxlength="32" placeholder="CODE" required><input [(ngModel)]="attributeDraft.label" name="attributeLabel" maxlength="120" placeholder="Label" required><select [(ngModel)]="attributeDraft.type" name="attributeType"><option value="TEXT">Text</option><option value="NUMBER">Number</option><option value="BOOLEAN">Boolean</option></select><label><input type="checkbox" [(ngModel)]="attributeDraft.required" name="attributeRequired"> Required</label><button class="primary">Add attribute</button></form>
+      <div class="panel-heading"><div><p class="eyebrow">{{ct('productData')}}</p><h2>{{ct('attributeDefinitions')}}</h2></div></div>
+      <form class="create-form" (ngSubmit)="createAttribute()"><label class="sr-only" for="new-attribute-code">{{ct('code')}}</label><input id="new-attribute-code" [(ngModel)]="attributeDraft.code" name="attributeCode" pattern="[A-Z][A-Z0-9_]{1,31}" maxlength="32" [placeholder]="ct('code')" required><label class="sr-only" for="new-attribute-label">{{ct('label')}}</label><input id="new-attribute-label" [(ngModel)]="attributeDraft.label" name="attributeLabel" maxlength="120" [placeholder]="ct('label')" required><label class="sr-only" for="new-attribute-type">{{ct('attributes')}}</label><select id="new-attribute-type" [(ngModel)]="attributeDraft.type" name="attributeType"><option value="TEXT">{{ct('text')}}</option><option value="NUMBER">{{ct('number')}}</option><option value="BOOLEAN">{{ct('boolean')}}</option></select><label><input type="checkbox" [(ngModel)]="attributeDraft.required" name="attributeRequired"> {{ct('required')}}</label><button class="primary">{{ct('addAttribute')}}</button></form>
       @for (attribute of attributes; track attribute) {
-        <div class="row"><span class="row-main"><strong>{{attribute.label}} · {{attribute.code}}</strong><small>{{attribute.type}} · {{attribute.required?'Required':'Optional'}} · {{attribute.active?'Active':'Inactive'}}</small></span><button class="link-button" (click)="editAttribute(attribute)">Rename</button><button class="link-button" (click)="toggleAttribute(attribute)">{{attribute.active?'Deactivate':'Activate'}}</button></div>
+        <div class="row"><span class="row-main"><strong>{{attribute.label}} · {{attribute.code}}</strong><small>{{attribute.type}} · {{attribute.required?ct('required'):ct('optional')}} · {{attribute.active?ct('active'):ct('inactive')}}</small></span><button class="link-button" (click)="editAttribute(attribute)">{{ct('rename')}}</button><button class="link-button" (click)="toggleAttribute(attribute)">{{attribute.active?ct('deactivate'):ct('activate')}}</button></div>
       }
       @if (!attributes.length) {
-        <p class="empty">No attribute definitions are configured.</p>
+        <p class="empty">{{ct('noAttributes')}}</p>
       }
     </div>
     @if (error) {
@@ -128,10 +130,10 @@ export class CatalogMetadataAdminComponent {
   brandDraft = { name: '', description: '' };
   attributeDraft = { code: '', label: '', type: 'TEXT' as AttributeDefinition['type'], required: false };
 
-  get parentOptions():SelectOption[]{return [{value:'',label:'Top-level category'},...this.categories.map(x=>({value:x.id,label:x.name}))];}
+  get parentOptions():SelectOption[]{return [{value:'',label:this.ct('topLevel')},...this.categories.map(x=>({value:x.id,label:x.name}))];}
   get productOptions():SelectOption[]{return this.products.map(x=>({value:x.id,label:x.name,detail:x.sku}));}
-  get brandOptions():SelectOption[]{return [{value:'',label:'No brand'},...this.brands.map(x=>({value:x.id,label:x.name,disabled:!x.active,detail:x.active?'':'Inactive'}))];}
-  get categoryOptions():SelectOption[]{return this.categories.map(x=>({value:x.id,label:x.name,disabled:!x.active,detail:x.parentId?'Under '+this.categoryName(x.parentId):x.active?'Top level':'Inactive'}));}
+  get brandOptions():SelectOption[]{return [{value:'',label:this.ct('noBrand')},...this.brands.map(x=>({value:x.id,label:x.name,disabled:!x.active,detail:x.active?'':this.ct('inactive')}))];}
+  get categoryOptions():SelectOption[]{return this.categories.map(x=>({value:x.id,label:x.name,disabled:!x.active,detail:x.parentId?this.ct('childOf').replace('{name}',this.categoryName(x.parentId)):x.active?this.ct('topLevel'):this.ct('inactive')}));}
   constructor() { this.load(); this.loadProducts(); }
 
   get productAttributeDefinitions(): AttributeDefinition[] {
@@ -140,43 +142,43 @@ export class CatalogMetadataAdminComponent {
   }
 
   load(): void {
-    this.http.get<Category[]>('/api/v1/categories').subscribe({ next: rows => this.categories = rows, error: e => this.fail(e, 'Could not load categories.') });
-    this.http.get<Brand[]>('/api/v1/brands').subscribe({ next: rows => this.brands = rows, error: e => this.fail(e, 'Could not load brands.') });
-    this.http.get<AttributeDefinition[]>('/api/v1/attribute-definitions').subscribe({ next: rows => this.attributes = rows, error: e => this.fail(e, 'Could not load attribute definitions.') });
+    this.http.get<Category[]>('/api/v1/categories').subscribe({ next: rows => this.categories = rows, error: e => this.fail(e, this.ct('loadCategoriesFailure')) });
+    this.http.get<Brand[]>('/api/v1/brands').subscribe({ next: rows => this.brands = rows, error: e => this.fail(e, this.ct('loadBrandsFailure')) });
+    this.http.get<AttributeDefinition[]>('/api/v1/attribute-definitions').subscribe({ next: rows => this.attributes = rows, error: e => this.fail(e, this.ct('loadAttributesFailure')) });
   }
 
-  loadProducts(): void { this.http.get<CatalogProduct[]>('/api/v1/products').subscribe({next:rows=>this.products=rows,error:e=>this.fail(e,'Could not load products for classification.')}); }
+  loadProducts(): void { this.http.get<CatalogProduct[]>('/api/v1/products').subscribe({next:rows=>this.products=rows,error:e=>this.fail(e,this.ct('loadProductsFailure'))}); }
   selectProduct(id:string):void{this.selectedProduct=this.products.find(row=>row.id===id)??null;if(!this.selectedProduct)return;this.productDraft={brandId:this.selectedProduct.brandId??'',categoryIds:[...this.selectedProduct.categoryIds],attributes:{...this.selectedProduct.attributes}};}
   toggleProductCategory(id:string,event:Event):void{const checked=(event.target as HTMLInputElement).checked;this.productDraft.categoryIds=checked?[...this.productDraft.categoryIds,id]:this.productDraft.categoryIds.filter(value=>value!==id);}
   setAttribute(code:string,value:string):void{this.productDraft.attributes={...this.productDraft.attributes,[code]:value};}
-  saveProductMetadata():void{if(!this.selectedProduct)return;const attributes=Object.fromEntries(Object.entries(this.productDraft.attributes).map(([key,value])=>[key,value===''?null:value]));this.http.put(`/api/v1/products/${this.selectedProduct.id}/catalog-metadata`,{brandId:this.productDraft.brandId||null,categoryIds:this.productDraft.categoryIds,attributes}).subscribe({next:()=>{this.error='';this.loadProducts();this.selectedProduct=null;this.selectedProductId='';},error:e=>this.fail(e,'Could not save product classification.')});}
+  saveProductMetadata():void{if(!this.selectedProduct)return;const attributes=Object.fromEntries(Object.entries(this.productDraft.attributes).map(([key,value])=>[key,value===''?null:value]));this.http.put(`/api/v1/products/${this.selectedProduct.id}/catalog-metadata`,{brandId:this.productDraft.brandId||null,categoryIds:this.productDraft.categoryIds,attributes}).subscribe({next:()=>{this.error='';this.loadProducts();this.selectedProduct=null;this.selectedProductId='';},error:e=>this.fail(e,this.ct('saveClassificationFailure'))});}
 
-  categoryName(id: string): string { return this.categories.find(row => row.id === id)?.name ?? 'Unknown parent'; }
+  categoryName(id: string): string { return this.categories.find(row => row.id === id)?.name ?? this.ct('unknownParent'); }
   createCategory(): void {
     this.http.post<Category>('/api/v1/categories', { name: this.categoryDraft.name.trim(), parentId: this.categoryDraft.parentId || null, active: true }).subscribe({
-      next: () => { this.categoryDraft = { name: '', parentId: '' }; this.load(); this.error = ''; }, error: e => this.fail(e, 'Could not create category.')
+      next: () => { this.categoryDraft = { name: '', parentId: '' }; this.load(); this.error = ''; }, error: e => this.fail(e, this.ct('createCategoryFailure'))
     });
   }
   editCategory(row: Category): void {
     this.openCatalogEditor('category',{...row,parentId:row.parentId??''});
   }
   toggleCategory(row: Category): void {
-    this.http.put(`/api/v1/categories/${row.id}`, { name: row.name, parentId: row.parentId, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, 'Could not change category status.') });
+    this.http.put(`/api/v1/categories/${row.id}`, { name: row.name, parentId: row.parentId, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, this.ct('changeCategoryFailure')) });
   }
 
   createBrand(): void {
-    this.http.post('/api/v1/brands', { ...this.brandDraft, name: this.brandDraft.name.trim(), active: true }).subscribe({ next: () => { this.brandDraft = { name: '', description: '' }; this.load(); this.error = ''; }, error: e => this.fail(e, 'Could not create brand.') });
+    this.http.post('/api/v1/brands', { ...this.brandDraft, name: this.brandDraft.name.trim(), active: true }).subscribe({ next: () => { this.brandDraft = { name: '', description: '' }; this.load(); this.error = ''; }, error: e => this.fail(e, this.ct('createBrandFailure')) });
   }
   editBrand(row: Brand): void {
     this.openCatalogEditor('brand',{...row});
   }
   toggleBrand(row: Brand): void {
-    this.http.put(`/api/v1/brands/${row.id}`, { name: row.name, description: row.description, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, 'Could not change brand status.') });
+    this.http.put(`/api/v1/brands/${row.id}`, { name: row.name, description: row.description, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, this.ct('changeBrandFailure')) });
   }
 
   createAttribute(): void {
     this.http.post('/api/v1/attribute-definitions', { ...this.attributeDraft, code: this.attributeDraft.code.trim().toUpperCase(), label: this.attributeDraft.label.trim() }).subscribe({
-      next: () => { this.attributeDraft = { code: '', label: '', type: 'TEXT', required: false }; this.load(); this.error = ''; }, error: e => this.fail(e, 'Could not create attribute definition.')
+      next: () => { this.attributeDraft = { code: '', label: '', type: 'TEXT', required: false }; this.load(); this.error = ''; }, error: e => this.fail(e, this.ct('createAttributeFailure'))
     });
   }
   editAttribute(row: AttributeDefinition): void {
@@ -189,8 +191,9 @@ export class CatalogMetadataAdminComponent {
   closeCatalogEditor():void{if(!this.catalogEditorBusy)this.catalogEditorDialogRef?.nativeElement.close()}
   saveCatalogEdit():void{const edit=this.catalogEditor;if(!edit||this.catalogEditorBusy)return;const label=edit.kind==='attribute'?edit.label.trim():edit.name.trim();if(!label){this.catalogEditorError=this.t('catalogEditRequired');return}let request;if(edit.kind==='category')request=this.http.put(`/api/v1/categories/${edit.id}`,{name:label,parentId:edit.parentId||null,active:edit.active});else if(edit.kind==='brand')request=this.http.put(`/api/v1/brands/${edit.id}`,{name:label,description:edit.description.trim(),active:edit.active});else request=this.http.put(`/api/v1/attribute-definitions/${edit.id}`,{label,active:edit.active});this.catalogEditorBusy=true;this.catalogEditorError='';request.subscribe({next:()=>{this.catalogEditorBusy=false;this.catalogEditorDialogRef?.nativeElement.close();this.load();this.error=''},error:e=>{this.catalogEditorBusy=false;this.catalogEditorError=e.error?.detail??this.t('catalogEditFailure')}})}
   toggleAttribute(row: AttributeDefinition): void {
-    this.http.put(`/api/v1/attribute-definitions/${row.id}`, { label: row.label, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, 'Could not change attribute status.') });
+    this.http.put(`/api/v1/attribute-definitions/${row.id}`, { label: row.label, active: !row.active }).subscribe({ next: () => this.load(), error: e => this.fail(e, this.ct('changeAttributeFailure')) });
   }
 
   private fail(error: any, fallback: string): void { this.error = error.error?.detail ?? fallback; }
+  ct(key: CatalogTextKey): string { return catalogText(currentBackofficeLocale(), key); }
 }

@@ -22,4 +22,17 @@ val npmBuild = tasks.register<Exec>("npmBuild") {
     outputs.dir("dist")
 }
 
+if (file("tsconfig.spec.json").exists()) {
+    val npmTest = tasks.register<Exec>("npmTest") {
+        group = "verification"
+        description = "Runs the Angular application unit tests."
+        dependsOn(npmInstall)
+        workingDir(projectDir)
+        commandLine(npmCommand, "test")
+        inputs.dir("src")
+        inputs.files("package.json", "package-lock.json", "angular.json", "tsconfig.json", "tsconfig.spec.json")
+    }
+    tasks.named("check") { dependsOn(npmTest) }
+}
+
 tasks.named("build") { dependsOn(npmBuild) }
