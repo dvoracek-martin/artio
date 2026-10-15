@@ -1,6 +1,7 @@
 .gradle/
 .gradle-home/
 **/build/
+!buildSrc/src/main/kotlin/io/artio/build/
 .idea/
 *.iml
 .vscode/
