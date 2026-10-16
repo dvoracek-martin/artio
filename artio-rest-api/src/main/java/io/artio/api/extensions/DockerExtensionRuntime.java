@@ -15,6 +15,7 @@ import io.artio.extensions.PluginManifest;
 import io.artio.extensions.ExtensionRuntimePort;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
@@ -213,8 +214,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             requireManaged(current, manifest.id(), runtimeIdentity);
             if (Boolean.TRUE.equals(current.getState().getRunning())) return;
             var existingEnvironment = current.getConfig() == null ? null : current.getConfig().getEnv();
-            if (existingEnvironment != null && java.util.Arrays.equals(existingEnvironment, environment.toArray(String[]::new))) {
+            if (service.secretFileBindings().isEmpty() && existingEnvironment != null
+                    && java.util.Arrays.equals(existingEnvironment, environment.toArray(String[]::new))) {
                 docker.startContainerCmd(name).exec();
+                copySecretFiles(name, manifest, service, configuration);
                 return;
             }
             docker.removeContainerCmd(current.getId()).withForce(false).exec();
@@ -222,6 +225,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             // Create only containers owned by this runtime; no mounts, published ports or caller-supplied options.
         }
         HostConfig host = restrictedHostConfig(network, service.memoryBytes());
+        if (!service.secretFileBindings().isEmpty()) {
+            host.withTmpFs(Map.of("/tmp", "rw,noexec,nosuid,size=16m",
+                    "/run/secrets", "rw,noexec,nosuid,nodev,size=1m,uid=10001,gid=10001,mode=0700"));
+        }
         if (!service.persistentPaths().isEmpty()) host.withBinds(persistentBinds(manifest.id(), runtimeIdentity, service));
         if (hostLoopbackTestAccess) {
             var bindings = new com.github.dockerjava.api.model.Ports();
@@ -246,6 +253,59 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         create.withEnv(environment);
         create.exec();
         docker.startContainerCmd(name).exec();
+        copySecretFiles(name, manifest, service, configuration);
+    }
+
+    private void copySecretFiles(String containerName, PluginManifest manifest, RuntimeService service,
+            Map<String, String> configuration) {
+        if (service.secretFileBindings().isEmpty()) return;
+        try {
+            byte[] archive = secretFilesArchive(service.secretFileBindings(), manifest.configuration(), configuration);
+            docker.copyArchiveToContainerCmd(containerName).withRemotePath("/run/secrets").withTarInputStream(
+                    new java.io.ByteArrayInputStream(archive)).exec();
+        } catch (IOException failure) {
+            throw new IllegalStateException("Plugin secret files could not be delivered", failure);
+        }
+    }
+
+    static byte[] secretFilesArchive(Map<String, String> bindings, Map<String, PluginManifest.ConfigField> schema,
+            Map<String, String> configuration) throws IOException {
+        if (bindings == null || bindings.isEmpty()) return new byte[0];
+        if (bindings.size() > 32) throw new IllegalArgumentException("Plugin secret file count exceeds its limit");
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (var tar = new org.apache.commons.compress.archivers.tar.TarArchiveOutputStream(bytes)) {
+            tar.setLongFileMode(org.apache.commons.compress.archivers.tar.TarArchiveOutputStream.LONGFILE_ERROR);
+            long total = 0;
+            for (var binding : bindings.entrySet()) {
+                String path = binding.getKey();
+                String key = binding.getValue();
+                PluginManifest.ConfigField field = key == null ? null : schema.get(key);
+                if (path == null || !path.matches("/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+                        || path.contains("..") || field == null || !"secret".equals(field.type()) || !field.secret()) {
+                    throw new IllegalArgumentException("Plugin secret file binding is invalid");
+                }
+                String value = configuration.get(key);
+                if (value == null) {
+                    if (field.required()) throw new IllegalStateException("Required plugin secret is missing");
+                    continue;
+                }
+                byte[] content = value.getBytes(StandardCharsets.UTF_8);
+                if (content.length > 10_000 || (total += content.length) > 900_000) {
+                    throw new IllegalArgumentException("Plugin secret files exceed their size limit");
+                }
+                String filename = path.substring("/run/secrets/".length());
+                var entry = new org.apache.commons.compress.archivers.tar.TarArchiveEntry(filename);
+                entry.setSize(content.length);
+                entry.setMode(0600);
+                entry.setUserId(10001);
+                entry.setGroupId(10001);
+                tar.putArchiveEntry(entry);
+                tar.write(content);
+                tar.closeArchiveEntry();
+            }
+            tar.finish();
+        }
+        return bytes.toByteArray();
     }
 
     private boolean hasLocalImage(String image) {
@@ -793,9 +853,9 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private java.util.List<RuntimeService> services(PluginManifest manifest) {
         var result = new java.util.ArrayList<RuntimeService>();
         result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true,
-                manifest.configurationBindings(), manifest.persistentPaths(), List.of(), 0, 268_435_456L));
+                manifest.configurationBindings(), manifest.secretFileBindings(), manifest.persistentPaths(), List.of(), 0, 268_435_456L));
         for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(),
-                service.healthPath(), false, service.configurationBindings(), service.persistentPaths(), service.internalPorts(), 0,
+                service.healthPath(), false, service.configurationBindings(), service.secretFileBindings(), service.persistentPaths(), service.internalPorts(), 0,
                 (service.memoryLimitMb() == null ? 256L : service.memoryLimitMb().longValue()) * 1_048_576L));
         return java.util.List.copyOf(result);
     }
@@ -814,7 +874,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         for (int index = 0; index < ordered.size(); index++) {
             RuntimeService service = ordered.get(index);
             indexed.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(),
-                    service.primary(), service.configurationBindings(), service.persistentPaths(), service.internalPorts(), index,
+                    service.primary(), service.configurationBindings(), service.secretFileBindings(), service.persistentPaths(), service.internalPorts(), index,
                     service.memoryBytes()));
         }
         return java.util.List.copyOf(indexed);
@@ -848,7 +908,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     private record RuntimeService(String id, String image, int port, String healthPath, boolean primary,
-                                  Map<String, String> configurationBindings, java.util.List<String> persistentPaths,
+                                  Map<String, String> configurationBindings, Map<String, String> secretFileBindings,
+                                  java.util.List<String> persistentPaths,
                                   java.util.List<Integer> internalPorts, int startupOrder, long memoryBytes) { }
 
     private static String jsonEscape(String value) {

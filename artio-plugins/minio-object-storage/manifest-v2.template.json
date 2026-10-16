@@ -1,0 +1,72 @@
+{
+  "packageManifest": {
+    "manifestVersion": "2",
+    "id": "storage.artio-minio",
+    "name": "Artio MinIO Object Storage",
+    "vendor": "Artio",
+    "version": "1.0.0",
+    "description": "Private S3-compatible object storage backed by an administrator-approved MinIO endpoint.",
+    "minimumCoreVersion": "0.1.0",
+    "maximumCoreVersion": "9.0.0",
+    "image": "ghcr.io/artio-plugins/minio-object-storage@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+    "extensionPoints": [],
+    "healthPath": "/health",
+    "diagnosticsPath": "/diagnostics",
+    "persistentPaths": ["/data"],
+    "configuration": {
+      "endpoint": {
+        "type": "url", "required": true, "secret": false,
+        "label": "MinIO endpoint", "description": "HTTPS S3 API endpoint approved by the administrator.",
+        "format": "uri", "options": [], "minimumLength": 8, "maximumLength": 512,
+        "minimum": null, "maximum": null
+      },
+      "bucket": {
+        "type": "text", "required": true, "secret": false,
+        "label": "Bucket", "description": "Pre-provisioned private bucket.",
+        "format": null, "options": [], "minimumLength": 3, "maximumLength": 63,
+        "minimum": null, "maximum": null
+      },
+      "prefix": {
+        "type": "text", "required": true, "secret": false,
+        "label": "Object prefix", "description": "Dedicated namespace assigned to this plugin instance.",
+        "format": null, "options": [], "minimumLength": 1, "maximumLength": 512,
+        "minimum": null, "maximum": null
+      },
+      "region": {
+        "type": "text", "required": true, "secret": false,
+        "label": "Signing region", "description": "S3 signing region, commonly us-east-1 for MinIO.",
+        "format": null, "options": [], "minimumLength": 1, "maximumLength": 64,
+        "minimum": null, "maximum": null
+      },
+      "addressingStyle": {
+        "type": "enum", "required": true, "secret": false,
+        "label": "Addressing style", "description": "Use path style for most MinIO installations.",
+        "format": null, "options": ["path", "virtual"], "minimumLength": null, "maximumLength": null,
+        "minimum": null, "maximum": null
+      },
+      "s3CredentialsJson": {
+        "type": "secret", "required": true, "secret": true,
+        "label": "Scoped S3 credentials", "description": "Write-only JSON with accessKeyId and secretAccessKey for this bucket prefix.",
+        "format": null, "options": [], "minimumLength": 2, "maximumLength": 10000,
+        "minimum": null, "maximum": null
+      }
+    },
+    "configurationBindings": {
+      "ARTIO_S3_ENDPOINT": "endpoint",
+      "ARTIO_S3_BUCKET": "bucket",
+      "ARTIO_S3_PREFIX": "prefix",
+      "ARTIO_S3_REGION": "region",
+      "ARTIO_S3_ADDRESSING_STYLE": "addressingStyle"
+    },
+    "secretFileBindings": {
+      "/run/secrets/s3-credentials.json": "s3CredentialsJson"
+    },
+    "geographicAvailability": {"scope": "GLOBAL", "countries": []}
+  },
+  "capabilities": [{
+    "capabilityId": "storage.object.v1",
+    "operations": ["put", "get", "head", "delete"],
+    "permissions": ["storage.object.write", "storage.object.read", "storage.object.delete"]
+  }],
+  "subscriptions": []
+}

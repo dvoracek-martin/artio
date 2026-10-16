@@ -173,7 +173,7 @@ public final class OfficialMarketplaceReleaseRegistration {
         return new PluginManifest("1", source.id(), source.name(), source.vendor(), source.version(), source.description(),
                 source.minimumCoreVersion(), source.maximumCoreVersion(), source.image(), source.dependencies(), List.of(),
                 source.configuration(), List.of(), source.healthPath(), source.diagnosticsPath(), source.geographicAvailability(),
-                source.services(), source.persistentPaths(), source.configurationBindings());
+                source.services(), source.persistentPaths(), source.configurationBindings(), source.secretFileBindings());
     }
 
     private String write(Object value) {

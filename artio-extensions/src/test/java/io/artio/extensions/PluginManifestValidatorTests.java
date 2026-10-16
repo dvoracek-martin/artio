@@ -255,6 +255,25 @@ class PluginManifestValidatorTests {
                         "bundle service dashboard environment binding references an unknown configuration field");
     }
 
+    @Test
+    void permitsSecretFilesOnlyForDeclaredSecretsInsideRunSecrets() {
+        var base = validManifest();
+        var valid = new PluginManifest(base.manifestVersion(), base.id(), base.name(), base.vendor(), base.version(),
+                base.description(), base.minimumCoreVersion(), base.maximumCoreVersion(), base.image(),
+                base.dependencies(), base.permissions(), base.configuration(), base.extensionPoints(), base.healthPath(),
+                base.diagnosticsPath(), base.geographicAvailability(), List.of(), List.of(), Map.of(),
+                Map.of("/run/secrets/provider-key", "apiKey"));
+        assertThat(validator.validate(valid, "0.1.0", Set.of())).isEmpty();
+
+        var invalid = new PluginManifest(base.manifestVersion(), base.id(), base.name(), base.vendor(), base.version(),
+                base.description(), base.minimumCoreVersion(), base.maximumCoreVersion(), base.image(),
+                base.dependencies(), base.permissions(), base.configuration(), base.extensionPoints(), base.healthPath(),
+                base.diagnosticsPath(), base.geographicAvailability(), List.of(), List.of(), Map.of(),
+                Map.of("/etc/provider-key", "apiKey"));
+        assertThat(validator.validate(invalid, "0.1.0", Set.of()))
+                .contains("primary service has an invalid secret file path");
+    }
+
     private static PluginManifest validManifest() {
         return new PluginManifest("1", "payments.stripe", "Stripe", "Artio", "1.0.0", "Payment adapter",
                 "0.1.0", "1.0.0", "ghcr.io/artio/stripe@sha256:" + "a".repeat(64), List.of(), List.of("payment.process"),

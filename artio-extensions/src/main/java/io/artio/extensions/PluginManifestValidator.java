@@ -68,6 +68,7 @@ public final class PluginManifestValidator {
         if (manifest.configuration().size() > 100) errors.add("configuration schema exceeds 100 fields");
         manifest.configuration().forEach((key, field) -> validateField(key, field, errors));
         validateConfigurationBindings(manifest.configurationBindings(), manifest.configuration(), "primary service", errors);
+        validateSecretFileBindings(manifest.secretFileBindings(), manifest.configuration(), "primary service", errors);
         validatePath(manifest.healthPath(), "healthPath", errors);
         validatePath(manifest.diagnosticsPath(), "diagnosticsPath", errors);
         validatePersistentPaths(manifest.persistentPaths(), "primary plugin", errors);
@@ -87,6 +88,8 @@ public final class PluginManifestValidator {
             }
             validatePath(service.healthPath(), "bundle service healthPath", errors);
             validateConfigurationBindings(service.configurationBindings(), manifest.configuration(),
+                    "bundle service " + service.id(), errors);
+            validateSecretFileBindings(service.secretFileBindings(), manifest.configuration(),
                     "bundle service " + service.id(), errors);
             validatePersistentPaths(service.persistentPaths(), "bundle service " + service.id(), errors);
             if (service.internalPorts().size() > 8) errors.add("bundle service may declare at most 8 additional private ports");
@@ -126,7 +129,7 @@ public final class PluginManifestValidator {
                 source.version(), source.description(), source.minimumCoreVersion(), source.maximumCoreVersion(),
                 source.image(), source.dependencies(), List.of(), source.configuration(), List.of(), source.healthPath(),
                 source.diagnosticsPath(), source.geographicAvailability(), source.services(), source.persistentPaths(),
-                source.configurationBindings());
+                source.configurationBindings(), source.secretFileBindings());
         List<String> errors = new ArrayList<>(validate(packageMetadata, coreVersion, installedPluginIds));
         if (!source.extensionPoints().isEmpty()) errors.add("v2 manifests must declare capabilities instead of legacy extensionPoints");
         if (!source.permissions().isEmpty()) errors.add("v2 manifests must declare permissions on capability operations");
@@ -246,6 +249,23 @@ public final class PluginManifestValidator {
                 }
             }
         });
+    }
+
+    private static void validateSecretFileBindings(java.util.Map<String, String> bindings,
+            java.util.Map<String, PluginManifest.ConfigField> schema, String service, List<String> errors) {
+        Set<String> paths = new HashSet<>();
+        bindings.forEach((path, configurationKey) -> {
+            if (path == null || !path.matches("/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]{0,63}") || path.contains("..")) {
+                errors.add(service + " has an invalid secret file path");
+            } else if (!paths.add(path)) {
+                errors.add(service + " has a duplicate secret file path");
+            }
+            PluginManifest.ConfigField field = configurationKey == null ? null : schema.get(configurationKey);
+            if (field == null || !"secret".equals(field.type()) || !field.secret()) {
+                errors.add(service + " secret file binding must reference a declared secret field");
+            }
+        });
+        if (bindings.size() > 32) errors.add(service + " may declare at most 32 secret file bindings");
     }
 
     private static void validatePath(String path, String field, List<String> errors) {

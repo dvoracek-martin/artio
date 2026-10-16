@@ -24,7 +24,8 @@ public record PluginManifest(
         GeographicAvailability geographicAvailability,
         List<BundleService> services,
         List<String> persistentPaths,
-        Map<String, String> configurationBindings) {
+        Map<String, String> configurationBindings,
+        Map<String, String> secretFileBindings) {
 
     public PluginManifest {
         Objects.requireNonNull(manifestVersion, "Manifest version is required");
@@ -43,6 +44,7 @@ public record PluginManifest(
         services = immutableNullableList(services);
         persistentPaths = immutableNullableList(persistentPaths);
         configurationBindings = immutableNullableMap(configurationBindings);
+        secretFileBindings = immutableNullableMap(secretFileBindings);
     }
 
     /** Source-compatible constructor for manifests created before primary-container persistent paths. */
@@ -54,7 +56,19 @@ public record PluginManifest(
             Map<String, String> configurationBindings) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                geographicAvailability, services, List.of(), configurationBindings);
+                geographicAvailability, services, List.of(), configurationBindings, Map.of());
+    }
+
+    /** Source-compatible constructor for manifests before protected secret-file delivery. */
+    public PluginManifest(String manifestVersion, String id, String name, String vendor, String version,
+            String description, String minimumCoreVersion, String maximumCoreVersion, String image,
+            List<Dependency> dependencies, List<String> permissions, Map<String, ConfigField> configuration,
+            List<String> extensionPoints, String healthPath, String diagnosticsPath,
+            GeographicAvailability geographicAvailability, List<BundleService> services,
+            List<String> persistentPaths, Map<String, String> configurationBindings) {
+        this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
+                image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
+                geographicAvailability, services, persistentPaths, configurationBindings, Map.of());
     }
 
     private static <T> List<T> immutableNullableList(List<T> values) {
@@ -73,7 +87,7 @@ public record PluginManifest(
             GeographicAvailability geographicAvailability, List<BundleService> services) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                geographicAvailability, services, List.of(), Map.of());
+                geographicAvailability, services, List.of(), Map.of(), Map.of());
     }
 
     /** Source-compatible constructor for manifests created before geographic metadata was added. */
@@ -83,7 +97,7 @@ public record PluginManifest(
             List<String> extensionPoints, String healthPath, String diagnosticsPath) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                GeographicAvailability.global(), List.of(), List.of(), Map.of());
+                GeographicAvailability.global(), List.of(), List.of(), Map.of(), Map.of());
     }
 
     /** Source-compatible constructor for v1 manifests with geographic metadata. */
@@ -94,17 +108,19 @@ public record PluginManifest(
             GeographicAvailability geographicAvailability) {
         this(manifestVersion, id, name, vendor, version, description, minimumCoreVersion, maximumCoreVersion,
                 image, dependencies, permissions, configuration, extensionPoints, healthPath, diagnosticsPath,
-                geographicAvailability, List.of(), List.of(), Map.of());
+                geographicAvailability, List.of(), List.of(), Map.of(), Map.of());
     }
 
     public record Dependency(String id, String minimumVersion, String maximumVersion) { }
 
     /** Optional private, non-invokable sidecar belonging to this plugin installation. */
     public record BundleService(String id, String image, int port, String healthPath,
-                                Map<String, String> configurationBindings, List<String> dependsOn,
+                                Map<String, String> configurationBindings, Map<String, String> secretFileBindings,
+                                List<String> dependsOn,
                                 List<String> persistentPaths, List<Integer> internalPorts, Integer memoryLimitMb) {
         public BundleService {
             configurationBindings = immutableNullableMap(configurationBindings);
+            secretFileBindings = immutableNullableMap(secretFileBindings);
             dependsOn = immutableNullableList(dependsOn);
             persistentPaths = immutableNullableList(persistentPaths);
             internalPorts = immutableNullableList(internalPorts);
@@ -113,27 +129,33 @@ public record PluginManifest(
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings, List<String> dependsOn,
                              List<String> persistentPaths) {
-            this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths, List.of(), null);
+            this(id, image, port, healthPath, configurationBindings, Map.of(), dependsOn, persistentPaths, List.of(), null);
+        }
+
+        public BundleService(String id, String image, int port, String healthPath,
+                             Map<String, String> configurationBindings, List<String> dependsOn,
+                             List<String> persistentPaths, List<Integer> internalPorts, Integer memoryLimitMb) {
+            this(id, image, port, healthPath, configurationBindings, Map.of(), dependsOn, persistentPaths, internalPorts, memoryLimitMb);
         }
 
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings, List<String> dependsOn,
                              List<String> persistentPaths, List<Integer> internalPorts) {
-            this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths, internalPorts, null);
+            this(id, image, port, healthPath, configurationBindings, Map.of(), dependsOn, persistentPaths, internalPorts, null);
         }
 
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings) {
-            this(id, image, port, healthPath, configurationBindings, List.of(), List.of(), List.of(), null);
+            this(id, image, port, healthPath, configurationBindings, Map.of(), List.of(), List.of(), List.of(), null);
         }
 
         public BundleService(String id, String image, int port, String healthPath,
                              Map<String, String> configurationBindings, List<String> dependsOn) {
-            this(id, image, port, healthPath, configurationBindings, dependsOn, List.of(), List.of(), null);
+            this(id, image, port, healthPath, configurationBindings, Map.of(), dependsOn, List.of(), List.of(), null);
         }
 
         public BundleService(String id, String image, int port, String healthPath) {
-            this(id, image, port, healthPath, Map.of(), List.of(), List.of(), List.of(), null);
+            this(id, image, port, healthPath, Map.of(), Map.of(), List.of(), List.of(), List.of(), null);
         }
     }
 

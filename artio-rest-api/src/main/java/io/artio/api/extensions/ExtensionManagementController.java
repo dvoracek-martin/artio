@@ -1547,7 +1547,7 @@ public class ExtensionManagementController {
         return new PluginManifest("1", source.id(), source.name(), source.vendor(), source.version(), source.description(),
                 source.minimumCoreVersion(), source.maximumCoreVersion(), source.image(), source.dependencies(), List.of(),
                 source.configuration(), List.of(), source.healthPath(), source.diagnosticsPath(), source.geographicAvailability(),
-                source.services(), source.persistentPaths(), source.configurationBindings());
+                source.services(), source.persistentPaths(), source.configurationBindings(), source.secretFileBindings());
     }
 
     private List<String> dependencyErrors(PluginManifest manifest, boolean requireEnabled) {
@@ -1668,8 +1668,11 @@ public class ExtensionManagementController {
         encryptedSecrets.forEach((key, ciphertext) -> {
             if (boundKeys.contains(key)) values.computeIfAbsent(key, ignored -> encryption.decrypt(ciphertext));
         });
-        long bytes = java.util.stream.Stream.concat(manifest.configurationBindings().entrySet().stream(),
-                manifest.services().stream().flatMap(service -> service.configurationBindings().entrySet().stream()))
+        var environmentBindings = java.util.stream.Stream.concat(manifest.configurationBindings().entrySet().stream(),
+                manifest.services().stream().flatMap(service -> service.configurationBindings().entrySet().stream()));
+        var secretFileBindings = java.util.stream.Stream.concat(manifest.secretFileBindings().entrySet().stream(),
+                manifest.services().stream().flatMap(service -> service.secretFileBindings().entrySet().stream()));
+        long bytes = java.util.stream.Stream.concat(environmentBindings, secretFileBindings)
                 .mapToLong(binding -> {
                     Object value = values.get(binding.getValue());
                     return value == null ? 0 : binding.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
@@ -1681,6 +1684,8 @@ public class ExtensionManagementController {
     private static Set<String> boundConfigurationKeys(PluginManifest manifest) {
         Set<String> keys = new java.util.HashSet<>(manifest.configurationBindings().values());
         manifest.services().forEach(service -> keys.addAll(service.configurationBindings().values()));
+        keys.addAll(manifest.secretFileBindings().values());
+        manifest.services().forEach(service -> keys.addAll(service.secretFileBindings().values()));
         return Set.copyOf(keys);
     }
 
