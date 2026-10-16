@@ -22,3 +22,4 @@ var/artio/media/
 **/.angular/cache/
 __pycache__/
 *.py[cod]
+/artio-plugins/minio-object-storage/acceptance/

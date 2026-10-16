@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 /** Restricted Docker runtime for digest-pinned extensions. The Docker daemon is an administrative trust boundary. */
 public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private static final String EGRESS_PROXY = "http://extension-egress:3128";
+    private static final String SECRET_FILE_HELPER_IMAGE = "python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4";
     private final int port;
     private static final long MAX_REQUEST_BYTES = 1_048_576;
     private static final long MAX_RESPONSE_BYTES = 1_048_576;
@@ -130,7 +131,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         if (hasLocalImage(image)) return;
         boolean completed;
         var pull = docker.pullImageCmd(image);
-        String registryHost = image.substring(0, image.indexOf('/'));
+        int separator = image.indexOf('/');
+        String firstComponent = separator < 0 ? "" : image.substring(0, separator);
+        String registryHost = separator < 0 || !(firstComponent.contains(".") || firstComponent.contains(":")
+                || "localhost".equals(firstComponent)) ? "docker.io" : firstComponent;
         ExtensionRuntimePort.RegistryAuth registryAuth = registryCredentials.get(registryHost);
         if (registryAuth != null) {
             pull.withAuthConfig(new AuthConfig()
@@ -217,7 +221,6 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             if (service.secretFileBindings().isEmpty() && existingEnvironment != null
                     && java.util.Arrays.equals(existingEnvironment, environment.toArray(String[]::new))) {
                 docker.startContainerCmd(name).exec();
-                copySecretFiles(name, manifest, service, configuration);
                 return;
             }
             docker.removeContainerCmd(current.getId()).withForce(false).exec();
@@ -225,11 +228,9 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             // Create only containers owned by this runtime; no mounts, published ports or caller-supplied options.
         }
         HostConfig host = restrictedHostConfig(network, service.memoryBytes());
-        if (!service.secretFileBindings().isEmpty()) {
-            host.withTmpFs(Map.of("/tmp", "rw,noexec,nosuid,size=16m",
-                    "/run/secrets", "rw,noexec,nosuid,nodev,size=1m,uid=10001,gid=10001,mode=0700"));
-        }
-        if (!service.persistentPaths().isEmpty()) host.withBinds(persistentBinds(manifest.id(), runtimeIdentity, service));
+        var serviceBinds = new java.util.ArrayList<Bind>();
+        if (!service.persistentPaths().isEmpty()) serviceBinds.addAll(persistentBinds(manifest.id(), runtimeIdentity, service));
+        SecretVolumeMount secretVolume = null;
         if (hostLoopbackTestAccess) {
             var bindings = new com.github.dockerjava.api.model.Ports();
             bindings.bind(ExposedPort.tcp(service.port()), com.github.dockerjava.api.model.Ports.Binding.bindIp("127.0.0.1"));
@@ -243,29 +244,98 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         labels.put("io.artio.extension.ports", service.internalPorts().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
         labels.put("io.artio.managed", "true");
         if (testRunId != null && !testRunId.isBlank()) labels.put("io.artio.test.run", testRunId);
-        var create = docker.createContainerCmd(resolveImage(service.image())).withName(name).withHostConfig(host)
-                .withUser("10001:10001")
-                .withLabels(labels);
-        var exposedPorts = new java.util.ArrayList<ExposedPort>();
-        exposedPorts.add(ExposedPort.tcp(service.port()));
-        service.internalPorts().forEach(additional -> exposedPorts.add(ExposedPort.tcp(additional)));
-        create.withExposedPorts(exposedPorts);
-        create.withEnv(environment);
-        create.exec();
-        docker.startContainerCmd(name).exec();
-        copySecretFiles(name, manifest, service, configuration);
+        try {
+            if (!service.secretFileBindings().isEmpty()) {
+                secretVolume = populateSecretFileVolume(manifest, runtimeIdentity, service, configuration);
+                serviceBinds.add(new Bind(secretVolume.volumeName(), new Volume("/run/secrets"), AccessMode.ro));
+            }
+            if (!serviceBinds.isEmpty()) host.withBinds(serviceBinds);
+            var create = docker.createContainerCmd(resolveImage(service.image())).withName(name).withHostConfig(host)
+                    .withUser("10001:10001")
+                    .withLabels(labels);
+            var exposedPorts = new java.util.ArrayList<ExposedPort>();
+            exposedPorts.add(ExposedPort.tcp(service.port()));
+            service.internalPorts().forEach(additional -> exposedPorts.add(ExposedPort.tcp(additional)));
+            create.withExposedPorts(exposedPorts);
+            create.withEnv(environment);
+            create.exec();
+            docker.startContainerCmd(name).exec();
+        } finally {
+            // Keep the tmpfs mounted by the helper until Docker has attached the plugin container.
+            // Removing the helper earlier unmounts a local tmpfs volume and discards its contents.
+            if (secretVolume != null) removeSecretVolumeHelper(secretVolume.helperContainerId());
+        }
     }
 
-    private void copySecretFiles(String containerName, PluginManifest manifest, RuntimeService service,
+    private SecretVolumeMount populateSecretFileVolume(PluginManifest manifest, String runtimeIdentity, RuntimeService service,
             Map<String, String> configuration) {
-        if (service.secretFileBindings().isEmpty()) return;
+        String volumeName = volumeName(runtimeIdentity, service.id(), "/run/secrets");
+        String helperName = "artio-secret-init-" + volumeName.substring("artio-vol-".length());
+        var volumeLabels = managedResourceLabels(manifest.id(), runtimeIdentity, service.id());
+        volumeLabels.put("io.artio.extension.secret-files", "true");
+        docker.listVolumesCmd().exec().getVolumes().stream().filter(volume -> volumeName.equals(volume.getName())).findFirst()
+                .ifPresent(volume -> {
+                    if (!volumeLabels.equals(volume.getLabels())) {
+                        throw new IllegalStateException("Refusing to replace an unmanaged extension secret volume");
+                    }
+                    docker.removeVolumeCmd(volumeName).exec();
+                });
+        var volume = docker.createVolumeCmd().withName(volumeName).withDriver("local")
+                .withDriverOpts(Map.of("type", "tmpfs", "device", "tmpfs",
+                        "o", "size=1m,uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev"))
+                .withLabels(volumeLabels).exec();
+        if (!volumeLabels.equals(volume.getLabels())) {
+            throw new IllegalStateException("Refusing to use an unmanaged extension secret volume");
+        }
+        String helperId = null;
+        boolean populated = false;
         try {
+            pullImage(SECRET_FILE_HELPER_IMAGE, Map.of());
+            var helperLabels = managedResourceLabels(manifest.id(), runtimeIdentity, service.id());
+            helperLabels.put("io.artio.extension.secret-writer", "true");
+            var helperHost = restrictedHostConfig("none", 134_217_728L)
+                    .withReadonlyRootfs(false)
+                    .withBinds(List.of(new Bind(volumeName, new Volume("/run/secrets"), AccessMode.rw)));
+            helperId = docker.createContainerCmd(SECRET_FILE_HELPER_IMAGE).withName(helperName)
+                    .withUser("10001:10001").withCmd("python3", "-c", "import time; time.sleep(120)")
+                    .withLabels(helperLabels).withHostConfig(helperHost).exec().getId();
             byte[] archive = secretFilesArchive(service.secretFileBindings(), manifest.configuration(), configuration);
-            docker.copyArchiveToContainerCmd(containerName).withRemotePath("/run/secrets").withTarInputStream(
-                    new java.io.ByteArrayInputStream(archive)).exec();
+            docker.startContainerCmd(helperId).exec();
+            try (var input = new java.io.ByteArrayInputStream(archive)) {
+                docker.copyArchiveToContainerCmd(helperId).withRemotePath("/run/secrets")
+                        .withTarInputStream(input).withCopyUIDGID(true).exec();
+            } finally {
+                java.util.Arrays.fill(archive, (byte) 0);
+            }
+            populated = true;
+            return new SecretVolumeMount(volumeName, helperId);
         } catch (IOException failure) {
             throw new IllegalStateException("Plugin secret files could not be delivered", failure);
+        } finally {
+            if (!populated) {
+                removeSecretVolumeHelper(helperId);
+                try { docker.removeVolumeCmd(volumeName).exec(); }
+                catch (NotFoundException ignored) { }
+            }
         }
+    }
+
+    private void removeSecretVolumeHelper(String helperContainerId) {
+        if (helperContainerId == null) return;
+        try { docker.removeContainerCmd(helperContainerId).withForce(true).exec(); }
+        catch (NotFoundException ignored) { }
+    }
+
+    private record SecretVolumeMount(String volumeName, String helperContainerId) { }
+
+    private java.util.HashMap<String, String> managedResourceLabels(String pluginId, String runtimeIdentity, String serviceId) {
+        var labels = new java.util.HashMap<String, String>();
+        labels.put("io.artio.extension", pluginId);
+        labels.put("io.artio.extension.runtime", runtimeIdentity);
+        labels.put("io.artio.extension.service", serviceId);
+        labels.put("io.artio.managed", "true");
+        if (testRunId != null && !testRunId.isBlank()) labels.put("io.artio.test.run", testRunId);
+        return labels;
     }
 
     static byte[] secretFilesArchive(Map<String, String> bindings, Map<String, PluginManifest.ConfigField> schema,
