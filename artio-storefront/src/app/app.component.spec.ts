@@ -22,6 +22,8 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
     )),
     post: vi.fn((url: string, _body?: unknown, _options?: unknown) => url === '/api/v1/payments/methods'
       ? of({ methods: [{ reference: 'card-ref', displayName: 'Card' }, { reference: 'paypal-ref', displayName: 'PayPal' }], partialFailure: false })
+      : url.includes('/api/v1/payments/provider/orders/')
+        ? of({ status: orderStatus === 'PAID' ? 'captured' : orderStatus === 'CANCELLED' ? 'cancelled' : 'pending' })
       : checkoutRetry && url === '/api/v1/cart/checkout'
         ? of({ orderId: 'retry-order', status: 'PENDING' })
         : checkoutRetry && url.includes('/checkout-session')
@@ -57,6 +59,14 @@ describe('Storefront payment return', () => {
     expect(fixture.nativeElement.textContent).toContain('Checking your payment');
     expect(fixture.nativeElement.textContent).not.toContain('Thank you for your order.');
     expect(fixture.nativeElement.textContent).toContain('Your payment is still processing. Your order will update when the provider confirms it.');
+  });
+
+  it('confirms a PayPal return only after Core accepts the capture result', () => {
+    const { fixture, http } = createComponent('PAID', true, '/checkout?success=true&orderId=paypal-order&token=provider-token');
+
+    expect(fixture.componentInstance.paymentReturnConfirmed).toBe(true);
+    expect(fixture.nativeElement.textContent).toContain('Your payment is confirmed.');
+    expect(http.post).toHaveBeenCalledWith('/api/v1/payments/provider/orders/paypal-order/capture?token=provider-token', {});
   });
 
   it('does not trust a success redirect when the customer session is missing', () => {
