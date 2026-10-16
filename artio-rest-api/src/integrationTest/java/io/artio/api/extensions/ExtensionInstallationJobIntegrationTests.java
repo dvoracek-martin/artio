@@ -10,6 +10,9 @@ import io.artio.api.security.EncryptionService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -145,15 +148,114 @@ class ExtensionInstallationJobIntegrationTests {
         var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
                 runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
                 new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
-                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30));
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30), 1_800_000, 300_000);
 
-        worker.runPending();
+        try {
+            worker.runPending();
 
-        assertThat(jobs.get(job.jobId()).state()).isEqualTo("INSTALLED");
-        assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
-                .isEqualTo("INSTALLED");
-        org.mockito.Mockito.verify(runtime).install(manifest, Map.of());
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("INSTALLED");
+            assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
+                    .isEqualTo("INSTALLED");
+            org.mockito.Mockito.verify(runtime).install(manifest, Map.of());
+        } finally {
+            worker.stopLeaseRenewals();
+        }
+    }
+
+    @Test
+    void reclaimsAnExpiredLeaseAfterThePreviousWorkerStops() throws Exception {
+        String pluginId = "installation.recovery";
+        PluginManifest manifest = manifest(pluginId);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, mapper.writeValueAsString(manifest), manifest.image());
+        var job = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, UUID.randomUUID(), "recovery-key-0001");
+        jdbc.update("UPDATE extension_installation_jobs SET state='DOWNLOADING_OR_IMPORTING',attempt_count=1,"
+                        + "lease_token=?,lease_until=now()-interval '1 second' WHERE job_id=?",
+                UUID.randomUUID(), job.jobId());
+        var runtime = org.mockito.Mockito.mock(ExtensionRuntimePort.class);
+        var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
+        var registryCredentials = org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class);
+        org.mockito.Mockito.when(registryCredentials.credentialsFor(manifest)).thenReturn(Map.of());
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
+                new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30), 1_800_000, 300_000);
+        try {
+            worker.runPending();
+
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("INSTALLED");
+            assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(2);
+            org.mockito.Mockito.verify(runtime).install(manifest, Map.of());
+        } finally {
+            worker.stopLeaseRenewals();
+        }
+    }
+
+    @Test
+    void renewsLeaseDuringControllerWorkAndPreventsASecondWorkerFromReclaimingTheJob() throws Exception {
+        String pluginId = "installation.lease-renewal";
+        String queuedPluginId = "installation.lease-queued";
+        PluginManifest manifest = manifest(pluginId);
+        PluginManifest queuedManifest = manifest(queuedPluginId);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, mapper.writeValueAsString(manifest), manifest.image());
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                queuedPluginId, mapper.writeValueAsString(queuedManifest), queuedManifest.image());
+        var job = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, UUID.randomUUID(), "lease-key-000001");
+        var queuedJob = jobs.request(queuedPluginId, null, "legacy:" + queuedPluginId, 0, queuedManifest,
+                UUID.randomUUID(), "lease-key-000002");
+        var runtime = org.mockito.Mockito.mock(ExtensionRuntimePort.class);
+        var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
+        var registryCredentials = org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class);
+        org.mockito.Mockito.when(registryCredentials.credentialsFor(org.mockito.ArgumentMatchers.any(PluginManifest.class))).thenReturn(Map.of());
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
+                new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30), 1_500, 250);
+        var installStarted = new CountDownLatch(1);
+        var finishInstall = new CountDownLatch(1);
+        var installCalls = new AtomicInteger();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if (installCalls.incrementAndGet() == 1) {
+                installStarted.countDown();
+                assertThat(finishInstall.await(10, TimeUnit.SECONDS)).isTrue();
+            }
+            return null;
+        }).when(runtime).install(org.mockito.ArgumentMatchers.any(PluginManifest.class),
+                org.mockito.ArgumentMatchers.anyMap());
+        Thread workerThread = new Thread(worker::runPending, "installation-lease-test-worker");
+        try {
+            workerThread.start();
+            assertThat(installStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(2_200);
+
+            var leaseUntil = jdbc.queryForObject("SELECT lease_until FROM extension_installation_jobs WHERE job_id=?",
+                    java.sql.Timestamp.class, job.jobId()).toInstant();
+            assertThat(leaseUntil).isAfter(java.time.Instant.now().plusMillis(500));
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("DOWNLOADING_OR_IMPORTING");
+            var queuedLeaseUntil = jdbc.queryForObject("SELECT lease_until FROM extension_installation_jobs WHERE job_id=?",
+                    java.sql.Timestamp.class, queuedJob.jobId()).toInstant();
+            assertThat(queuedLeaseUntil).isAfter(java.time.Instant.now().plusMillis(500));
+
+            worker.runPending();
+            org.mockito.Mockito.verify(runtime, org.mockito.Mockito.times(1)).install(
+                    org.mockito.ArgumentMatchers.any(PluginManifest.class), org.mockito.ArgumentMatchers.anyMap());
+
+            finishInstall.countDown();
+            workerThread.join(5_000);
+            assertThat(workerThread.isAlive()).isFalse();
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("INSTALLED");
+            assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(1);
+            assertThat(jobs.get(queuedJob.jobId()).state()).isEqualTo("INSTALLED");
+            assertThat(jobs.get(queuedJob.jobId()).attemptCount()).isEqualTo(1);
+            org.mockito.Mockito.verify(runtime, org.mockito.Mockito.times(2)).install(
+                    org.mockito.ArgumentMatchers.any(PluginManifest.class), org.mockito.ArgumentMatchers.anyMap());
+        } finally {
+            finishInstall.countDown();
+            workerThread.join(5_000);
+            worker.stopLeaseRenewals();
+        }
     }
 
     @Test

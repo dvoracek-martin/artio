@@ -1,5 +1,11 @@
 # Extension installation jobs (v1)
 
+## Lease renewal and restart recovery
+
+While work is active, the worker extends its PostgreSQL lease using the same fencing token; defaults are a 30-minute lease renewed every 5 minutes. Configure ARTIO_EXTENSION_INSTALLATION_LEASE_DURATION_MS and ARTIO_EXTENSION_INSTALLATION_LEASE_RENEWAL_MS when needed; the renewal interval must be less than half the lease duration. This prevents a healthy long-running worker from losing ownership. If Core exits, renewals stop and another worker may reclaim the active job after the lease expires. The retry uses the frozen manifest and image snapshots.
+
+The persisted phase is visible while the isolated Extension Controller performs the operation, including DOWNLOADING_OR_IMPORTING. Per-image controller progress and automatic quarantine/terminal-job retention remain open. Lease renewal uses the existing current V1 database schema and requires no migration.
+
 Installing a registered extension is a durable Core operation. Submit `POST /api/v1/admin/extensions/installations` with `pluginId`, optional `instanceId`, and an `idempotencyKey` containing 8–128 safe characters. Core validates the registered manifest and dependencies, snapshots the manifest, permissions, runtime identity and image list, records the actor, and responds `202 Accepted` with a `jobId` before runtime I/O begins.
 
 The worker claims jobs with a PostgreSQL lease and fencing token, performs Docker/controller work outside the HTTP request and outside a database transaction, then stores `INSTALLED` or a safe error class in `FAILED`. Inspect recent jobs with `GET /api/v1/admin/extensions/installations?pluginId=...` or one job with `GET /api/v1/admin/extensions/installations/{jobId}`. A failed job can be retried with `POST /api/v1/admin/extensions/installations/{jobId}/retry`; a still-queued job can be cancelled with `POST /api/v1/admin/extensions/installations/{jobId}/cancel`. Reusing the same actor and idempotency key returns the original job; reusing it for a different plugin target returns `409`.

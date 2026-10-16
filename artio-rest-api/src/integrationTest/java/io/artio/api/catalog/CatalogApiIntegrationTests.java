@@ -640,7 +640,7 @@ class CatalogApiIntegrationTests {
             org.mockito.Mockito.when(runtimeProvider.getIfAvailable()).thenReturn(liveRuntime);
             var worker = new io.artio.api.extensions.ExtensionInstallationJobWorker(jdbc,
                     new com.fasterxml.jackson.databind.ObjectMapper(), runtimeProvider, extensionRegistryCredentials,
-                    ociArchiveInspector, archiveQuarantineStore);
+                    ociArchiveInspector, archiveQuarantineStore, 1_800_000, 300_000);
             worker.runPending();
             var completed = adminExchange("/api/v1/admin/extensions/installations/{jobId}", HttpMethod.GET,
                     null, io.artio.api.extensions.ExtensionInstallationJobOperations.JobView.class, jobId);

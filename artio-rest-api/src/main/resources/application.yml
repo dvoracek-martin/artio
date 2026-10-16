@@ -119,6 +119,10 @@ artio:
   extensions:
     core-version: ${ARTIO_CORE_VERSION:0.1.0}
     trusted-registries: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:}
+    installations:
+      poll-interval-ms: ${ARTIO_EXTENSION_INSTALLATION_POLL_INTERVAL_MS:1000}
+      lease-duration-ms: ${ARTIO_EXTENSION_INSTALLATION_LEASE_DURATION_MS:1800000}
+      lease-renewal-ms: ${ARTIO_EXTENSION_INSTALLATION_LEASE_RENEWAL_MS:300000}
     archive:
       quarantine-path: ${ARTIO_EXTENSION_ARCHIVE_QUARANTINE_PATH:/var/lib/artio/extensions/quarantine}
       maximum-bytes: ${ARTIO_EXTENSION_ARCHIVE_MAX_BYTES:2147483648}

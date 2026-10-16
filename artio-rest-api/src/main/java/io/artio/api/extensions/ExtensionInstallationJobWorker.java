@@ -12,16 +12,26 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import jakarta.annotation.PreDestroy;
 
 /** Executes durable install jobs outside the request thread and without holding a database transaction over Docker I/O. */
 @Component
 @ConditionalOnProperty(prefix = "artio.workers", name = "enabled", havingValue = "true")
 public class ExtensionInstallationJobWorker {
+    private static final Logger log = LoggerFactory.getLogger(ExtensionInstallationJobWorker.class);
     private static final TypeReference<List<java.util.Map<String, String>>> IMAGE_LIST = new TypeReference<>() { };
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -29,18 +39,39 @@ public class ExtensionInstallationJobWorker {
     private final ExtensionRegistryCredentialService registryCredentials;
     private final OciArchiveInspector archiveInspector;
     private final OciArchiveQuarantineStore quarantine;
+    private final long leaseDurationMillis;
+    private final long leaseRenewalMillis;
+    private final ScheduledExecutorService leaseRenewals;
 
     public ExtensionInstallationJobWorker(JdbcTemplate jdbc, ObjectMapper mapper,
             ObjectProvider<ExtensionRuntimePort> runtimeProvider,
             ExtensionRegistryCredentialService registryCredentials,
             OciArchiveInspector archiveInspector,
-            OciArchiveQuarantineStore quarantine) {
+            OciArchiveQuarantineStore quarantine,
+            @Value("${artio.extensions.installations.lease-duration-ms:1800000}") long leaseDurationMillis,
+            @Value("${artio.extensions.installations.lease-renewal-ms:300000}") long leaseRenewalMillis) {
+        if (leaseDurationMillis < 1_000 || leaseRenewalMillis < 250 || leaseRenewalMillis * 2 >= leaseDurationMillis) {
+            throw new IllegalArgumentException("Installation job lease renewal must run at least twice before lease expiry");
+        }
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.runtimeProvider = runtimeProvider;
         this.registryCredentials = registryCredentials;
         this.archiveInspector = archiveInspector;
         this.quarantine = quarantine;
+        this.leaseDurationMillis = leaseDurationMillis;
+        this.leaseRenewalMillis = leaseRenewalMillis;
+        ThreadFactory threadFactory = task -> {
+            Thread thread = new Thread(task, "artio-installation-lease-renewal");
+            thread.setDaemon(true);
+            return thread;
+        };
+        this.leaseRenewals = Executors.newScheduledThreadPool(2, threadFactory);
+    }
+
+    @PreDestroy
+    void stopLeaseRenewals() {
+        leaseRenewals.shutdownNow();
     }
 
     @Scheduled(fixedDelayString = "${artio.extensions.installations.poll-interval-ms:1000}")
@@ -48,7 +79,7 @@ public class ExtensionInstallationJobWorker {
         List<InstallJob> jobs = jdbc.query("""
                 UPDATE extension_installation_jobs SET state='POLICY_CHECK',attempt_count=attempt_count+1,
                     lease_token=md5(job_id::text || clock_timestamp()::text || random()::text)::uuid,
-                    lease_until=now()+interval '30 minutes',updated_at=now()
+                    lease_until=now()+(? * interval '1 millisecond'),updated_at=now()
                 WHERE job_id IN (
                     SELECT job_id FROM extension_installation_jobs
                     WHERE state='REQUESTED' OR (state IN ('POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE') AND lease_until<now())
@@ -60,11 +91,34 @@ public class ExtensionInstallationJobWorker {
                 """, (rs, row) -> new InstallJob(rs.getObject("job_id", UUID.class), rs.getString("plugin_id"),
                 rs.getObject("instance_id", UUID.class), rs.getString("runtime_identity"), rs.getString("manifest_snapshot"),
                 rs.getString("permission_snapshot"), rs.getString("image_snapshot"), rs.getObject("lease_token", UUID.class),
-                rs.getString("source_kind"), rs.getString("quarantine_name"), rs.getString("archive_sha256")));
-        jobs.forEach(this::install);
+                rs.getString("source_kind"), rs.getString("quarantine_name"), rs.getString("archive_sha256")), leaseDurationMillis);
+        var heartbeats = jobs.stream()
+                .map(job -> leaseRenewals.scheduleWithFixedDelay(
+                        () -> renewLease(job), leaseRenewalMillis, leaseRenewalMillis, TimeUnit.MILLISECONDS))
+                .toList();
+        try {
+            jobs.forEach(this::installClaimed);
+        } finally {
+            heartbeats.forEach(heartbeat -> heartbeat.cancel(false));
+        }
     }
 
-    private void install(InstallJob job) {
+    private void renewLease(InstallJob job) {
+        try {
+            int renewed = jdbc.update("UPDATE extension_installation_jobs SET lease_until=now()+(? * interval '1 millisecond'),updated_at=now() "
+                            + "WHERE job_id=? AND lease_token=? AND lease_until>now() "
+                            + "AND state IN ('POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE')",
+                    leaseDurationMillis, job.jobId(), job.leaseToken());
+            if (renewed == 0) {
+                log.debug("Installation job lease is no longer owned by worker: {}", job.jobId());
+            }
+        } catch (Exception failure) {
+            log.warn("Installation job lease renewal failed for job {} ({})",
+                    job.jobId(), failure.getClass().getSimpleName());
+        }
+    }
+
+    private void installClaimed(InstallJob job) {
         PluginManifest manifest = null;
         try {
             manifest = mapper.readValue(job.manifestJson(), PluginManifest.class);
