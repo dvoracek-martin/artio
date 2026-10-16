@@ -33,6 +33,13 @@ if not defined ARTIO_MARKETPLACE_BASE_URL (
     pause
     exit /b 1
 )
+for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\advisory-trusted-key.txt'; if (-not (Test-Path -LiteralPath $path)) { exit 1 }; $key = (Get-Content -Raw -LiteralPath $path).Trim(); if ($key -notmatch '^[A-Za-z0-9._-]+=[A-Za-z0-9_-]+$') { exit 1 }; Write-Output $key"`) do set "ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS=%%A"
+if not defined ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS (
+    echo Could not resolve the local Marketplace advisory verification key.
+    echo Review %MARKETPLACE_ROOT%\.local-marketplace\advisory-trusted-key.txt
+    pause
+    exit /b 1
+)
 call :stop_artio
 if errorlevel 1 exit /b 1
 docker compose up --build -d --wait --wait-timeout 300
