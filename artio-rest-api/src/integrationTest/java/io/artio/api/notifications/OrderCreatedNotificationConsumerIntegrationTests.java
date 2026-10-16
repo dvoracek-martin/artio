@@ -8,6 +8,7 @@ import io.artio.api.extensions.PluginEventDeliveryWorker;
 import io.artio.api.extensions.PluginEventBackfillOperations;
 import io.artio.api.security.EncryptionService;
 import io.artio.extensions.ExtensionRuntimePort;
+import io.artio.extensions.PluginManifest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -28,6 +29,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -56,7 +58,7 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
     @Container
-    static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
+    static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:4.3.1"));
 
     @Autowired JdbcTemplate jdbc;
     @Autowired KafkaTemplate<String, String> kafka;
@@ -65,6 +67,18 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     @Autowired KafkaListenerEndpointRegistry listenerRegistry;
     @Autowired EncryptionService encryption;
     @Autowired PluginEventBackfillOperations eventBackfillOperations;
+
+    @BeforeEach
+    void clearPluginEventFixtures() {
+        // Package releases are append-only; delete only the per-test mutable runtime and delivery rows.
+        jdbc.update("DELETE FROM extension_event_deliveries WHERE plugin_id LIKE 'events.%' OR plugin_id LIKE 'backfill.%'");
+        jdbc.update("DELETE FROM extension_event_backfill_runs WHERE plugin_id LIKE 'events.%' OR plugin_id LIKE 'backfill.%'");
+        jdbc.update("DELETE FROM extension_event_subscriptions WHERE instance_id IN "
+                + "(SELECT instance_id FROM extension_plugin_instances WHERE plugin_id LIKE 'events.%' OR plugin_id LIKE 'backfill.%')");
+        jdbc.update("DELETE FROM extension_capability_bindings WHERE instance_id IN "
+                + "(SELECT instance_id FROM extension_plugin_instances WHERE plugin_id LIKE 'events.%' OR plugin_id LIKE 'backfill.%')");
+        jdbc.update("DELETE FROM extension_plugin_instances WHERE plugin_id LIKE 'events.%' OR plugin_id LIKE 'backfill.%'");
+    }
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -125,17 +139,16 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         UUID secondInstanceId = UUID.randomUUID();
         UUID secondSubscriptionId = UUID.randomUUID();
         String pluginId = "events." + UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+        String image = "ghcr.io/example/events@sha256:" + "a".repeat(64);
+        PluginManifest packageManifest = packageManifest(pluginId, image);
         jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,public_configuration) "
                         + "VALUES (?,?::jsonb,?,'ENABLED',?::jsonb)", pluginId,
-                "{\"id\":\"" + pluginId + "\",\"version\":\"2.0.0\"}",
-                "ghcr.io/example/events@sha256:" + "a".repeat(64), "{\"region\":\"eu\"}");
+                mapper.writeValueAsString(packageManifest), image, "{\"region\":\"eu\"}");
         long releaseId = jdbc.queryForObject("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) "
                         + "VALUES (?, '2.0.0', ?, ?::jsonb) RETURNING release_id", Long.class, pluginId,
-                "ghcr.io/example/events@sha256:" + "a".repeat(64), "{\"id\":\"" + pluginId + "\",\"version\":\"2.0.0\"}");
+                image, mapper.writeValueAsString(packageManifest));
         jdbc.update("INSERT INTO extension_plugin_v2_releases(release_id,plugin_id,manifest) VALUES (?, ?, ?::jsonb)",
-                releaseId, pluginId, "{\"packageManifest\":{\"manifestVersion\":\"2\",\"id\":\"" + pluginId
-                        + "\",\"version\":\"2.0.0\"},\"subscriptions\":[{\"eventType\":\"order.created\","
-                        + "\"schemaVersion\":1,\"permissions\":[]}],\"capabilities\":[]}");
+                releaseId, pluginId, v2Manifest(packageManifest));
         jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
                         + "lifecycle_state,runtime_identity,public_configuration,encrypted_secrets) VALUES (?,?,'main',?,'CAPABILITY_V2',"
                         + "'ENABLED',?,?::jsonb,?::jsonb)", instanceId, pluginId, releaseId, pluginId, "{\"region\":\"eu\"}",
@@ -150,6 +163,13 @@ class OrderCreatedNotificationConsumerIntegrationTests {
                 "{\"apiKey\":\"" + encryption.encrypt("second-event-secret") + "\"}");
         jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
                         + "VALUES (?,?,'order.created',1)", secondSubscriptionId, secondInstanceId);
+        Integer activeSubscriptions = jdbc.queryForObject("SELECT count(*) FROM extension_event_subscriptions s "
+                        + "JOIN extension_plugin_instances i ON i.instance_id=s.instance_id "
+                        + "JOIN extension_plugins p ON p.plugin_id=i.plugin_id "
+                        + "WHERE i.plugin_id=? AND s.event_type='order.created' AND s.schema_version=1 "
+                        + "AND s.subscription_state='ACTIVE' AND i.compatibility_mode='CAPABILITY_V2' AND i.lifecycle_state='ENABLED'",
+                Integer.class, pluginId);
+        assertThat(activeSubscriptions).as("Enabled V2 subscriptions must be eligible before publishing the event").isEqualTo(2);
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
                 userId, "event-fanout-" + userId + "@example.test", "unused-test-hash", "Event", "Fanout");
 
@@ -228,6 +248,7 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         UUID subscriptionId = UUID.randomUUID();
         String pluginId = "backfill." + UUID.randomUUID().toString().replace("-", "").substring(0, 18);
         String image = "ghcr.io/example/events@sha256:" + "b".repeat(64);
+        PluginManifest packageManifest = packageManifest(pluginId, image);
         Instant occurredAt = Instant.now().minusSeconds(60);
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
                 actorId, "event-backfill-" + actorId + "@example.test", "unused-test-hash", "Backfill", "Operator");
@@ -237,15 +258,13 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload,status,published_at,created_at) "
                         + "VALUES (?,'ORDER_CREATED','ORDER',?,?::jsonb,'PUBLISHED',?,?)",
                 eventId, orderId.toString(), outboxPayload, java.sql.Timestamp.from(occurredAt), java.sql.Timestamp.from(occurredAt));
-        String manifest = "{\"id\":\"" + pluginId + "\",\"version\":\"2.0.0\"}";
+        String manifest = mapper.writeValueAsString(packageManifest);
         jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,public_configuration) "
                         + "VALUES (?,?::jsonb,?,'ENABLED','{}'::jsonb)", pluginId, manifest, image);
         long releaseId = jdbc.queryForObject("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) "
                         + "VALUES (?,'2.0.0',?,?::jsonb) RETURNING release_id", Long.class, pluginId, image, manifest);
         jdbc.update("INSERT INTO extension_plugin_v2_releases(release_id,plugin_id,manifest) VALUES (?, ?, ?::jsonb)",
-                releaseId, pluginId, "{\"packageManifest\":{\"manifestVersion\":\"2\",\"id\":\"" + pluginId
-                        + "\",\"version\":\"2.0.0\"},\"subscriptions\":[{\"eventType\":\"order.created\","
-                        + "\"schemaVersion\":1,\"permissions\":[]}],\"capabilities\":[]}");
+                releaseId, pluginId, v2Manifest(packageManifest));
         jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
                         + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
                         + "VALUES (?,?,'default',?,'CAPABILITY_V2','ENABLED',?,2,'{\"region\":\"eu\"}'::jsonb,?::jsonb)",
@@ -289,7 +308,9 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         var runtimeFactory = new StaticListableBeanFactory(Map.of("runtime", runtime));
         new PluginEventDeliveryWorker(jdbc, mapper, encryption,
                 runtimeFactory.getBeanProvider(ExtensionRuntimePort.class)).deliverPending();
-        assertThat(backfillCalls).hasValue(1);
+        var delivery = jdbc.queryForMap("SELECT state,last_error_code,available_at FROM extension_event_deliveries WHERE backfill_run_id=?",
+                preview.runId());
+        assertThat(backfillCalls).as("Backfill delivery state: %s", delivery).hasValue(1);
         assertThat(jdbc.queryForObject("SELECT state FROM extension_event_deliveries WHERE backfill_run_id=?",
                 String.class, preview.runId())).isEqualTo("DELIVERED");
         assertThat(jdbc.queryForObject("SELECT status FROM extension_event_backfill_runs WHERE run_id=?",
@@ -512,6 +533,18 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         record.headers().add(new RecordHeader("event-type", "ORDER_CREATED".getBytes(StandardCharsets.UTF_8)));
         record.headers().add(new RecordHeader("schema-version", "1".getBytes(StandardCharsets.UTF_8)));
         kafka.send(record).get(10, TimeUnit.SECONDS);
+    }
+
+    private PluginManifest packageManifest(String pluginId, String image) {
+        return new PluginManifest("1", pluginId, "Event subscriber", "Artio test fixtures", "2.0.0",
+                "Isolated order event subscriber fixture", "1.0.0", "99.0.0", image, java.util.List.of(),
+                java.util.List.of(), Map.of(), java.util.List.of("events.subscriber.v1"), "/health", "/diagnostics");
+    }
+
+    private String v2Manifest(PluginManifest packageManifest) throws Exception {
+        return mapper.writeValueAsString(Map.of("packageManifest", packageManifest,
+                "subscriptions", java.util.List.of(Map.of("eventType", "order.created", "schemaVersion", 1,
+                        "permissions", java.util.List.of())), "capabilities", java.util.List.of()));
     }
 
     private void awaitInbox(UUID eventId) throws InterruptedException {

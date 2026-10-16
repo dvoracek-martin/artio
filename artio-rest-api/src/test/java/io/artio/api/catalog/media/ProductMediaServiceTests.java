@@ -12,6 +12,14 @@ import org.junit.jupiter.api.Test;
 
 class ProductMediaServiceTests {
     @Test
+    void localStorageRemainsAvailableForMediaWritesWithoutAPluginBinding() {
+        var service = new ProductMediaService(org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class),
+                new LocalMediaStorage("unused"));
+
+        assertThat(service.isUploadAvailable()).isTrue();
+    }
+
+    @Test
     void acceptsAndReencodesOnlySupportedImages() throws Exception {
         byte[] png = image("png", 3, 2);
 

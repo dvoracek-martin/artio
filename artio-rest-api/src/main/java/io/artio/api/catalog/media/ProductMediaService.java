@@ -35,11 +35,13 @@ public class ProductMediaService {
     }
 
     public boolean isUploadAvailable() {
-        return storage instanceof PluginMediaStorage pluginStorage && pluginStorage.hasEnabledStorageBinding();
+        // Local and S3 remain supported compatibility adapters. Only plugin-backed
+        // storage needs an enabled, explicitly bound capability before writes are accepted.
+        return !(storage instanceof PluginMediaStorage pluginStorage) || pluginStorage.hasEnabledStorageBinding();
     }
 
     public MediaView upload(UUID productId, byte[] uploaded, String altText) {
-        requirePluginStorage();
+        requireStorageAvailable();
         lockProduct(productId);
         Integer currentCount = jdbc.queryForObject("SELECT count(*) FROM catalog_product_media WHERE product_id=?", Integer.class, productId);
         if (currentCount != null && currentCount >= MAX_MEDIA_PER_PRODUCT) throw new ResponseStatusException(HttpStatus.CONFLICT, "A product cannot have more than 100 images");
@@ -93,7 +95,7 @@ public class ProductMediaService {
     }
 
     public MediaView replace(UUID productId, UUID mediaId, byte[] uploaded, String altText) {
-        requirePluginStorage();
+        requireStorageAvailable();
         lockProduct(productId);
         if (uploaded == null || uploaded.length == 0) throw new IllegalArgumentException("Choose an image file");
         if (uploaded.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "Image upload is limited to 10 MiB");
@@ -234,7 +236,7 @@ public class ProductMediaService {
         }
     }
 
-    private void requirePluginStorage() {
+    private void requireStorageAvailable() {
         if (!isUploadAvailable()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "MEDIA_STORAGE_PLUGIN_REQUIRED");
         }

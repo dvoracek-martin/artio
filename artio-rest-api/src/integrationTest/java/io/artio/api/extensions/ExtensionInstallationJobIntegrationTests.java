@@ -50,8 +50,12 @@ class ExtensionInstallationJobIntegrationTests {
     @BeforeEach
     void clearFixtures() {
         jdbc.update("DELETE FROM extension_installation_jobs");
-        jdbc.update("DELETE FROM extension_plugins");
         jdbc.update("DELETE FROM extension_registry_credentials");
+        jdbc.update("DELETE FROM extension_plugin_release_provenance WHERE release_id IN "
+                + "(SELECT release_id FROM extension_plugin_releases WHERE plugin_id LIKE 'installation.%' OR plugin_id='marketplace.installation')");
+        jdbc.update("DELETE FROM extension_plugin_v2_releases WHERE plugin_id LIKE 'installation.%' OR plugin_id='marketplace.installation'");
+        jdbc.update("DELETE FROM extension_plugin_releases WHERE plugin_id LIKE 'installation.%' OR plugin_id='marketplace.installation'");
+        jdbc.update("DELETE FROM extension_plugins WHERE plugin_id LIKE 'installation.%' OR plugin_id='marketplace.installation'");
     }
 
     @Test

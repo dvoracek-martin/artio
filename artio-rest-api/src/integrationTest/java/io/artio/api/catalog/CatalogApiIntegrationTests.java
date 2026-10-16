@@ -1750,8 +1750,11 @@ class CatalogApiIntegrationTests {
         var headers = new HttpHeaders();
         headers.setBearerAuth(adminToken);
         headers.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
-        return http.exchange("/api/v1/products/{id}/media?altText={altText}", HttpMethod.POST,
-                new HttpEntity<>(imagePart(bytes), headers), ProductMediaController.MediaResponse.class, productId, altText);
+        var raw = http.exchange("/api/v1/products/{id}/media?altText={altText}", HttpMethod.POST,
+                new HttpEntity<>(imagePart(bytes), headers), String.class, productId, altText);
+        assertThat(raw.getStatusCode()).as("Media upload response: %s", raw.getBody()).isEqualTo(HttpStatus.CREATED);
+        var response = mapper.readValue(raw.getBody(), ProductMediaController.MediaResponse.class);
+        return new ResponseEntity<>(response, raw.getHeaders(), raw.getStatusCode());
     }
 
     private static org.springframework.util.LinkedMultiValueMap<String, Object> imagePart(byte[] bytes) {
@@ -2976,17 +2979,21 @@ class CatalogApiIntegrationTests {
 
     @Test
     void customerAdministrationSearchesByLastLoginActivityAndBoundsResults() {
+        UUID customerId = UUID.randomUUID();
+        String customerEmail = "recent-customer-" + customerId + "@example.test";
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at,last_login) "
+                        + "VALUES (?,?,'fixture-hash','Recent','Customer','CUSTOMER',now(),now())", customerId, customerEmail);
         String base="/api/v1/admin/users";
-        var recent=adminExchange(base+"?q="+"admin-"+adminUserId+"&activity=RECENT",HttpMethod.GET,null,
+        var recent=adminExchange(base+"?q="+customerEmail+"&activity=RECENT",HttpMethod.GET,null,
                 io.artio.api.users.UserController.UserView[].class);
         assertThat(recent.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(recent.getBody()).hasSize(1);
-        assertThat(recent.getBody()[0].id()).isEqualTo(adminUserId);
+        assertThat(recent.getBody()[0].id()).isEqualTo(customerId);
         assertThat(recent.getBody()[0].lastLogin()).isNotNull();
 
         var never=adminExchange(base+"?activity=NEVER",HttpMethod.GET,null,io.artio.api.users.UserController.UserView[].class);
         assertThat(never.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(never.getBody()).extracting("id").doesNotContain(adminUserId);
+        assertThat(never.getBody()).extracting("id").doesNotContain(customerId);
         var invalid=adminExchange(base+"?limit=201",HttpMethod.GET,null,ApiError.class);
         assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }

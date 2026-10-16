@@ -229,7 +229,10 @@ class ReportingApiIntegrationTests {
     }
     private String token(UUID user, String role) {
         Instant now = Instant.now();
-        return jwt.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), JwtClaimsSet.builder().subject(user.toString()).claim("role", role).issuedAt(now).expiresAt(now.plusSeconds(600)).build())).getTokenValue();
+        Long tokenVersion = jdbc.queryForObject("SELECT token_version FROM users WHERE id=?", Long.class, user);
+        return jwt.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), JwtClaimsSet.builder()
+                .subject(user.toString()).claim("role", role).claim("tokenVersion", tokenVersion)
+                .issuedAt(now).expiresAt(now.plusSeconds(600)).build())).getTokenValue();
     }
     private void install(List<String> features, boolean expired) throws Exception {
         Instant now = Instant.now(); Instant issued = issueBase.plusSeconds(++grantRevision);

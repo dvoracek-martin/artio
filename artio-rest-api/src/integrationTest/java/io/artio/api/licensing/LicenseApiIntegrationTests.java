@@ -336,8 +336,10 @@ class LicenseApiIntegrationTests {
 
     private String token(UUID user, String role) {
         Instant now = Instant.now();
+        Long tokenVersion = jdbc.queryForObject("SELECT token_version FROM users WHERE id=?", Long.class, user);
         return jwt.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), JwtClaimsSet.builder()
-                .subject(user.toString()).claim("role", role).issuedAt(now).expiresAt(now.plusSeconds(300)).build())).getTokenValue();
+                .subject(user.toString()).claim("role", role).claim("tokenVersion", tokenVersion)
+                .issuedAt(now).expiresAt(now.plusSeconds(300)).build())).getTokenValue();
     }
 
     private byte[] signed(UUID identity) throws Exception {
