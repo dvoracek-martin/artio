@@ -32,7 +32,7 @@ final class ExtensionRuntimeController {
     ResponseEntity<Void> install(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody ManifestRequest request) {
         security.authorize(authorization);
-        runtime.install(request.manifest());
+        runtime.install(request.manifest(), request.registryCredentials());
         return ResponseEntity.noContent().build();
     }
 
@@ -40,7 +40,7 @@ final class ExtensionRuntimeController {
     ResponseEntity<Void> installInstance(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody InstanceManifestRequest request) {
         security.authorize(authorization);
-        runtime.installInstance(request.runtimeIdentity(), request.manifest());
+        runtime.installInstance(request.runtimeIdentity(), request.manifest(), request.registryCredentials());
         return ResponseEntity.noContent().build();
     }
 
@@ -48,7 +48,7 @@ final class ExtensionRuntimeController {
     ResponseEntity<Void> update(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody ManifestRequest request) {
         security.authorize(authorization);
-        runtime.update(request.manifest());
+        runtime.update(request.manifest(), request.registryCredentials());
         return ResponseEntity.noContent().build();
     }
 
@@ -145,8 +145,18 @@ final class ExtensionRuntimeController {
                 request.idempotencyKey(), request.configurationJson(), request.requestJson(), Duration.ofMillis(request.deadlineMillis()));
     }
 
-    record ManifestRequest(PluginManifest manifest, int credentialGeneration) { }
-    record InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration) { }
+    record ManifestRequest(PluginManifest manifest, int credentialGeneration,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        ManifestRequest { registryCredentials = registryCredentials == null ? Map.of() : Map.copyOf(registryCredentials); }
+        ManifestRequest(PluginManifest manifest, int credentialGeneration) { this(manifest, credentialGeneration, Map.of()); }
+    }
+    record InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        InstanceManifestRequest { registryCredentials = registryCredentials == null ? Map.of() : Map.copyOf(registryCredentials); }
+        InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration) {
+            this(runtimeIdentity, manifest, credentialGeneration, Map.of());
+        }
+    }
     record PluginIdentityRequest(String pluginId) { }
     record InstanceEnableRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
             Map<String, String> configuration) {

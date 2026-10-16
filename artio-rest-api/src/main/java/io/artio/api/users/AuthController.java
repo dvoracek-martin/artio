@@ -90,7 +90,7 @@ public class AuthController {
         jdbc.update("UPDATE users SET last_login=? WHERE id=?", java.sql.Timestamp.from(now), user.id());
         long expiresIn = Boolean.TRUE.equals(request.rememberMe()) && !mfaEnrollmentRequired ? 2_592_000 : 3600;
         long tokenVersion = jdbc.queryForObject("SELECT token_version FROM users WHERE id=?", Long.class, user.id());
-        var claims = JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(expiresIn)).subject(user.id().toString()).claim("email", user.email()).claim("role", user.role()).claim("tokenVersion", tokenVersion).claim("mfaSetupOnly",mfaEnrollmentRequired).build();
+        var claims = JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(expiresIn)).subject(user.id().toString()).claim("email", user.email()).claim("role", user.role()).claim("tokenVersion", tokenVersion).claim("mfaSetupOnly",mfaEnrollmentRequired).claim("mfaVerified",mfaVerified).build();
         String token = jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
         return new LoginResponse(token, "Bearer", expiresIn, user.id(), user.email(), user.role(),mfaEnrollmentRequired);
     }

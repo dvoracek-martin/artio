@@ -20,12 +20,15 @@ public class ExtensionInstallationJobWorker {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final ObjectProvider<ExtensionRuntimePort> runtimeProvider;
+    private final ExtensionRegistryCredentialService registryCredentials;
 
     public ExtensionInstallationJobWorker(JdbcTemplate jdbc, ObjectMapper mapper,
-            ObjectProvider<ExtensionRuntimePort> runtimeProvider) {
+            ObjectProvider<ExtensionRuntimePort> runtimeProvider,
+            ExtensionRegistryCredentialService registryCredentials) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.runtimeProvider = runtimeProvider;
+        this.registryCredentials = registryCredentials;
     }
 
     @Scheduled(fixedDelayString = "${artio.extensions.installations.poll-interval-ms:1000}")
@@ -66,8 +69,9 @@ public class ExtensionInstallationJobWorker {
                 throw new IllegalStateException("Installation image snapshot is invalid or changed");
             }
             if (!transition(job, "DOWNLOADING_OR_IMPORTING")) return;
-            if (job.instanceId() == null) runtime.install(manifest);
-            else runtime.installInstance(job.runtimeIdentity(), manifest);
+            var auth = registryCredentials.credentialsFor(manifest);
+            if (job.instanceId() == null) runtime.install(manifest, auth);
+            else runtime.installInstance(job.runtimeIdentity(), manifest, auth);
             if (!transition(job, "VERIFYING_ARTIFACTS") || !transition(job, "REGISTERING_RELEASE")) return;
             if (job.instanceId() == null) {
                 jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", job.pluginId());

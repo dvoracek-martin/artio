@@ -99,7 +99,7 @@ class ExtensionControllerApplicationTests {
                 new HttpEntity<>(new ExtensionRuntimeController.PluginIdentityRequest(manifest.id()), headers), Void.class, identity)
                 .getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
 
-        verify(runtime).installInstance(identity, manifest);
+        verify(runtime).installInstance(identity, manifest, java.util.Map.of());
         verify(runtime).enableInstance(identity, manifest, 2, java.util.Map.of("account", "eu"));
         verify(runtime).healthInstance(identity, manifest);
         verify(runtime).disableInstance(identity, manifest.id());

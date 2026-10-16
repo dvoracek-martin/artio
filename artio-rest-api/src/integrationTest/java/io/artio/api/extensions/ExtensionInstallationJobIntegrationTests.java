@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.PluginManifest;
+import io.artio.api.security.EncryptionService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,6 +32,7 @@ class ExtensionInstallationJobIntegrationTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper mapper;
     @Autowired ExtensionInstallationJobOperations jobs;
+    @Autowired EncryptionService encryption;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -49,6 +51,7 @@ class ExtensionInstallationJobIntegrationTests {
     void clearFixtures() {
         jdbc.update("DELETE FROM extension_installation_jobs");
         jdbc.update("DELETE FROM extension_plugins");
+        jdbc.update("DELETE FROM extension_registry_credentials");
     }
 
     @Test
@@ -107,7 +110,10 @@ class ExtensionInstallationJobIntegrationTests {
         var job = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, UUID.randomUUID(), "worker-key-000001");
         var runtime = org.mockito.Mockito.mock(io.artio.extensions.ExtensionRuntimePort.class);
         var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
-        var worker = new ExtensionInstallationJobWorker(jdbc, mapper, runtimeBeans.getBeanProvider(ExtensionRuntimePort.class));
+        var registryCredentials = org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class);
+        org.mockito.Mockito.when(registryCredentials.credentialsFor(manifest)).thenReturn(Map.of());
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials);
 
         worker.runPending();
 
@@ -115,7 +121,37 @@ class ExtensionInstallationJobIntegrationTests {
         assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
                 .isEqualTo("INSTALLED");
-        org.mockito.Mockito.verify(runtime).install(manifest);
+        org.mockito.Mockito.verify(runtime).install(manifest, Map.of());
+    }
+
+    @Test
+    void storesTrustedRegistryCredentialsEncryptedAndReturnsThemOnlyToTheInstallWorker() throws Exception {
+        UUID actorId = UUID.fromString("20000000-0000-0000-0000-000000000001");
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) VALUES (?,?,?,'Test','Admin','SUPERADMIN',now()) "
+                        + "ON CONFLICT(id) DO NOTHING",
+                actorId, "registry-admin@example.test", "not-used");
+        var service = new ExtensionRegistryCredentialService(jdbc, encryption,
+                new io.artio.extensions.PluginManifestValidator(java.util.Set.of("registry.example:5000")));
+        var saved = service.put("REGISTRY.EXAMPLE:5000", "publisher", "test-registry-password", actorId);
+        String storedCiphertext = jdbc.queryForObject(
+                "SELECT encrypted_password FROM extension_registry_credentials WHERE registry_host=?", String.class,
+                "registry.example:5000");
+        PluginManifest privateManifest = new PluginManifest("1", "private.plugin", "Private Plugin", "Customer", "1.0.0",
+                "Private registry fixture", "0.1.0", "9.0.0",
+                "registry.example:5000/team/plugin@sha256:" + "a".repeat(64), List.of(), List.of(), Map.of(),
+                List.of(), "/health", "/diagnostics");
+
+        assertThat(saved.registryHost()).isEqualTo("registry.example:5000");
+        assertThat(storedCiphertext).doesNotContain("test-registry-password");
+        assertThat(service.list()).singleElement().satisfies(summary ->
+                assertThat(summary.username()).isEqualTo("publisher"));
+        assertThat(service.credentialsFor(privateManifest))
+                .containsEntry("registry.example:5000",
+                        new ExtensionRuntimePort.RegistryAuth("publisher", "test-registry-password"));
+        assertThatThrownBy(() -> service.put("untrusted.example", "publisher", "another-password", actorId))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_audit_events WHERE plugin_id='custom.registry' AND actor_user_id=?", Integer.class, actorId))
+                .isEqualTo(1);
     }
 
     private static PluginManifest manifest(String id) {

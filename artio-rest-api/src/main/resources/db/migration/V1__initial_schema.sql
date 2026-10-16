@@ -1105,6 +1105,20 @@ CREATE UNIQUE INDEX extension_installation_jobs_one_active_plugin_idx ON extensi
 CREATE UNIQUE INDEX extension_installation_jobs_one_active_instance_idx ON extension_installation_jobs(plugin_id,instance_id)
     WHERE instance_id IS NOT NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
 
+-- Private-registry credentials are operator-approved and encrypted with the active Core key.
+CREATE TABLE extension_registry_credentials (
+    registry_host VARCHAR(255) PRIMARY KEY,
+    username VARCHAR(256) NOT NULL,
+    encrypted_password TEXT NOT NULL,
+    created_by UUID NOT NULL REFERENCES users(id),
+    updated_by UUID NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (registry_host ~ '^[a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]{1,5})?$'),
+    CHECK (username <> ''),
+    CHECK (encrypted_password <> '')
+);
+
 -- The current development schema keeps only this V1 snapshot. Signed Marketplace
 -- support/security state and permanent exact OCI digest bans are Core-owned.
 CREATE TABLE extension_marketplace_advisory_state (

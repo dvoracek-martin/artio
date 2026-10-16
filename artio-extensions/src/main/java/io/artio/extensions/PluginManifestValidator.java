@@ -24,6 +24,10 @@ public final class PluginManifestValidator {
         this.trustedRegistries = trustedRegistries.stream().map(s -> s.toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
+    public boolean trustsRegistryHost(String registryHost) {
+        return registryHost != null && trustedRegistries.contains(registryHost.toLowerCase(Locale.ROOT));
+    }
+
     public List<String> validate(PluginManifest manifest, String coreVersion, Set<String> installedPluginIds) {
         List<String> errors = new ArrayList<>();
         if (!"1".equals(manifest.manifestVersion())) errors.add("manifestVersion must be 1");

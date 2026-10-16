@@ -35,11 +35,21 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
         this.token = token;
     }
 
-    @Override public void install(PluginManifest manifest) { post("internal/v1/extensions/install", new ManifestRequest(manifest, 1), Duration.ofSeconds(150), Void.class); }
-    @Override public void installInstance(String runtimeIdentity, PluginManifest manifest) {
-        post("internal/v1/extensions/instances/install", new InstanceManifestRequest(runtimeIdentity, manifest, 1), Duration.ofSeconds(150), Void.class);
+    @Override public void install(PluginManifest manifest) { install(manifest, Map.of()); }
+    @Override public void install(PluginManifest manifest, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        post("internal/v1/extensions/install", new ManifestRequest(manifest, 1, registryCredentials), Duration.ofSeconds(150), Void.class);
     }
-    @Override public void update(PluginManifest manifest) { post("internal/v1/extensions/update", new ManifestRequest(manifest, 1), Duration.ofSeconds(150), Void.class); }
+    @Override public void installInstance(String runtimeIdentity, PluginManifest manifest) {
+        installInstance(runtimeIdentity, manifest, Map.of());
+    }
+    @Override public void installInstance(String runtimeIdentity, PluginManifest manifest,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        post("internal/v1/extensions/instances/install", new InstanceManifestRequest(runtimeIdentity, manifest, 1, registryCredentials), Duration.ofSeconds(150), Void.class);
+    }
+    @Override public void update(PluginManifest manifest) { update(manifest, Map.of()); }
+    @Override public void update(PluginManifest manifest, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        post("internal/v1/extensions/update", new ManifestRequest(manifest, 1, registryCredentials), Duration.ofSeconds(150), Void.class);
+    }
     @Override public void enable(PluginManifest manifest) { enable(manifest, 1); }
     @Override public void enable(PluginManifest manifest, int generation) {
         enable(manifest, generation, Map.of());
@@ -157,8 +167,14 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
         return pluginId;
     }
 
-    private record ManifestRequest(PluginManifest manifest, int credentialGeneration) { }
-    private record InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration) { }
+    private record ManifestRequest(PluginManifest manifest, int credentialGeneration,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        private ManifestRequest { registryCredentials = registryCredentials == null ? Map.of() : Map.copyOf(registryCredentials); }
+    }
+    private record InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        private InstanceManifestRequest { registryCredentials = registryCredentials == null ? Map.of() : Map.copyOf(registryCredentials); }
+    }
     private record PluginIdentityRequest(String pluginId) { }
     private record InstanceEnableRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
             Map<String, String> configuration) {

@@ -79,6 +79,32 @@ class RemoteExtensionRuntimeTests {
     }
 
     @Test
+    void sendsPrivateRegistryCredentialsOnlyToTheAuthenticatedExtensionController() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> body = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/extensions/install", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        var runtime = new RemoteExtensionRuntime(new ObjectMapper(), "http://127.0.0.1:" + server.getAddress().getPort(),
+                "integration-controller-token-value-at-least-32-characters");
+        var manifest = new io.artio.extensions.PluginManifest("1", "private.plugin", "Private", "Customer", "1.0.0",
+                "Private registry fixture", "0.1.0", "9.0.0",
+                "registry.example:5000/team/plugin@sha256:" + "a".repeat(64), java.util.List.of(), java.util.List.of(),
+                java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
+
+        runtime.install(manifest,
+                java.util.Map.of("registry.example:5000", new ExtensionRuntimePort.RegistryAuth("publisher", "private-pull-token")));
+
+        assertThat(authorization.get()).isEqualTo("Bearer integration-controller-token-value-at-least-32-characters");
+        assertThat(body.get()).contains("registry.example:5000", "publisher", "private-pull-token");
+    }
+
+    @Test
     void mapsControllerProviderFailuresBackToTheExtensionContract() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/internal/v1/extensions/invoke", exchange -> {

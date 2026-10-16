@@ -8,9 +8,19 @@ import java.util.Map;
 /** Core-owned boundary to an isolated extension process; the Docker adapter is outside this module. */
 public interface ExtensionRuntimePort {
     void install(PluginManifest manifest);
+    default void install(PluginManifest manifest, Map<String, RegistryAuth> registryCredentials) {
+        install(manifest);
+    }
     /** Installs a package release for one isolated runtime identity. v1 adapters keep the legacy package identity. */
     default void installInstance(String runtimeIdentity, PluginManifest manifest) { install(manifest); }
+    default void installInstance(
+            String runtimeIdentity, PluginManifest manifest, Map<String, RegistryAuth> registryCredentials) {
+        installInstance(runtimeIdentity, manifest);
+    }
     default void update(PluginManifest manifest) { install(manifest); }
+    default void update(PluginManifest manifest, Map<String, RegistryAuth> registryCredentials) {
+        update(manifest);
+    }
     void enable(PluginManifest manifest);
     default void enable(PluginManifest manifest, int credentialGeneration) { enable(manifest); }
     default void enable(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
@@ -79,6 +89,12 @@ public interface ExtensionRuntimePort {
     record RuntimeHealth(boolean healthy, String status, Map<String, String> services) {
         public RuntimeHealth { services = services == null ? Map.of() : Map.copyOf(services); }
         public RuntimeHealth(boolean healthy, String status) { this(healthy, status, Map.of()); }
+    }
+    record RegistryAuth(String username, String password) {
+        public RegistryAuth {
+            if (username == null || username.isBlank() || password == null || password.isBlank())
+                throw new IllegalArgumentException("Registry authentication is invalid");
+        }
     }
     record TelemetryResponse(int statusCode, String contentType, byte[] body) {
         public TelemetryResponse { body = body == null ? new byte[0] : body.clone(); }

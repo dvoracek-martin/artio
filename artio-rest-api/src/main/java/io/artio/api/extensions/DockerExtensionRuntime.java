@@ -6,6 +6,7 @@ import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.AuthConfig;
 import com.github.dockerjava.api.model.AccessMode;
 import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.Volume;
@@ -73,15 +74,29 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     public void install(PluginManifest manifest) {
+        install(manifest, Map.of());
+    }
+
+    @Override
+    public void install(PluginManifest manifest, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         for (RuntimeService service : services(manifest)) {
-            pullImage(service.image());
+            pullImage(service.image(), registryCredentials);
         }
     }
 
-    private void pullImage(String image) {
+    private void pullImage(String image, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         requirePinnedImage(image);
         boolean completed;
-        try (var callback = docker.pullImageCmd(image).start()) {
+        var pull = docker.pullImageCmd(image);
+        String registryHost = image.substring(0, image.indexOf('/'));
+        ExtensionRuntimePort.RegistryAuth registryAuth = registryCredentials.get(registryHost);
+        if (registryAuth != null) {
+            pull.withAuthConfig(new AuthConfig()
+                    .withUsername(registryAuth.username())
+                    .withPassword(registryAuth.password())
+                    .withRegistryAddress(registryHost));
+        }
+        try (var callback = pull.start()) {
             completed = callback.awaitCompletion(120, TimeUnit.SECONDS);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -94,14 +109,27 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
 
     @Override
     public void installInstance(String runtimeIdentity, PluginManifest manifest) {
+        installInstance(runtimeIdentity, manifest, Map.of());
+    }
+
+    @Override
+    public void installInstance(
+            String runtimeIdentity,
+            PluginManifest manifest,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         validateRuntimeIdentity(runtimeIdentity);
-        install(manifest);
+        install(manifest, registryCredentials);
     }
 
     @Override
     public void update(PluginManifest manifest) {
+        update(manifest, Map.of());
+    }
+
+    @Override
+    public void update(PluginManifest manifest, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         requirePinnedImage(manifest.image());
-        install(manifest); // Pull first: a failed download leaves the current stopped runtime intact.
+        install(manifest, registryCredentials); // Pull first: a failed download leaves the current stopped runtime intact.
         removeStoppedManagedContainer(manifest.id());
     }
 
