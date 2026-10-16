@@ -1,6 +1,6 @@
 # Dependency and container security scans
 
-The pull-request and push workflow checks both frontend lockfiles with the official npm registry and fails on moderate or higher npm advisories. It builds and scans the API, Storefront, Backoffice, all provider/search plugins, the OpenSearch engine, and each bundled observability image (control, collector, Grafana, Jaeger, Prometheus). Trivy checks for HIGH and CRITICAL OS and library vulnerabilities. It ignores advisories without an available fix and fails for any remaining finding at those severities, except that the bundled OpenSearch engine and four observability runtime images temporarily fail only on CRITICAL findings. The Trivy action is pinned to a full commit SHA and the scanner version is explicit.
+The pull-request and push workflow checks both frontend lockfiles with the official npm registry and fails on moderate or higher npm advisories. It also runs `pip-audit` against the pinned PostFinance Checkout Python requirements. It builds and scans the API, Storefront, Backoffice, all provider/search plugins (including PostFinance Checkout), the OpenSearch engine, and each bundled observability image (control, collector, Grafana, Jaeger, Prometheus). Trivy checks for HIGH and CRITICAL OS and library vulnerabilities. It ignores advisories without an available fix and fails for any remaining finding at those severities, except that the bundled OpenSearch engine and four observability runtime images temporarily fail only on CRITICAL findings. The Trivy action is pinned to a full commit SHA and the scanner version is explicit.
 
 The scan is a release gate, not proof that an image has no risk. Review scanner output and upstream advisories when dependencies, base images, or scan policy change. A new finding blocks the workflow until the package is updated or an owner documents a narrow, time-bounded exception with its rationale and compensating control. Do not suppress a test or broadly ignore a vulnerability to obtain a green build.
 
@@ -25,6 +25,8 @@ Local equivalents from the repository root:
 ```powershell
 npm --registry=https://registry.npmjs.org audit --audit-level=moderate --prefix artio-storefront
 npm --registry=https://registry.npmjs.org audit --audit-level=moderate --prefix artio-backoffice
+python -m pip install pip-audit==2.10.1
+python -m pip_audit -r artio-plugins/postfinance-payments/requirements.txt
 docker build -f artio-docker/Dockerfile -t artio/api:local .
 docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-storefront --build-arg APP_NAME=storefront -t artio/storefront:local .
 docker build -f artio-docker/Dockerfile.frontend --build-arg MODULE=artio-backoffice --build-arg APP_NAME=backoffice -t artio/backoffice:local .

@@ -11,7 +11,7 @@ Create a Transaction webhook listener in the configured PostFinance Checkout spa
 ```powershell
 python -m pip install -r artio-plugins/postfinance-payments/requirements.txt
 python -m unittest discover -s artio-plugins/postfinance-payments -p "test_*.py" -v
-docker build -f artio-plugins/postfinance-payments/Dockerfile -t artio/postfinance-payments:local .
+docker build -f artio-plugins/postfinance-payments/Dockerfile -t artio/postfinance-payments:local artio-plugins/postfinance-payments
 ```
 
 The tests use mocked SDK calls, so they validate REST mapping, idempotency, ECDSA-verifier invocation and fail-closed behavior without claiming a sandbox charge. The image requires network access to PostFinance Checkout at runtime. Remove the local image after manual testing with `docker image rm artio/postfinance-payments:local`; the release acceptance script removes only its own run-tagged image and container.

@@ -33,7 +33,8 @@ jobs:
           python-version: '3.12'
       - name: Test Docker plugin source packages
         run: |
-          for plugin in stripe-payments paypal-payments brevo-email observability swiss-post; do
+          python -m pip install --disable-pip-version-check -r artio-plugins/postfinance-payments/requirements.txt
+          for plugin in stripe-payments paypal-payments postfinance-payments brevo-email observability swiss-post; do
             python -m unittest discover -s "artio-plugins/$plugin" -p 'test_*.py' -v
           done
       - name: Require Docker for PostgreSQL integration tests
@@ -42,6 +43,10 @@ jobs:
         run: |
           npm --registry=https://registry.npmjs.org audit --audit-level=moderate --prefix artio-storefront
           npm --registry=https://registry.npmjs.org audit --audit-level=moderate --prefix artio-backoffice
+      - name: Audit PostFinance Python dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit==2.10.1
+          python -m pip_audit -r artio-plugins/postfinance-payments/requirements.txt
       - name: Build, run tests and generate coverage
         run: bash ./gradlew --no-daemon clean build integrationTest jacocoTestReport
       - name: Verify Docker extension lifecycle and egress isolation
@@ -63,6 +68,8 @@ jobs:
         run: docker build -f artio-plugins/stripe-payments/Dockerfile -t artio/plugin-stripe:${GITHUB_SHA} artio-plugins/stripe-payments
       - name: Build PayPal plugin container
         run: docker build -f artio-plugins/paypal-payments/Dockerfile -t artio/plugin-paypal:${GITHUB_SHA} artio-plugins/paypal-payments
+      - name: Build PostFinance Checkout plugin container
+        run: docker build -f artio-plugins/postfinance-payments/Dockerfile -t artio/plugin-postfinance:${GITHUB_SHA} artio-plugins/postfinance-payments
       - name: Build Swiss Post plugin container
         run: docker build -f artio-plugins/swiss-post/Dockerfile -t artio/plugin-swiss-post:${GITHUB_SHA} artio-plugins/swiss-post
       - name: Build Brevo plugin container
@@ -128,6 +135,17 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: artio/plugin-paypal:${{ github.sha }}
+          version: v0.76.0
+          skip-setup-trivy: true
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Scan PostFinance Checkout plugin image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio/plugin-postfinance:${{ github.sha }}
           version: v0.76.0
           skip-setup-trivy: true
           format: table
@@ -262,6 +280,7 @@ jobs:
             "artio/backoffice:${GITHUB_SHA}" \
             "artio/plugin-stripe:${GITHUB_SHA}" \
             "artio/plugin-paypal:${GITHUB_SHA}" \
+            "artio/plugin-postfinance:${GITHUB_SHA}" \
             "artio/plugin-swiss-post:${GITHUB_SHA}" \
             "artio/plugin-brevo:${GITHUB_SHA}" \
             "artio/plugin-opensearch:${GITHUB_SHA}" \

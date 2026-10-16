@@ -1,5 +1,5 @@
 postfinancecheckout==6.4.0
-cryptography==46.0.2
+cryptography==50.0.2
 pydantic==2.14.1
 PyJWT==2.15.1
 python-dateutil==2.9.0.post0
