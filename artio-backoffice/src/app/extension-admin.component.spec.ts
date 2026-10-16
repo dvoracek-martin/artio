@@ -1,11 +1,13 @@
 import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 import { ExtensionAdminComponent } from './extension-admin.component';
 
 describe('ExtensionAdminComponent', () => {
   beforeEach(async () => {
-    await TestBed.configureTestingModule({ imports: [ExtensionAdminComponent] }).compileComponents();
+    await TestBed.configureTestingModule({ imports: [ExtensionAdminComponent], providers: [provideHttpClient(), provideHttpClientTesting()] }).compileComponents();
   });
   afterEach(() => localStorage.removeItem('artio-backoffice-language'));
 
@@ -78,6 +80,33 @@ describe('ExtensionAdminComponent', () => {
       .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Review and register')) as HTMLButtonElement;
     button.click();
     expect(actions).toEqual([{ type: 'marketplaceRegister', item: fixture.componentInstance.marketplacePlugins[0], country: 'CH' }]);
+  });
+
+  it('blocks a revoked Marketplace release while preserving uninstall', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.extensionsLoading = false;
+    fixture.componentInstance.extensions = [{ id: 'shipping.demo', name: 'Demo Shipping', version: '1.2.3', lifecycleState: 'ENABLED', configuredSecrets: [] }];
+    fixture.componentInstance.securityAdvisories = { releases: [{ pluginId: 'shipping.demo', version: '1.2.3', securityStatus: 'BANNED' }] };
+    const actions: any[] = [];
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('A signed Marketplace advisory bans this exact image digest.');
+    const buttons = [...fixture.nativeElement.querySelectorAll('button')] as HTMLButtonElement[];
+    expect(buttons.some(button => button.textContent?.includes('Disable'))).toBe(false);
+    buttons.find(button => button.textContent?.includes('Uninstall'))?.click();
+    expect(actions.map(action => action.type)).toEqual(['uninstall']);
+  });
+
+  it('does not offer registration for a release banned by Marketplace', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.extensionsLoading = false;
+    fixture.componentInstance.marketplacePlugins = [{ pluginId: 'shipping.demo', version: '1.2.3', vendor: 'Demo', metadata: { title: 'Demo Shipping' } }];
+    fixture.componentInstance.securityAdvisories = { releases: [{ pluginId: 'shipping.demo', version: '1.2.3', securityStatus: 'BANNED' }] };
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Blocked by security advisory');
+    expect([...fixture.nativeElement.querySelectorAll('button')].some((button: HTMLButtonElement) => button.textContent?.includes('Review and register'))).toBe(false);
   });
 
   it('renders instance lifecycle, configuration, capability binding and subscription controls for v2 plugins', () => {
