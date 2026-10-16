@@ -102,11 +102,13 @@ public class PaymentController {
     private CheckoutSession extensionCheckout(UUID orderId, JwtAuthenticationToken auth, PaymentProvider extension,
             PaymentSelection selection) {
         UUID userId = UUID.fromString(auth.getToken().getSubject());
-        var rows = jdbc.query("SELECT o.total-COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='CAPTURED'),0),o.currency,o.status,o.shipping_country FROM orders o WHERE o.id=? AND o.user_id=?",
+        var rows = jdbc.query("SELECT o.total-COALESCE((SELECT sum(COALESCE(p.captured_amount,p.amount)) FROM payments p WHERE p.order_id=o.id AND p.status='CAPTURED'),0),o.currency,o.status,o.shipping_country FROM orders o WHERE o.id=? AND o.user_id=?",
                 (rs, n) -> new OrderRow(rs.getBigDecimal(1), rs.getString(2).trim(), rs.getString(3), rs.getString(4)), orderId, userId);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
         OrderRow order = rows.getFirst();
         if (!"PENDING".equals(order.status())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Order is not awaiting payment");
+        if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payments WHERE order_id=? AND status='CAPTURE_REVIEW')", Boolean.class, orderId)))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A captured payment needs operator reconciliation before another checkout can start");
         if(order.total().signum()<=0)throw new ResponseStatusException(HttpStatus.CONFLICT,"Order has no remaining payment due");
         Instant expiresAt = Instant.now().plus(Duration.ofMinutes(31));
         try { inventory.extendReservationsForPayment(orderId, expiresAt.plus(Duration.ofMinutes(1))); }
@@ -155,6 +157,37 @@ public class PaymentController {
         String attemptDiscriminator = UUID.nameUUIDFromBytes((selectedProviderIdentity + ":" + selectedMethodIdentity)
                 .getBytes(StandardCharsets.UTF_8)).toString();
         String idempotencyKey = "artio-order-" + orderId + "-" + attemptDiscriminator;
+        UUID paymentAttemptId = UUID.nameUUIDFromBytes((orderId + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8));
+        String providerPluginId = selectedMethod == null
+                ? extensionProviderId.isBlank() ? "legacy-extension" : extensionProviderId : selectedMethod.providerPluginId();
+        UUID selectedInstanceId = selectedMethod == null ? null : selectedMethod.providerInstanceId();
+        Long selectedReleaseId = selectedMethod == null ? null : selectedMethod.releaseId();
+        int selectedGeneration = selectedMethod == null ? 0 : selectedMethod.configurationGeneration();
+        String selectedAccountFingerprint = selectedInstanceId == null ? null : jdbc.query(
+                "SELECT external_account_fingerprint FROM extension_plugin_instances WHERE instance_id=? AND release_id=? AND configuration_generation=?",
+                (rs, row) -> rs.getString(1) == null ? null : rs.getString(1).trim(), selectedInstanceId, selectedReleaseId, selectedGeneration)
+                .stream().findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Selected payment provider instance changed; refresh available methods"));
+        Map<String, String> selectedScope = Map.of("country", order.country() == null ? "" : order.country().trim().toUpperCase(java.util.Locale.ROOT),
+                "currency", order.currency().toUpperCase(java.util.Locale.ROOT));
+        String requestFingerprint = sha256((orderId + ":" + providerPluginId + ":" + selectedInstanceId + ":"
+                + selectedReleaseId + ":" + selectedGeneration + ":" + selectedAccountFingerprint + ":" + selectedMethodIdentity + ":"
+                + order.total().toPlainString() + ":" + order.currency()).getBytes(StandardCharsets.UTF_8));
+        jdbc.update("INSERT INTO payment_attempts(attempt_id,order_id,payment_obligation_id,provider_plugin_id,provider_instance_id,provider_release_id,configuration_generation,provider_account_fingerprint,provider_scope,payment_method_id,idempotency_key,request_fingerprint,amount,currency,status,expires_at) "
+                        + "VALUES (?,?,?,?,?,?,?, ?,?::jsonb,?,?,?,?,?,'CREATING',?) ON CONFLICT(order_id,idempotency_key) DO NOTHING",
+                paymentAttemptId, orderId, orderId, providerPluginId, selectedInstanceId, selectedReleaseId, selectedGeneration,
+                selectedAccountFingerprint, writeJson(selectedScope), selectedMethod == null ? null : selectedMethod.methodId(),
+                idempotencyKey, requestFingerprint, order.total(), order.currency(), java.sql.Timestamp.from(expiresAt));
+        PaymentAttempt durableAttempt = jdbc.query("SELECT attempt_id,request_fingerprint,status,provider_reference,checkout_url FROM payment_attempts WHERE order_id=? AND idempotency_key=?",
+                (rs, row) -> new PaymentAttempt(rs.getObject("attempt_id", UUID.class), rs.getString("request_fingerprint"),
+                        rs.getString("status"), rs.getString("provider_reference"), rs.getString("checkout_url")), orderId, idempotencyKey)
+                .stream().findFirst().orElseThrow(() -> new IllegalStateException("Payment attempt could not be persisted"));
+        if (!durableAttempt.id().equals(paymentAttemptId) || !durableAttempt.requestFingerprint().equals(requestFingerprint))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A different payment attempt already owns this checkout identity");
+        if ("FAILED".equals(durableAttempt.status()) || "CANCELLED".equals(durableAttempt.status()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This payment attempt has already been closed");
+        jdbc.update("UPDATE payment_attempts SET status='CREATING',updated_at=now() WHERE attempt_id=? AND status IN ('CREATING','UNKNOWN')",
+                paymentAttemptId);
         PaymentProvider.CheckoutResult result;
         PaymentProvider.OwnedResult<PaymentProvider.CheckoutResult> owned;
         try {
@@ -166,24 +199,46 @@ public class PaymentController {
                     selectedMethod == null ? null : selectedMethod.providerInstanceId());
             result = owned.result();
         } catch (PaymentProvider.CheckoutRejectedException rejected) {
+            jdbc.update("UPDATE payment_attempts SET status='FAILED',updated_at=now() WHERE attempt_id=? AND status IN ('CREATING','UNKNOWN')", paymentAttemptId);
             checkoutFailureCompensation.cancelRejectedCheckout(orderId);
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "Payment provider rejected checkout; order and stock reservation were cancelled");
         } catch (RuntimeException failure) {
             // Provider timeouts may be ambiguous; preserve the reservation and retry with the same key.
+            jdbc.update("UPDATE payment_attempts SET status='UNKNOWN',updated_at=now() WHERE attempt_id=? AND status='CREATING'", paymentAttemptId);
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider could not create a checkout session");
         }
         if (result == null || result.providerReference() == null || result.providerReference().isBlank()
                 || result.checkoutUrl() == null || result.checkoutUrl().isBlank()) {
+            jdbc.update("UPDATE payment_attempts SET status='UNKNOWN',updated_at=now() WHERE attempt_id=? AND status='CREATING'", paymentAttemptId);
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an invalid checkout session");
         }
         PaymentProvider.ProviderOwner owner = owned.owner();
-        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,payment_method_id,payment_obligation_id,status,provider_reference,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope,created_at,updated_at) VALUES (?,?,?,?,?,'EXTENSION',?,?, 'PENDING',?,?,?,?,?,?::jsonb,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",
+        if (owner != null && (!owner.instanceId().equals(selectedInstanceId) || !java.util.Objects.equals(owner.releaseId(), selectedReleaseId)
+                || owner.configurationGeneration() != selectedGeneration
+                || !java.util.Objects.equals(owner.externalAccountFingerprint(), selectedAccountFingerprint))) {
+            jdbc.update("UPDATE payment_attempts SET status='UNKNOWN',updated_at=now() WHERE attempt_id=?", paymentAttemptId);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider ownership changed while creating checkout");
+        }
+        jdbc.update("UPDATE payment_attempts SET status='PENDING',provider_reference=?,checkout_url=?,provider_account_fingerprint=?,provider_scope=?::jsonb,updated_at=now() WHERE attempt_id=?",
+                result.providerReference(), result.checkoutUrl(), owner == null ? null : owner.externalAccountFingerprint(),
+                owner == null ? "{}" : writeJson(owner.scope()), paymentAttemptId);
+        int paymentInserted = jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,payment_method_id,payment_obligation_id,payment_attempt_id,status,provider_plugin_id,provider_reference,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope,created_at,updated_at) VALUES (?,?,?,?,?,'EXTENSION',?,?,?, 'PENDING',?,?,?,?,?,?,?::jsonb,now(),now()) ON CONFLICT DO NOTHING",
                 UUID.randomUUID(), orderId, userId, order.total(), order.currency(),
-                selectedMethod == null ? null : selectedMethod.methodId(), orderId, result.providerReference(),
+                selectedMethod == null ? null : selectedMethod.methodId(), orderId, paymentAttemptId, providerPluginId, result.providerReference(),
                 owner == null ? null : owner.instanceId(), owner == null ? null : owner.releaseId(),
                 owner == null ? null : owner.configurationGeneration(), owner == null ? null : owner.externalAccountFingerprint(),
                 owner == null ? "{}" : writeJson(owner.scope()));
+        if (paymentInserted == 0) {
+            UUID existingAttempt = jdbc.query("SELECT payment_attempt_id FROM payments WHERE provider_plugin_id=? AND provider_instance_id IS NOT DISTINCT FROM ? "
+                            + "AND provider_account_fingerprint IS NOT DISTINCT FROM ? AND provider_reference=?",
+                    (rs, row) -> rs.getObject(1, UUID.class), providerPluginId, owner == null ? null : owner.instanceId(),
+                    owner == null ? null : owner.externalAccountFingerprint(), result.providerReference()).stream().findFirst().orElse(null);
+            if (!paymentAttemptId.equals(existingAttempt)) {
+                jdbc.update("UPDATE payment_attempts SET status='UNKNOWN',updated_at=now() WHERE attempt_id=?", paymentAttemptId);
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider reused an external reference for a different attempt");
+            }
+        }
         return new CheckoutSession(result.providerReference(), result.checkoutUrl());
     }
 
@@ -209,6 +264,7 @@ public class PaymentController {
                         throw new ResponseStatusException(HttpStatus.CONFLICT,"Payment cancellation is not confirmed");
                 }else throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payment provider cannot cancel this checkout");
                 jdbc.update("UPDATE payments SET status='CANCELLED',updated_at=now() WHERE id=? AND status='PENDING'",payment.id());
+                jdbc.update("UPDATE payment_attempts SET status='CANCELLED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", payment.id());
             }catch(ResponseStatusException known){throw known;}
             catch(RuntimeException failure){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Payment cancellation was not confirmed; retry after provider reconciliation");}
         }
@@ -236,11 +292,12 @@ public class PaymentController {
         UUID userId = UUID.fromString(auth.getToken().getSubject());
         var references = jdbc.query("SELECT provider_reference,status,amount,currency,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text,id FROM payments WHERE order_id=? AND user_id=? AND method='EXTENSION'",
                 (rs, row) -> new CapturePayment(rs.getString(1), rs.getString(2), rs.getBigDecimal(3), rs.getString(4).trim(), providerOwner(rs,5), rs.getObject(10,UUID.class)), orderId, userId);
-        if (references.isEmpty() || !java.security.MessageDigest.isEqual(
-                references.getFirst().providerReference().getBytes(StandardCharsets.UTF_8), returnedProviderReference.getBytes(StandardCharsets.UTF_8))) {
+        var matchingReferences = references.stream().filter(payment -> java.security.MessageDigest.isEqual(
+                payment.providerReference().getBytes(StandardCharsets.UTF_8), returnedProviderReference.getBytes(StandardCharsets.UTF_8))).toList();
+        if (matchingReferences.size() != 1) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider order is unavailable");
         }
-        CapturePayment payment = references.getFirst();
+        CapturePayment payment = matchingReferences.getFirst();
         String providerReference = payment.providerReference();
         String orderStatus = jdbc.query("SELECT status FROM orders WHERE id=? AND user_id=? FOR UPDATE",
                 (rs, row) -> rs.getString(1), orderId, userId).stream().findFirst()
@@ -261,7 +318,12 @@ public class PaymentController {
                 || result.currency() == null || !payment.currency().equalsIgnoreCase(result.currency())) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an inconsistent capture amount");
         }
-        jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now() WHERE provider_reference=? AND status='PENDING'", providerReference);
+        UUID settlementId = UUID.randomUUID();
+        jdbc.update("INSERT INTO payment_settlements(settlement_id,payment_id,provider_event_id,provider_reference,amount,currency,disposition) VALUES (?,?,?,?,?,?,'APPLIED')",
+                settlementId, payment.id(), "buyer-return:" + payment.id(), providerReference, result.amount(), result.currency().trim().toUpperCase(java.util.Locale.ROOT));
+        jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status='CAPTURED',updated_at=now() WHERE id=? AND status='PENDING'",
+                result.amount(), result.currency().trim().toUpperCase(java.util.Locale.ROOT), payment.id());
+        jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", payment.id());
         int changed = jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
         if (changed > 0) {
             OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);
@@ -323,17 +385,16 @@ public class PaymentController {
             markProviderWebhookProcessed(providerKey, event.providerEventId());
             return Map.of("status", "ignored");
         }
+        UUID linkedPaymentId = paymentIdForReference(event.providerReference(), webhookOwner);
         if (webhookOwner != null) {
-            UUID paymentOwner = jdbc.query("SELECT provider_instance_id FROM payments WHERE provider_reference=? AND method='EXTENSION'",
-                    (rs, row) -> rs.getObject(1, UUID.class), event.providerReference()).stream().findFirst().orElse(null);
-            if (paymentOwner == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "Payment checkout is not persisted yet; retry the provider webhook");
-            if (!webhookOwner.instanceId().equals(paymentOwner)) {
+            if (linkedPaymentId == null && paymentReferenceExists(event.providerReference())) {
                 markProviderWebhookProcessed(providerKey, event.providerEventId());
                 return Map.of("status", "payment_not_found");
             }
+            if (linkedPaymentId == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Payment checkout is not persisted yet; retry the provider webhook");
         }
-        UUID orderId = lockOrderForSession(event.providerReference());
+        UUID orderId = linkedPaymentId == null ? null : lockOrderForPayment(linkedPaymentId);
         if (orderId == null) {
             if (webhookOwner != null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Payment order is not available yet; retry the provider webhook");
@@ -341,43 +402,63 @@ public class PaymentController {
             return Map.of("status", "ignored");
         }
         if (event.state() == PaymentProvider.PaymentState.CAPTURED) {
-            var settlements = jdbc.query("SELECT amount,currency,provider_instance_id FROM payments WHERE provider_reference=? AND method='EXTENSION'",
-                    (rs, row) -> new PaymentSettlement(rs.getBigDecimal("amount"), rs.getString("currency").trim(), rs.getObject("provider_instance_id", UUID.class)),
-                    event.providerReference());
+            var settlements = jdbc.query("SELECT p.id,COALESCE(a.amount,p.amount) amount,p.currency,p.provider_instance_id,p.status FROM payments p LEFT JOIN payment_attempts a ON a.attempt_id=p.payment_attempt_id WHERE p.id=? AND p.method='EXTENSION'",
+                    (rs, row) -> new PaymentSettlement(rs.getObject("id", UUID.class), rs.getBigDecimal("amount"), rs.getString("currency").trim(),
+                            rs.getObject("provider_instance_id", UUID.class), rs.getString("status")),
+                    linkedPaymentId);
             if (settlements.isEmpty()) {
                 markProviderWebhookProcessed(providerKey, event.providerEventId());
                 return Map.of("status", "payment_not_found");
             }
             var settlement = settlements.getFirst();
-            if (event.amount() == null || event.currency() == null
-                    || settlement.amount().compareTo(event.amount()) != 0
-                    || !settlement.currency().equalsIgnoreCase(event.currency())
+            if (event.amount() == null || event.amount().signum() < 0 || event.currency() == null || event.currency().length() != 3
                     || webhookOwner != null && !webhookOwner.instanceId().equals(settlement.instanceId())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provider settlement amount or currency does not match the payment");
             }
             String orderStatus = jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId);
-            if ("CANCELLED".equals(orderStatus)) {
-                markProviderWebhookProcessed(providerKey, event.providerEventId());
-                return Map.of("status", "cancelled");
+            String capturedCurrency = event.currency().trim().toUpperCase(java.util.Locale.ROOT);
+            boolean currencyMatches = settlement.currency().equalsIgnoreCase(capturedCurrency);
+            int amountComparison = settlement.amount().compareTo(event.amount());
+            String disposition;
+            String caseType = null;
+            if (!currencyMatches) { disposition = "CURRENCY_MISMATCH"; caseType = disposition; }
+            else if ("CANCELLED".equals(orderStatus)) {
+                disposition = "LATE_CAPTURE"; caseType = disposition;
+            } else if ("PAID".equals(orderStatus) || amountComparison < 0) { disposition = "OVERPAYMENT"; caseType = disposition; }
+            else if (amountComparison > 0) { disposition = "UNDERPAYMENT"; caseType = disposition; }
+            else disposition = "APPLIED";
+
+            UUID settlementId = UUID.randomUUID();
+            jdbc.update("INSERT INTO payment_settlements(settlement_id,payment_id,provider_event_id,provider_reference,amount,currency,disposition) VALUES (?,?,?,?,?,?,?)",
+                    settlementId, settlement.id(), event.providerEventId(), event.providerReference(), event.amount(), capturedCurrency, disposition);
+            if (caseType != null) {
+                jdbc.update("INSERT INTO payment_reconciliation_cases(case_id,payment_id,order_id,settlement_id,case_type,expected_amount,captured_amount,expected_currency,captured_currency) VALUES (?,?,?,?,?,?,?,?,?)",
+                        UUID.randomUUID(), settlement.id(), orderId, settlementId, caseType, settlement.amount(), event.amount(), settlement.currency(), capturedCurrency);
             }
-            if (!"PENDING".equals(orderStatus) && !"PAID".equals(orderStatus)) {
+            if ("UNDERPAYMENT".equals(disposition) || "CURRENCY_MISMATCH".equals(disposition)) {
+            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status='CAPTURE_REVIEW',updated_at=now() WHERE id=?", event.amount(), capturedCurrency, settlement.id());
+                jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", settlement.id());
                 markProviderWebhookProcessed(providerKey, event.providerEventId());
-                return Map.of("status", "order_not_payable");
+                return Map.of("status", "reconciliation_required");
             }
-            jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now() WHERE provider_reference=? AND status IN ('PENDING','CAPTURED')", event.providerReference());
-            String paymentStatus=jdbc.queryForObject("SELECT status FROM payments WHERE provider_reference=?",String.class,event.providerReference());
-            if(!"CAPTURED".equals(paymentStatus)) {
-                markProviderWebhookProcessed(providerKey,event.providerEventId());
-                return Map.of("status","payment_not_payable");
+            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status='CAPTURED',updated_at=now() WHERE id=? AND status IN ('PENDING','FAILED','CANCELLED','CAPTURED')", event.amount(), capturedCurrency, settlement.id());
+            jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", settlement.id());
+            if ("LATE_CAPTURE".equals(disposition)) {
+                markProviderWebhookProcessed(providerKey, event.providerEventId());
+                return Map.of("status", "reconciliation_required");
             }
             int paid = jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
-            if (paid > 0) { OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true); awardLoyalty(orderId); }
-            orderUpdates.publish(orderId);
-            jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING",orderId);
-            jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)",UUID.randomUUID(),orderId,orderId);
+            if (paid > 0) {
+                OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);
+                awardLoyalty(orderId);
+                orderUpdates.publish(orderId);
+                jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING",orderId);
+                jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)",UUID.randomUUID(),orderId,orderId);
+            }
         } else if (event.state() == PaymentProvider.PaymentState.EXPIRED || event.state() == PaymentProvider.PaymentState.FAILED
                 || event.state() == PaymentProvider.PaymentState.CANCELLED) {
-            jdbc.update("UPDATE payments SET status='FAILED',updated_at=now() WHERE provider_reference=? AND status='PENDING'", event.providerReference());
+            jdbc.update("UPDATE payments SET status='FAILED',updated_at=now() WHERE id=? AND status='PENDING'", linkedPaymentId);
+            jdbc.update("UPDATE payment_attempts SET status='FAILED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", linkedPaymentId);
             boolean hasPending = Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payments WHERE order_id=? AND status='PENDING')", Boolean.class, orderId));
             if (!hasPending && jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'", orderId) > 0) {
                 OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_CANCELLED","Order cancelled because payment did not complete",true);
@@ -413,9 +494,29 @@ public class PaymentController {
         jdbc.update("UPDATE payment_webhook_receipts SET processed_at=now() WHERE provider=? AND event_id=?", providerKey, eventId);
     }
 
-    private UUID lockOrderForSession(String sessionId) {
-        var orders=jdbc.query("SELECT o.id FROM orders o JOIN payments p ON p.order_id=o.id WHERE p.provider_reference=? FOR UPDATE OF o",
-                (rs,row)->rs.getObject(1,UUID.class),sessionId);
+    private boolean paymentReferenceExists(String providerReference) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payments WHERE provider_reference=? AND method='EXTENSION')",
+                Boolean.class, providerReference));
+    }
+
+    private UUID paymentIdForReference(String providerReference, PaymentProvider.ProviderOwner owner) {
+        if (owner != null) return jdbc.query("SELECT id FROM payments WHERE provider_reference=? AND method='EXTENSION' AND provider_plugin_id IS NOT NULL "
+                        + "AND provider_instance_id=? AND provider_release_id IS NOT DISTINCT FROM ? AND provider_configuration_generation=? "
+                        + "AND provider_account_fingerprint IS NOT DISTINCT FROM ?",
+                (rs, row) -> rs.getObject(1, UUID.class), providerReference, owner.instanceId(), owner.releaseId(),
+                owner.configurationGeneration(), owner.externalAccountFingerprint()).stream().findFirst().orElse(null);
+        if (!extensionProviderId.isBlank()) {
+            UUID configured = jdbc.query("SELECT id FROM payments WHERE provider_reference=? AND method='EXTENSION' AND provider_plugin_id=?",
+                    (rs, row) -> rs.getObject(1, UUID.class), providerReference, extensionProviderId).stream().findFirst().orElse(null);
+            if (configured != null) return configured;
+        }
+        return jdbc.query("SELECT id FROM payments WHERE provider_reference=? AND method='EXTENSION' AND provider_plugin_id IS NULL",
+                (rs, row) -> rs.getObject(1, UUID.class), providerReference).stream().findFirst().orElse(null);
+    }
+
+    private UUID lockOrderForPayment(UUID paymentId) {
+        var orders=jdbc.query("SELECT o.id FROM orders o JOIN payments p ON p.order_id=o.id WHERE p.id=? FOR UPDATE OF o",
+                (rs,row)->rs.getObject(1,UUID.class),paymentId);
         return orders.isEmpty()?null:orders.getFirst();
     }
 
@@ -427,7 +528,7 @@ public class PaymentController {
         if (role == null || !Set.of("ADMIN", "SUPERADMIN").contains(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Idempotency-Key header is required");
-        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method,order_id,user_id,gift_card_id,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM payments WHERE id=? FOR UPDATE",
+        var payments = jdbc.query("SELECT provider_reference,status,COALESCE(captured_amount,amount) amount,refunded_amount,COALESCE(captured_currency,currency) currency,method,order_id,user_id,gift_card_id,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM payments WHERE id=? FOR UPDATE",
                 (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6),rs.getObject(7,UUID.class),rs.getObject(8,UUID.class),rs.getObject(9,UUID.class),providerOwner(rs,10)),paymentId);
         if (payments.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
         RefundRow payment = payments.getFirst();
@@ -441,7 +542,7 @@ public class PaymentController {
             return ResponseEntity.ok(new RefundView(prior.id(), paymentId, prior.amount(), payment.currency(), payment.refundedAmount(), remaining,
                     prior.providerReference(), "COMPLETED"));
         }
-        if (!Set.of("CAPTURED", "PARTIALLY_REFUNDED").contains(payment.status()))
+        if (!Set.of("CAPTURED", "CAPTURE_REVIEW", "PARTIALLY_REFUNDED").contains(payment.status()))
             throw new ResponseStatusException(HttpStatus.CONFLICT,"Only captured payments can be refunded");
         BigDecimal refundAmount = command == null || command.amount() == null ? remaining : command.amount();
         int fractionDigits = Currency.getInstance(payment.currency()).getDefaultFractionDigits();
@@ -481,6 +582,7 @@ public class PaymentController {
         BigDecimal totalRefunded = payment.refundedAmount().add(refundAmount);
         String paymentStatus = totalRefunded.compareTo(payment.amount()) == 0 ? "REFUNDED" : "PARTIALLY_REFUNDED";
         jdbc.update("UPDATE payments SET refunded_amount=?,status=?,updated_at=now() WHERE id=?",totalRefunded,paymentStatus,paymentId);
+        if ("REFUNDED".equals(paymentStatus)) jdbc.update("UPDATE payment_reconciliation_cases SET status='RESOLVED',resolution_note='Captured amount fully refunded',resolved_at=now() WHERE payment_id=? AND status='OPEN'",paymentId);
         jdbc.update("UPDATE payment_refunds SET status='COMPLETED',provider_reference=?,updated_at=now() WHERE id=?",providerReference,refundId);
         LoyaltyAccounting.reverseForRefund(jdbc,refundId,payment.orderId());
         OrderTimelineEvents.record(jdbc,payment.orderId(),UUID.fromString(auth.getToken().getSubject()),"PAYMENT_REFUNDED",
@@ -508,13 +610,14 @@ public class PaymentController {
     }
     private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method,UUID orderId,UUID userId,UUID giftCardId,PaymentProvider.ProviderOwner owner){}
     private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference){}
-    private record PaymentSettlement(BigDecimal amount,String currency,UUID instanceId){}
+    private record PaymentSettlement(UUID id,BigDecimal amount,String currency,UUID instanceId,String status){}
     public record RefundCommand(BigDecimal amount){}
     public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,
                              BigDecimal remainingAmount,String providerReference,String status){}
     private record OrderRow(BigDecimal total,String currency,String status,String country){}
     private record PendingPayment(UUID id,String providerReference,String method,PaymentProvider.ProviderOwner owner){}
     private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency, PaymentProvider.ProviderOwner owner, UUID id) { }
+    private record PaymentAttempt(UUID id, String requestFingerprint, String status, String providerReference, String checkoutUrl) { }
     public record PaymentSelection(String methodReference) { }
     public record PaymentMethodDiscoveryRequest(String country, String currency, BigDecimal amount) { }
     public record PaymentMethodOption(String reference, String displayName) { }

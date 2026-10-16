@@ -1715,6 +1715,7 @@ class CatalogApiIntegrationTests {
         var retry = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
                 Map.of("methodReference", cardReference), Map.class, orderId);
         assertThat(retry.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(retry.getBody().get("providerReference")).isEqualTo(response.getBody().get("providerReference"));
         var changedMethod = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
                 Map.of("methodReference", paypalReference), Map.class, orderId);
         assertThat(changedMethod.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -1726,6 +1727,116 @@ class CatalogApiIntegrationTests {
                 Integer.class, orderId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE order_id=? AND method='EXTENSION' AND payment_obligation_id=?",
                 Integer.class, orderId, orderId)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_attempts WHERE order_id=? AND status='PENDING'", Integer.class, orderId)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE order_id=? AND payment_attempt_id IS NOT NULL", Integer.class, orderId)).isEqualTo(2);
+    }
+
+    @Test
+    void paymentProviderReferencesAreNamespacedByProviderAccount() {
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID orderId = insertPendingOrder(userId);
+        String accountA = "0".repeat(64);
+        String accountB = "1".repeat(64);
+        insertExternalPayment(orderId, userId, "psp-a", accountA, "shared-provider-reference");
+        insertExternalPayment(orderId, userId, "psp-a", accountB, "shared-provider-reference");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE provider_reference='shared-provider-reference'", Integer.class)).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> insertExternalPayment(orderId, userId, "psp-a", accountA,
+                "shared-provider-reference")).isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
+    }
+
+    @Test
+    void externalPaymentAttemptChargesOnlyTheBalanceRemainingAfterGiftCardTender() {
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID orderId = insertPendingOrder(userId);
+        jdbc.update("UPDATE orders SET total=12.50,currency='CHF',shipping_country='CH' WHERE id=?", orderId);
+        reservePaymentTestOrder(orderId);
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,2.50,'CHF','GIFT_CARD','CAPTURED',?,now(),now())",
+                UUID.randomUUID(), orderId, userId, "giftcard-test-" + UUID.randomUUID());
+
+        var discovered = http.postForEntity("/api/v1/payments/methods", Map.of("country", "CH", "currency", "CHF"), Map.class);
+        List<Map> options = (List<Map>) discovered.getBody().get("methods");
+        String cardReference = (String) findPaymentOption(options, "Card").get("reference");
+        var checkout = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", cardReference), Map.class, orderId);
+
+        assertThat(checkout.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT amount FROM payment_attempts WHERE order_id=?", BigDecimal.class, orderId))
+                .isEqualByComparingTo("10.00");
+        assertThat(jdbc.queryForObject("SELECT amount FROM payments WHERE order_id=? AND method='EXTENSION'", BigDecimal.class, orderId))
+                .isEqualByComparingTo("10.00");
+    }
+
+    @Test
+    void concurrentCheckoutRetriesShareOneDurableProviderAttempt() throws Exception {
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID orderId = insertPendingOrder(userId);
+        jdbc.update("UPDATE orders SET total=12.50,currency='CHF',shipping_country='CH' WHERE id=?", orderId);
+        reservePaymentTestOrder(orderId);
+        var discovered = http.postForEntity("/api/v1/payments/methods", Map.of("country", "CH", "currency", "CHF"), Map.class);
+        List<Map> options = (List<Map>) discovered.getBody().get("methods");
+        String cardReference = (String) findPaymentOption(options, "Card").get("reference");
+        var request = new HttpEntity<>(Map.of("methodReference", cardReference), bearerHeaders(adminToken));
+        var ready = new java.util.concurrent.CountDownLatch(1);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(() -> { ready.await(); return http.exchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST, request, Map.class, orderId); });
+            var second = pool.submit(() -> { ready.await(); return http.exchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST, request, Map.class, orderId); });
+            ready.countDown();
+            var a = first.get();
+            var b = second.get();
+            assertThat(a.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(b.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(a.getBody().get("providerReference")).isEqualTo(b.getBody().get("providerReference"));
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_attempts WHERE order_id=?", Integer.class, orderId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE order_id=? AND method='EXTENSION'", Integer.class, orderId)).isEqualTo(1);
+    }
+
+    @Test
+    void ambiguousProviderFailureKeepsTheDurableAttemptForSameIdentityRetry() {
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID orderId = insertPendingOrder(userId);
+        jdbc.update("UPDATE orders SET total=12.50,currency='CHF',shipping_country='CH' WHERE id=?", orderId);
+        reservePaymentTestOrder(orderId);
+        var discovered = http.postForEntity("/api/v1/payments/methods", Map.of("country", "CH", "currency", "CHF"), Map.class);
+        List<Map> options = (List<Map>) discovered.getBody().get("methods");
+        String cardReference = (String) findPaymentOption(options, "Card").get("reference");
+        PROVIDER_CHECKOUT_FAILURE.set(new IllegalStateException("simulated timeout with unknown provider outcome"));
+
+        var ambiguous = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", cardReference), ApiError.class, orderId);
+        assertThat(ambiguous.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY);
+        assertThat(jdbc.queryForObject("SELECT status FROM payment_attempts WHERE order_id=?", String.class, orderId)).isEqualTo("UNKNOWN");
+
+        var retry = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", cardReference), Map.class, orderId);
+        assertThat(retry.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_attempts WHERE order_id=?", Integer.class, orderId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM payment_attempts WHERE order_id=?", String.class, orderId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE order_id=? AND method='EXTENSION'", Integer.class, orderId)).isEqualTo(1);
+    }
+
+    private HttpHeaders bearerHeaders(String token) {
+        var headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        return headers;
+    }
+
+    private void reservePaymentTestOrder(UUID orderId) {
+        UUID sellableId = UUID.randomUUID();
+        var warehouse = inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "PAY-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Payment acceptance", "CH-ZH"));
+        inventory.receive(warehouse.id(), sellableId, BigDecimal.ONE);
+        inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(orderId, warehouse.id(), sellableId, BigDecimal.ONE));
+    }
+
+    private void insertExternalPayment(UUID orderId, UUID userId, String providerId, String accountFingerprint, String providerReference) {
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_plugin_id,provider_account_fingerprint,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,?,?,now(),now())",
+                UUID.randomUUID(), orderId, userId, providerId, accountFingerprint, providerReference);
     }
 
     private static Map<?, ?> findPaymentOption(List<Map> options, String displayName) {
@@ -1766,7 +1877,7 @@ class CatalogApiIntegrationTests {
         reservationExpiryScheduler.releaseExpiredReservations();
 
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, unpaidOrderId)).isEqualTo("CANCELLED");
-        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("CAPTURED");
         assertThat(inventory.reservationsByOrder(unpaidOrderId)).singleElement()
                 .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
                 .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
@@ -1798,11 +1909,88 @@ class CatalogApiIntegrationTests {
 
         var lateSuccess = providerWebhook("checkout.session.completed", sessionId, "paid");
         assertThat(lateSuccess.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PAID");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("CAPTURED");
+        assertThat(jdbc.queryForObject("SELECT disposition FROM payment_settlements WHERE payment_id=?", String.class, paymentId)).isEqualTo("APPLIED");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.update("UPDATE payment_settlements SET disposition='OVERPAYMENT' WHERE payment_id=?", paymentId))
+                .isInstanceOf(org.springframework.jdbc.UncategorizedSQLException.class)
+                .hasMessageContaining("payment_settlements is immutable");
 
         providerWebhook("checkout.session.expired", secondSessionId, "unpaid");
-        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
-        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PAID");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("CAPTURED");
+
+        UUID overpaidOrder = insertPendingOrder(userId);
+        UUID overpaidPayment = UUID.randomUUID();
+        String overpaidSession = "cs_overpaid_" + overpaidPayment;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
+                overpaidPayment, overpaidOrder, userId, overpaidSession);
+        var overpayment = providerWebhook("checkout.session.completed", overpaidSession, "paid", "2.00", "USD");
+        assertThat(overpayment.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, overpaidOrder)).isEqualTo("PAID");
+        assertThat(jdbc.queryForObject("SELECT amount FROM payment_settlements WHERE payment_id=?", BigDecimal.class, overpaidPayment))
+                .isEqualByComparingTo("2.00");
+        assertThat(jdbc.queryForObject("SELECT amount FROM payments WHERE id=?", BigDecimal.class, overpaidPayment)).isEqualByComparingTo("1.00");
+        assertThat(jdbc.queryForObject("SELECT captured_amount FROM payments WHERE id=?", BigDecimal.class, overpaidPayment)).isEqualByComparingTo("2.00");
+        assertThat(jdbc.queryForObject("SELECT case_type FROM payment_reconciliation_cases WHERE payment_id=?", String.class, overpaidPayment))
+                .isEqualTo("OVERPAYMENT");
+        var overpaymentRefundHeaders = new HttpHeaders();
+        overpaymentRefundHeaders.setBearerAuth(adminToken);
+        overpaymentRefundHeaders.set("Idempotency-Key", "overpayment-refund-" + overpaidPayment);
+        var overpaymentRefund = http.exchange("/api/v1/payments/{paymentId}/refund", HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.payments.PaymentController.RefundCommand(new BigDecimal("2.00")), overpaymentRefundHeaders),
+                io.artio.api.payments.PaymentController.RefundView.class, overpaidPayment);
+        assertThat(overpaymentRefund.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, overpaidPayment)).isEqualTo("REFUNDED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payment_reconciliation_cases WHERE payment_id=?", String.class, overpaidPayment)).isEqualTo("RESOLVED");
+        assertThat(adminExchange("/api/v1/admin/payments/reconciliation-cases", HttpMethod.GET, null, List.class).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        UUID doublePaidOrder = insertPendingOrder(userId);
+        UUID firstCapture = UUID.randomUUID();
+        UUID secondCapture = UUID.randomUUID();
+        String firstSession = "cs_double_first_" + firstCapture;
+        String secondSession = "cs_double_second_" + secondCapture;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now()),(?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
+                firstCapture, doublePaidOrder, userId, firstSession, secondCapture, doublePaidOrder, userId, secondSession);
+        providerWebhook("checkout.session.completed", secondSession, "paid");
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, doublePaidOrder)).isEqualTo("PAID");
+        providerWebhook("checkout.session.completed", firstSession, "paid");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_reconciliation_cases WHERE order_id=? AND case_type='OVERPAYMENT'",
+                Integer.class, doublePaidOrder)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM order_timeline_events WHERE order_id=? AND event_type='ORDER_PAID'",
+                Integer.class, doublePaidOrder)).isEqualTo(1);
+
+        UUID underpaidOrder = insertPendingOrder(userId);
+        UUID underpaidPayment = UUID.randomUUID();
+        String underpaidSession = "cs_underpaid_" + underpaidPayment;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
+                underpaidPayment, underpaidOrder, userId, underpaidSession);
+        var underpayment = providerWebhook("checkout.session.completed", underpaidSession, "paid", "0.50", "USD");
+        assertThat(underpayment.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, underpaidPayment)).isEqualTo("CAPTURE_REVIEW");
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, underpaidOrder)).isEqualTo("PENDING");
+        var blockedRetry = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST, null, ApiError.class, underpaidOrder);
+        assertThat(blockedRetry.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(jdbc.queryForObject("SELECT case_type FROM payment_reconciliation_cases WHERE payment_id=?", String.class, underpaidPayment))
+                .isEqualTo("UNDERPAYMENT");
+
+        UUID cancelledOrder = insertPendingOrder(userId);
+        UUID cancelledPayment = UUID.randomUUID();
+        String cancelledSession = "cs_cancelled_late_" + cancelledPayment;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','FAILED',?,now(),now())",
+                cancelledPayment, cancelledOrder, userId, cancelledSession);
+        jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=?", cancelledOrder);
+        var cancelledLateCapture = providerWebhook("checkout.session.completed", cancelledSession, "paid");
+        assertThat(cancelledLateCapture.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, cancelledOrder)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, cancelledPayment)).isEqualTo("CAPTURED");
+        assertThat(jdbc.queryForObject("SELECT case_type FROM payment_reconciliation_cases WHERE payment_id=?", String.class, cancelledPayment))
+                .isEqualTo("LATE_CAPTURE");
     }
 
     @Test
@@ -1858,9 +2046,13 @@ class CatalogApiIntegrationTests {
     }
 
     private ResponseEntity<String> providerWebhook(String type, String sessionId, String paymentStatus) throws Exception {
+        return providerWebhook(type, sessionId, paymentStatus, "1.00", "USD");
+    }
+
+    private ResponseEntity<String> providerWebhook(String type, String sessionId, String paymentStatus, String amount, String currency) throws Exception {
         String eventId = "evt_test_" + UUID.nameUUIDFromBytes((type + ":" + sessionId).getBytes(StandardCharsets.UTF_8));
         String body = "{\"id\":\"" + eventId + "\",\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
-                + "\",\"payment_status\":\"" + paymentStatus + "\",\"amount\":\"1.00\",\"currency\":\"USD\"}}}";
+                + "\",\"payment_status\":\"" + paymentStatus + "\",\"amount\":\"" + amount + "\",\"currency\":\"" + currency + "\"}}}";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
         headers.set("Provider-Signature", "integration-test-signature");
@@ -2289,6 +2481,22 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PAID");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, orderId)).isEqualTo("CAPTURED");
         assertThat(jdbc.queryForObject("SELECT reconciliation_claimed_at IS NULL FROM payments WHERE order_id=?", Boolean.class, orderId)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT disposition FROM payment_settlements WHERE payment_id=(SELECT id FROM payments WHERE order_id=?)",
+                String.class, orderId)).isEqualTo("APPLIED");
+    }
+
+    @Test
+    void reconciliationRecordsCapturedOverpaymentForOperatorResolution() {
+        UUID orderId = createStaleProviderOrder("cs_reconcile_overpaid_" + UUID.randomUUID());
+        PROVIDER_RESPONSE.set("{\"status\":\"complete\",\"payment_status\":\"paid\",\"amount\":\"20.00\",\"currency\":\"CHF\"}");
+
+        paymentReconciliationWorker.reconcileDueSessions();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PAID");
+        assertThat(jdbc.queryForObject("SELECT amount FROM payment_settlements WHERE payment_id=(SELECT id FROM payments WHERE order_id=?)",
+                BigDecimal.class, orderId)).isEqualByComparingTo("20.00");
+        assertThat(jdbc.queryForObject("SELECT case_type FROM payment_reconciliation_cases WHERE order_id=?", String.class, orderId))
+                .isEqualTo("OVERPAYMENT");
     }
 
     @Test

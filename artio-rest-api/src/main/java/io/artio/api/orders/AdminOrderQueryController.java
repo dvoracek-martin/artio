@@ -100,7 +100,7 @@ public class AdminOrderQueryController {
         List<OrderLine> lines = jdbc.query("SELECT oi.id,oi.variant_id,oi.bundle_id,oi.quantity,oi.unit_price,oi.currency,COALESCE((SELECT sum(si.quantity) FROM order_shipment_items si JOIN order_shipments s ON s.id=si.shipment_id WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0) AS shipped_quantity FROM order_items oi WHERE oi.order_id=? ORDER BY oi.id",
                 (rs, row) -> new OrderLine(rs.getObject("id", UUID.class), rs.getObject("variant_id", UUID.class),
                         rs.getObject("bundle_id", UUID.class), rs.getBigDecimal("quantity"), rs.getBigDecimal("shipped_quantity"), rs.getBigDecimal("unit_price"), rs.getString("currency").trim()), id);
-        List<PaymentSummary> payments = jdbc.query("SELECT id,method,status,amount,refunded_amount,currency,provider_reference,created_at,updated_at FROM payments WHERE order_id=? ORDER BY created_at",
+        List<PaymentSummary> payments = jdbc.query("SELECT id,method,status,COALESCE(captured_amount,amount) amount,refunded_amount,COALESCE(captured_currency,currency) currency,provider_reference,created_at,updated_at FROM payments WHERE order_id=? ORDER BY created_at",
                 (rs, row) -> new PaymentSummary(rs.getObject("id", UUID.class), rs.getString("method"), rs.getString("status"),
                         rs.getBigDecimal("amount"), rs.getBigDecimal("refunded_amount"), rs.getString("currency").trim(), rs.getString("provider_reference"),
                         rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), id);

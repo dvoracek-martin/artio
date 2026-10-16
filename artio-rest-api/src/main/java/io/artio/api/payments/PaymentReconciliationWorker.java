@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -87,12 +88,9 @@ public class PaymentReconciliationWorker {
             var result = owned.get().result();
             switch (result.state()) {
                 case CAPTURED -> {
-                    var settlement = result;
-                    if (!payment.sessionId().equals(settlement.providerReference()) || settlement.amount() == null
-                            || payment.amount().compareTo(settlement.amount()) != 0 || settlement.currency() == null
-                            || !payment.currency().equalsIgnoreCase(settlement.currency())) {
-                        retry(payment, "PROVIDER_SETTLEMENT_MISMATCH");
-                    } else applyPaid(payment);
+                    if (!payment.sessionId().equals(result.providerReference()) || result.amount() == null || result.currency() == null) {
+                        retry(payment, "PROVIDER_SETTLEMENT_INCOMPLETE");
+                    } else applyCaptured(payment, result);
                 }
                 case EXPIRED, FAILED, CANCELLED -> applyExpired(payment);
                 default -> retry(payment, "PROVIDER_" + result.state().name());
@@ -104,21 +102,45 @@ public class PaymentReconciliationWorker {
         }
     }
 
-    private void applyPaid(PaymentSession payment) {
+    private void applyCaptured(PaymentSession payment, PaymentProvider.PaymentResult result) {
         transactions.executeWithoutResult(status -> {
-            UUID orderId = lockPendingOrder(payment);
-            if (orderId == null) { clearClaim(payment.id()); return; }
-            int captured = jdbc.update("UPDATE payments SET status='CAPTURED',updated_at=now(),reconciliation_claimed_at=NULL WHERE id=? AND status='PENDING'", payment.id());
-            if (captured == 0) { clearClaim(payment.id()); return; }
-            int paid=jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
+            var rows = jdbc.query("SELECT o.id,o.status,p.status FROM orders o JOIN payments p ON p.order_id=o.id WHERE p.id=? FOR UPDATE OF o,p",
+                    (rs, row) -> new OrderPayment(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)), payment.id());
+            if (rows.isEmpty() || !Set.of("PENDING", "FAILED", "CANCELLED").contains(rows.getFirst().paymentStatus())) {
+                clearClaim(payment.id()); return;
+            }
+            OrderPayment orderPayment = rows.getFirst();
+            UUID orderId = orderPayment.orderId();
+            String captureCurrency = result.currency().trim().toUpperCase(java.util.Locale.ROOT);
+            boolean currencyMatches = payment.currency().equalsIgnoreCase(captureCurrency);
+            int amountComparison = payment.amount().compareTo(result.amount());
+            String disposition;
+            String caseType = null;
+            if (!currencyMatches) { disposition = "CURRENCY_MISMATCH"; caseType = disposition; }
+            else if ("CANCELLED".equals(orderPayment.orderStatus())) { disposition = "LATE_CAPTURE"; caseType = disposition; }
+            else if ("PAID".equals(orderPayment.orderStatus()) || amountComparison < 0) { disposition = "OVERPAYMENT"; caseType = disposition; }
+            else if (amountComparison > 0) { disposition = "UNDERPAYMENT"; caseType = disposition; }
+            else disposition = "APPLIED";
+            UUID settlementId = UUID.randomUUID();
+            String reconciliationEventId = "reconcile:" + payment.id();
+            jdbc.update("INSERT INTO payment_settlements(settlement_id,payment_id,provider_event_id,provider_reference,amount,currency,disposition) VALUES (?,?,?,?,?,?,?)",
+                    settlementId, payment.id(), reconciliationEventId, payment.sessionId(), result.amount(), captureCurrency, disposition);
+            if (caseType != null) jdbc.update("INSERT INTO payment_reconciliation_cases(case_id,payment_id,order_id,settlement_id,case_type,expected_amount,captured_amount,expected_currency,captured_currency) VALUES (?,?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), payment.id(), orderId, settlementId, caseType, payment.amount(), result.amount(), payment.currency(), captureCurrency);
+            boolean review = "UNDERPAYMENT".equals(disposition) || "CURRENCY_MISMATCH".equals(disposition);
+            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status=?,updated_at=now(),reconciliation_claimed_at=NULL WHERE id=? AND status IN ('PENDING','FAILED','CANCELLED')",
+                    result.amount(), captureCurrency, review ? "CAPTURE_REVIEW" : "CAPTURED", payment.id());
+            jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", payment.id());
+            int paid = review || "LATE_CAPTURE".equals(disposition) ? 0
+                    : jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
             if(paid>0){
                 OrderTimelineEvents.record(jdbc,orderId,null,"ORDER_PAID","Payment confirmed",true);
                 jdbc.query("SELECT user_id,total FROM orders WHERE id=?",(rs,row)->new Object[]{rs.getObject(1,UUID.class),rs.getBigDecimal(2)},orderId)
                         .stream().findFirst().ifPresent(order->LoyaltyAccounting.earnForOrder(jdbc,(UUID)order[0],orderId,(java.math.BigDecimal)order[1]));
+                jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING", orderId);
+                jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)", UUID.randomUUID(), orderId, orderId);
+                orderUpdates.publish(orderId);
             }
-            jdbc.update("INSERT INTO product_interactions(id,user_id,variant_id,kind,order_id) SELECT gen_random_uuid(),o.user_id,oi.variant_id,'PURCHASE',o.id FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.id=? ON CONFLICT DO NOTHING", orderId);
-            jdbc.update("INSERT INTO notifications(id,user_id,type,subject,body,is_read,created_at) SELECT ?,user_id,'PAYMENT_RECEIVED','Payment received','Payment received for order '||id,false,now() FROM orders WHERE id=? AND NOT EXISTS (SELECT 1 FROM notifications WHERE type='PAYMENT_RECEIVED' AND body='Payment received for order '||?)", UUID.randomUUID(), orderId, orderId);
-            orderUpdates.publish(orderId);
         });
     }
 
@@ -127,6 +149,7 @@ public class PaymentReconciliationWorker {
             UUID orderId = lockPendingOrder(payment);
             if (orderId == null) { clearClaim(payment.id()); return; }
             jdbc.update("UPDATE payments SET status='FAILED',updated_at=now(),reconciliation_claimed_at=NULL WHERE id=? AND status='PENDING'", payment.id());
+            jdbc.update("UPDATE payment_attempts SET status='FAILED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", payment.id());
             boolean hasPending = Boolean.TRUE.equals(jdbc.queryForObject(
                     "SELECT EXISTS(SELECT 1 FROM payments WHERE order_id=? AND status='PENDING')", Boolean.class, orderId));
             if (!hasPending && jdbc.update("UPDATE orders SET status='CANCELLED' WHERE id=? AND status='PENDING'", orderId) > 0) {
@@ -136,12 +159,6 @@ public class PaymentReconciliationWorker {
                 orderUpdates.publish(orderId);
             }
         });
-    }
-
-    private UUID lockPendingOrder(PaymentSession payment) {
-        List<UUID> orders = jdbc.query("SELECT o.id FROM orders o JOIN payments p ON p.order_id=o.id WHERE p.id=? AND p.status='PENDING' AND o.status='PENDING' FOR UPDATE OF o",
-                (rs, row) -> rs.getObject(1, UUID.class), payment.id());
-        return orders.isEmpty() ? null : orders.getFirst();
     }
 
     private void retry(PaymentSession payment, String errorType) {
@@ -159,6 +176,12 @@ public class PaymentReconciliationWorker {
         jdbc.update("UPDATE payments SET reconciliation_claimed_at=NULL WHERE id=?", paymentId);
     }
 
+    private UUID lockPendingOrder(PaymentSession payment) {
+        List<UUID> orders = jdbc.query("SELECT o.id FROM orders o JOIN payments p ON p.order_id=o.id WHERE p.id=? AND p.status='PENDING' AND o.status='PENDING' FOR UPDATE OF o",
+                (rs, row) -> rs.getObject(1, UUID.class), payment.id());
+        return orders.isEmpty() ? null : orders.getFirst();
+    }
+
     private static PaymentProvider.ProviderOwner providerOwner(ResultSet rs, int column) throws SQLException {
         UUID instanceId = rs.getObject(column, UUID.class);
         if (instanceId == null) return null;
@@ -170,4 +193,5 @@ public class PaymentReconciliationWorker {
     }
     private record PaymentSession(UUID id, UUID orderId, String sessionId, int attempts, String method,
                                   java.math.BigDecimal amount, String currency, PaymentProvider.ProviderOwner owner) { }
+    private record OrderPayment(UUID orderId, String orderStatus, String paymentStatus) { }
 }

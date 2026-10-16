@@ -22,7 +22,7 @@ public class ReportingService {
             WITH selected_orders AS (
                 SELECT id,user_id,currency,total FROM orders WHERE created_at>=? AND created_at<?
             ), payment_totals AS (
-                SELECT p.order_id,SUM(p.amount) captured,SUM(p.refunded_amount) refunded
+                SELECT p.order_id,SUM(COALESCE(p.captured_amount,p.amount)) captured,SUM(p.refunded_amount) refunded
                 FROM payments p JOIN selected_orders o ON o.id=p.order_id AND o.currency=p.currency
                 WHERE p.status IN ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED') GROUP BY p.order_id
             )
@@ -80,7 +80,7 @@ public class ReportingService {
                         rs.getBigDecimal("units"), rs.getBigDecimal("recorded_line_value"), rs.getInt("position")), window.start(), window.end());
         var lifetime = jdbc.query("""
                 WITH customer_values AS (
-                    SELECT p.currency,o.user_id,SUM(p.amount) captured,SUM(p.refunded_amount) refunded
+                    SELECT p.currency,o.user_id,SUM(COALESCE(p.captured_amount,p.amount)) captured,SUM(p.refunded_amount) refunded
                     FROM payments p JOIN orders o ON o.id=p.order_id AND o.currency=p.currency
                     WHERE o.created_at<? AND p.status IN ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED')
                     GROUP BY p.currency,o.user_id

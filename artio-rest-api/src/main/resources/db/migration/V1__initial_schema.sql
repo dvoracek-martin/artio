@@ -316,12 +316,15 @@ CREATE TABLE payments (
   order_id UUID NOT NULL REFERENCES orders(id),
   user_id UUID NOT NULL REFERENCES users(id),
   amount NUMERIC(19,4) NOT NULL CHECK (amount >= 0),
-  refunded_amount NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0 AND refunded_amount <= amount),
+  captured_amount NUMERIC(19,4) CHECK (captured_amount IS NULL OR captured_amount >= 0),
+  captured_currency CHAR(3),
+  refunded_amount NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0 AND refunded_amount <= COALESCE(captured_amount,amount)),
   currency CHAR(3) NOT NULL,
   method VARCHAR(32) NOT NULL,
   payment_method_id VARCHAR(64) CHECK (payment_method_id IS NULL OR payment_method_id ~ '^[a-z][a-z0-9._-]{0,63}$'),
   payment_obligation_id UUID REFERENCES orders(id),
   status VARCHAR(32) NOT NULL,
+  provider_plugin_id VARCHAR(128),
   provider_reference VARCHAR(255) NOT NULL,
   provider_instance_id UUID,
   provider_release_id BIGINT,
@@ -331,11 +334,74 @@ CREATE TABLE payments (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
   CHECK ((provider_instance_id IS NULL AND provider_release_id IS NULL AND provider_configuration_generation IS NULL)
-      OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL AND provider_configuration_generation IS NOT NULL))
+      OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL AND provider_configuration_generation IS NOT NULL)),
+  CHECK ((captured_amount IS NULL AND captured_currency IS NULL) OR (captured_amount IS NOT NULL AND captured_currency IS NOT NULL))
 );
-CREATE UNIQUE INDEX uq_payments_provider_reference ON payments(provider_reference);
+CREATE UNIQUE INDEX uq_payments_provider_reference ON payments(provider_plugin_id,provider_instance_id,provider_account_fingerprint,provider_reference) NULLS NOT DISTINCT;
 CREATE INDEX idx_payments_order ON payments(order_id);
 CREATE INDEX idx_payments_provider_owner ON payments(provider_instance_id,created_at DESC) WHERE provider_instance_id IS NOT NULL;
+-- The selected provider and stable idempotency identity are durable before invoking a PSP.
+CREATE TABLE payment_attempts (
+  attempt_id UUID PRIMARY KEY,
+  order_id UUID NOT NULL REFERENCES orders(id),
+  payment_obligation_id UUID NOT NULL REFERENCES orders(id),
+  provider_plugin_id VARCHAR(128) NOT NULL,
+  provider_instance_id UUID,
+  provider_release_id BIGINT,
+  configuration_generation INTEGER NOT NULL DEFAULT 0 CHECK (configuration_generation >= 0),
+  provider_account_fingerprint CHAR(64) CHECK (provider_account_fingerprint IS NULL OR provider_account_fingerprint ~ '^[a-f0-9]{64}$'),
+  provider_scope JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(provider_scope) = 'object'),
+  payment_method_id VARCHAR(64),
+  idempotency_key VARCHAR(200) NOT NULL,
+  request_fingerprint CHAR(64) NOT NULL CHECK (request_fingerprint ~ '^[a-f0-9]{64}$'),
+  amount NUMERIC(19,4) NOT NULL CHECK (amount > 0),
+  currency CHAR(3) NOT NULL,
+  status VARCHAR(16) NOT NULL CHECK (status IN ('CREATING','PENDING','UNKNOWN','FAILED','CAPTURED','CANCELLED')),
+  provider_reference VARCHAR(255),
+  checkout_url TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(order_id,idempotency_key),
+  CHECK ((provider_instance_id IS NULL AND provider_release_id IS NULL)
+      OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX uq_payment_attempt_provider_reference ON payment_attempts(provider_plugin_id,provider_instance_id,provider_account_fingerprint,provider_reference) NULLS NOT DISTINCT
+    WHERE provider_reference IS NOT NULL;
+ALTER TABLE payments ADD COLUMN payment_attempt_id UUID UNIQUE REFERENCES payment_attempts(attempt_id);
+-- A verified provider capture is a financial fact even when it cannot settle an order automatically.
+CREATE TABLE payment_settlements (
+  settlement_id UUID PRIMARY KEY,
+  payment_id UUID NOT NULL REFERENCES payments(id),
+  provider_event_id VARCHAR(255) NOT NULL,
+  provider_reference VARCHAR(255) NOT NULL,
+  amount NUMERIC(19,4) NOT NULL CHECK (amount >= 0),
+  currency CHAR(3) NOT NULL,
+  disposition VARCHAR(32) NOT NULL CHECK (disposition IN ('APPLIED','LATE_CAPTURE','OVERPAYMENT','UNDERPAYMENT','CURRENCY_MISMATCH')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(payment_id, provider_event_id)
+);
+CREATE INDEX idx_payment_settlements_payment ON payment_settlements(payment_id, created_at DESC);
+CREATE FUNCTION payment_settlements_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'payment_settlements is immutable'; END $$;
+CREATE TRIGGER payment_settlements_immutable
+    BEFORE UPDATE OR DELETE ON payment_settlements FOR EACH ROW EXECUTE FUNCTION payment_settlements_immutable();
+CREATE TABLE payment_reconciliation_cases (
+  case_id UUID PRIMARY KEY,
+  payment_id UUID NOT NULL REFERENCES payments(id),
+  order_id UUID NOT NULL REFERENCES orders(id),
+  settlement_id UUID NOT NULL UNIQUE REFERENCES payment_settlements(settlement_id),
+  case_type VARCHAR(32) NOT NULL CHECK (case_type IN ('LATE_CAPTURE','OVERPAYMENT','UNDERPAYMENT','CURRENCY_MISMATCH')),
+  expected_amount NUMERIC(19,4) NOT NULL CHECK (expected_amount >= 0),
+  captured_amount NUMERIC(19,4) NOT NULL CHECK (captured_amount >= 0),
+  expected_currency CHAR(3) NOT NULL,
+  captured_currency CHAR(3) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','RESOLVED')),
+  resolution_note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
+);
+CREATE INDEX idx_payment_reconciliation_cases_open ON payment_reconciliation_cases(created_at) WHERE status='OPEN';
 CREATE TABLE payment_refunds (
   id UUID PRIMARY KEY,
   payment_id UUID NOT NULL REFERENCES payments(id),

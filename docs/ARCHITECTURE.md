@@ -94,6 +94,8 @@ Preserve existing modular domains, PostgreSQL adapters and API behavior when com
 
 The provider-neutral `payment.provider.v1` port now owns checkout, cancellation, capture, refund, webhook verification and reconciliation boundaries. Stripe-specific HTTP, credentials, webhook signature code and CSP permission have been removed from Core. Stripe and PayPal implementations remain separately sourced Docker plugins. Release acceptance still requires publishing immutable plugin images, verifying provider sandbox flows, and exercising lifecycle/recovery against Docker and PostgreSQL.
 
+Checkout persists a payment attempt and stable provider/account namespace before invoking a PSP. Verified captures are recorded in an immutable settlement ledger, while `payments.amount` keeps the requested obligation and `captured_amount`/`captured_currency` keep the provider's actual financial result. A late capture, second successful attempt, overpayment, underpayment or currency mismatch creates an operator reconciliation case. `GET /api/v1/admin/payments/reconciliation-cases` exposes open cases; an administrator can refund against the actual captured amount, and a full refund resolves that payment's open cases. Review cases prevent an underpaid or currency-mismatched obligation from starting another checkout.
+
 ## Verification required before claiming a boundary
 
 - Architecture dependency checker passes and fails when a domain takes an adapter/framework dependency.
