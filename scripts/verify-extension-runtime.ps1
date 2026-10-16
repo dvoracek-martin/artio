@@ -1,8 +1,11 @@
-param([string[]]$Tests = @(
+param(
+    [string[]]$Tests = @(
     'io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests',
     'io.artio.api.extensions.PackagedExtensionControllerIntegrationTests',
     'io.artio.api.extensions.PluginEventDeliveryDockerIntegrationTests'
-))
+),
+    [switch]$SkipObjectStorageTest
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -87,9 +90,11 @@ try {
 
     Push-Location $repoRoot
     try {
-        $verificationArguments = @(':artio-rest-api:integrationTest', '--rerun', '--no-daemon')
+        $verificationArguments = @(':artio-rest-api:integrationTest', '--rerun', '--no-daemon', '--max-workers=1')
         foreach ($test in $Tests) { $verificationArguments += @('--tests', $test) }
-        $verificationArguments += @('--tests', 'io.artio.api.extensions.ObjectStorageDockerIntegrationTests')
+        if (-not $SkipObjectStorageTest) {
+            $verificationArguments += @('--tests', 'io.artio.api.extensions.ObjectStorageDockerIntegrationTests')
+        }
         $gradleWrapper = if ($env:OS -eq 'Windows_NT') { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
         if (-not (Test-Path -LiteralPath $gradleWrapper -PathType Leaf)) {
             throw "Gradle wrapper was not found at '$gradleWrapper'."
@@ -119,7 +124,8 @@ try {
             $inspect = docker inspect $containerId | ConvertFrom-Json
             $labels = $inspect[0].Config.Labels
             $extensionId = [string]$labels.'io.artio.extension'
-            if ($extensionId.StartsWith("runtime.e2e$runSuffix") -or $extensionId.StartsWith("runtime.egress$runSuffix") -or
+            if ($extensionId.StartsWith("runtime.e2e$runSuffix") -or $extensionId.StartsWith("secret.e2e$runSuffix") -or
+                    $extensionId.StartsWith("runtime.egress$runSuffix") -or
                     $extensionId.StartsWith("controller.e2e$runSuffix") -or $labels.'io.artio.test.egress' -eq $runSuffix -or
                     $labels.'io.artio.test.run' -eq $runSuffix) {
                 docker rm --force $containerId | Out-Null
@@ -134,7 +140,8 @@ try {
             $extensionId = [string]$labels.'io.artio.extension'
             $fixtureIdentity = [string]$labels.'io.artio.test.fixture'
             $runtimeIdentity = [string]$labels.'io.artio.extension.runtime'
-            if (($extensionId.StartsWith("runtime.e2e$runSuffix") -or $extensionId.StartsWith("runtime.egress$runSuffix") -or
+            if (($extensionId.StartsWith("runtime.e2e$runSuffix") -or $extensionId.StartsWith("secret.e2e$runSuffix") -or
+                    $extensionId.StartsWith("runtime.egress$runSuffix") -or
                     $extensionId.StartsWith("controller.e2e$runSuffix")) -or $runtimeIdentity.StartsWith("runtime.e2e$runSuffix") -or
                     $fixtureIdentity.StartsWith($runSuffix)) {
                 docker volume rm $volumeName | Out-Null

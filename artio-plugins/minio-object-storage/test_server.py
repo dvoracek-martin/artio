@@ -159,6 +159,21 @@ class MinioAdapterTests(unittest.TestCase):
                         server._client()
                 self.assertEqual("invalid_endpoint", failure.exception.code)
 
+    def test_maps_provider_authorization_status_to_denial_without_exposing_provider_errors(self):
+        from botocore.exceptions import ClientError
+
+        failure = ClientError(
+            {
+                "Error": {"Code": "MinioPolicyDenied", "Message": "sensitive provider detail"},
+                "ResponseMetadata": {"HTTPStatusCode": 403},
+            },
+            "PutObject",
+        )
+        with self.assertRaises(server.StorageError) as denied:
+            server._s3_call(lambda: (_ for _ in ()).throw(failure))
+        self.assertEqual("provider_denied", denied.exception.code)
+        self.assertNotIn("sensitive provider detail", str(denied.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

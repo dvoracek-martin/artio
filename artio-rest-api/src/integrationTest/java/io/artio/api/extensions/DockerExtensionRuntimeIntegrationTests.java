@@ -69,6 +69,57 @@ class DockerExtensionRuntimeIntegrationTests {
     }
 
     @Test
+    void deliversRotatedSecretsOnlyThroughPrivateTmpfsFiles() throws Exception {
+        String image = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V1");
+        assumeTrue(image != null, "Run scripts/verify-extension-runtime.ps1 to provide the pinned fixture image");
+        DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        var transport = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost())
+                .sslConfig(config.getSSLConfig()).maxConnections(6).connectionTimeout(Duration.ofSeconds(5))
+                .responseTimeout(Duration.ofSeconds(120)).build();
+        try (DockerClient docker = DockerClientImpl.getInstance(config, transport)) {
+            String network = "artio-secrets-it-" + UUID.randomUUID().toString().substring(0, 8);
+            String pluginId = testPluginId("secret.e2e");
+            docker.createNetworkCmd().withName(network).withDriver("bridge")
+                    .withLabels(Map.of("io.artio.test.run", testRunId())).exec();
+            var runtime = new DockerExtensionRuntime(docker, network, 8080,
+                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
+            PluginManifest base = manifest(pluginId, image, "1.0.0", false);
+            var secretField = new PluginManifest.ConfigField("secret", true, true, "Acceptance secret", null,
+                    null, List.of(), 1, 100, null, null);
+            var release = new PluginManifest(base.manifestVersion(), base.id(), base.name(), base.vendor(), base.version(),
+                    base.description(), base.minimumCoreVersion(), base.maximumCoreVersion(), base.image(), base.dependencies(),
+                    base.permissions(), Map.of("acceptanceSecret", secretField), base.extensionPoints(), base.healthPath(),
+                    base.diagnosticsPath(), base.geographicAvailability(), base.services(), base.persistentPaths(),
+                    base.configurationBindings(), Map.of("/run/secrets/acceptance-secret", "acceptanceSecret"));
+            try {
+                runtime.install(release);
+                runtime.enable(release, 1, Map.of("acceptanceSecret", "first-private-value"));
+                String containerName = DockerExtensionRuntime.containerName(pluginId);
+                var first = docker.inspectContainerCmd(containerName).exec();
+                assertThat(java.util.Arrays.stream(first.getConfig().getEnv()))
+                        .noneMatch(value -> value.contains("first-private-value"));
+                var secretBind = java.util.Arrays.stream(first.getHostConfig().getBinds())
+                        .filter(bind -> "/run/secrets".equals(bind.getVolume().getPath())).findFirst().orElseThrow();
+                assertThat(secretBind.getAccessMode()).isEqualTo(com.github.dockerjava.api.model.AccessMode.ro);
+                assertThat(docker.inspectVolumeCmd(secretBind.getPath()).exec().getOptions()).containsEntry("type", "tmpfs");
+                execPython(docker, pluginId, "from pathlib import Path; import os, stat; p=Path('/run/secrets/acceptance-secret'); assert p.read_text() == 'first-private-value'; assert stat.S_IMODE(p.stat().st_mode) == 0o600; assert p.stat().st_uid == 10001; assert p.stat().st_gid == 10001");
+
+                runtime.disable(pluginId);
+                runtime.enable(release, 2, Map.of("acceptanceSecret", "rotated-private-value"));
+                var rotated = docker.inspectContainerCmd(containerName).exec();
+                assertThat(rotated.getId()).isNotEqualTo(first.getId());
+                assertThat(java.util.Arrays.stream(rotated.getConfig().getEnv()))
+                        .noneMatch(value -> value.contains("rotated-private-value"));
+                execPython(docker, pluginId, "from pathlib import Path; p=Path('/run/secrets/acceptance-secret'); assert p.read_text() == 'rotated-private-value'; assert 'first-private-value' not in p.read_text() ");
+            } finally {
+                runtime.disable(pluginId);
+                runtime.uninstall(pluginId);
+                docker.removeNetworkCmd(network).exec();
+            }
+        }
+    }
+
+    @Test
     void isolatesTwoLiveInstancesOfTheSameReleaseAndLifecycle() throws Exception {
         String image = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V1");
         assumeTrue(image != null, "Run scripts/verify-extension-runtime.ps1 to provide the pinned fixture image");
@@ -319,7 +370,9 @@ class DockerExtensionRuntimeIntegrationTests {
     private static void execPython(DockerClient docker, String pluginId, String code) throws Exception {
         var command = docker.execCreateCmd(DockerExtensionRuntime.containerName(pluginId))
                 .withAttachStdout(true).withAttachStderr(true).withCmd("python", "-c", code).exec();
-        try (var callback = new com.github.dockerjava.core.command.ExecStartResultCallback()) {
+        var stdout = new java.io.ByteArrayOutputStream();
+        var stderr = new java.io.ByteArrayOutputStream();
+        try (var callback = new com.github.dockerjava.core.command.ExecStartResultCallback(stdout, stderr)) {
             assertThat(docker.execStartCmd(command.getId()).exec(callback).awaitCompletion(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
         }
         Long exitCode = null;
@@ -328,7 +381,8 @@ class DockerExtensionRuntimeIntegrationTests {
             exitCode = docker.inspectExecCmd(command.getId()).exec().getExitCodeLong();
             if (exitCode == null) Thread.sleep(25);
         }
-        assertThat(exitCode).isNotNull().isZero();
+        assertThat(exitCode).as("plugin exec failed; stdout=%s stderr=%s", stdout.toString(java.nio.charset.StandardCharsets.UTF_8),
+                stderr.toString(java.nio.charset.StandardCharsets.UTF_8)).isNotNull().isZero();
     }
 
     private static PluginManifest manifest(String pluginId, String image, String version, boolean bundle) {

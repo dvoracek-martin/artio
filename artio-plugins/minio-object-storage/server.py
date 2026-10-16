@@ -142,9 +142,10 @@ def _s3_call(call):
         return call()
     except ClientError as error:
         code = error.response.get("Error", {}).get("Code", "")
+        status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
         if code in ("NoSuchKey", "NoSuchVersion", "NotFound", "404"):
             raise StorageError(404, "object_not_found") from None
-        if code in ("AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "AllAccessDisabled"):
+        if status in (401, 403) or code in ("AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "AllAccessDisabled"):
             raise StorageError(403, "provider_denied") from None
         if code in ("SlowDown", "Throttling", "RequestLimitExceeded"):
             raise StorageError(429, "provider_throttled") from None

@@ -21,7 +21,13 @@ Run the adapter tests from the Core repository:
 python -m unittest discover -s artio-plugins/minio-object-storage -p 'test_*.py' -v
 ```
 
-These tests use a fake S3 client. They do not prove compatibility with a real MinIO server, Docker networking, controller installation, Marketplace approval, product-media persistence across a real restart, backup/restore, or managed provisioning. The image reference in the manifest is a publication template and is deliberately not a usable release digest.
+The regular tests use a fake S3 client. The opt-in real-server acceptance builds the source-locked MinIO Community server and adapter, creates a uniquely named isolated Docker network and temporary volumes, and checks versioned S3 round-trip, checksum, tombstone, and invalid-credential behavior. Run it from the Core repository:
+
+```powershell
+.\artio-plugins\minio-object-storage\verify-real-minio.ps1
+```
+
+The acceptance passed on 2026-10-16 (2 real MinIO integration tests); the script removed its uniquely named images, containers, volumes, network, and temporary secret directory. This verifies the adapter against this local server build, not plugin installation through the packaged Core controller, Marketplace approval, product-media persistence across a real restart, backup/restore, or managed provisioning. The image reference in the manifest is a publication template and is deliberately not a usable release digest.
 
 ## Upstream and release status
 
