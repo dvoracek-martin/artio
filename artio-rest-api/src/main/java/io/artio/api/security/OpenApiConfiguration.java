@@ -48,6 +48,7 @@ public class OpenApiConfiguration {
                 || "/api/v1/payments/provider/webhook".equals(path)
                 || "/api/v1/pricing/quote".equals(path))) return true;
         if (path.startsWith("/api/v1/public/")) return true;
+        if (method == PathItem.HttpMethod.POST && "/api/v1/payments/methods".equals(path)) return true;
         return method == PathItem.HttpMethod.GET
                 && (path.equals("/api/v1/products") || path.startsWith("/api/v1/products/")
                 || path.equals("/api/v1/categories") || path.startsWith("/api/v1/categories/")

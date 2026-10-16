@@ -69,13 +69,38 @@ public class PaymentController {
             @ApiResponse(responseCode = "503", description = "No payment provider is configured or enabled",
                     content = @Content(schema = @Schema(implementation = io.artio.api.error.ApiError.class)))
     })
-    public CheckoutSession checkoutSession(@PathVariable UUID orderId, JwtAuthenticationToken auth) {
+    public CheckoutSession checkoutSession(@PathVariable UUID orderId, @RequestBody(required = false) PaymentSelection request,
+            JwtAuthenticationToken auth) {
         PaymentProvider extension = provider.getIfAvailable();
         if (extension == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "No payment provider is configured");
-        return extensionCheckout(orderId, auth, extension);
+        return extensionCheckout(orderId, auth, extension, request);
     }
 
-    private CheckoutSession extensionCheckout(UUID orderId, JwtAuthenticationToken auth, PaymentProvider extension) {
+    @PostMapping("/methods")
+    @Operation(summary = "List eligible payment methods", description = "Aggregates safe method discovery from eligible payment providers for the requested market and currency.")
+    public PaymentMethodDiscoveryView paymentMethods(@RequestBody PaymentMethodDiscoveryRequest request) {
+        PaymentProvider extension = provider.getIfAvailable();
+        if (extension == null) return new PaymentMethodDiscoveryView(java.util.List.of(), java.util.List.of(), false);
+        if (request.country() == null || request.currency() == null || request.amount() != null && request.amount().signum() < 0)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Payment discovery requires a valid country, currency and amount");
+        String normalizedCountry = request.country().trim().toUpperCase(java.util.Locale.ROOT);
+        String normalizedCurrency = request.currency().trim().toUpperCase(java.util.Locale.ROOT);
+        BigDecimal amount = request.amount();
+        PaymentProvider.PaymentMethodDiscovery discovery = extension.discoverMethods(
+                new PaymentProvider.PaymentDiscoveryRequest(normalizedCountry, normalizedCurrency, amount));
+        jdbc.update("DELETE FROM payment_method_references WHERE expires_at < now()");
+        java.util.List<PaymentMethodOption> options = discovery.methods().stream().map(method -> {
+            UUID reference = UUID.randomUUID();
+            jdbc.update("INSERT INTO payment_method_references(reference_id,method_id,provider_plugin_id,provider_instance_id,provider_release_id,configuration_generation,country,currency,amount,expires_at) VALUES (?,?,?,?,?,?,?,?,?,now()+interval '10 minutes')",
+                    reference, method.methodId(), method.providerPluginId(), method.providerInstanceId(), method.releaseId(),
+                    method.configurationGeneration(), normalizedCountry, normalizedCurrency, amount);
+            return new PaymentMethodOption(reference.toString(), method.displayName());
+        }).toList();
+        return new PaymentMethodDiscoveryView(options, discovery.failures(), discovery.partialFailure());
+    }
+
+    private CheckoutSession extensionCheckout(UUID orderId, JwtAuthenticationToken auth, PaymentProvider extension,
+            PaymentSelection selection) {
         UUID userId = UUID.fromString(auth.getToken().getSubject());
         var rows = jdbc.query("SELECT o.total-COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='CAPTURED'),0),o.currency,o.status,o.shipping_country FROM orders o WHERE o.id=? AND o.user_id=?",
                 (rs, n) -> new OrderRow(rs.getBigDecimal(1), rs.getString(2).trim(), rs.getString(3), rs.getString(4)), orderId, userId);
@@ -90,14 +115,55 @@ public class PaymentController {
         }
         var capabilities = extension.capabilities();
         if (!capabilities.hostedCheckout()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Payment provider does not support hosted checkout");
-        String idempotencyKey = "artio-order-" + orderId;
+        PaymentProvider.PaymentMethodDiscovery discovery = extension.discoverMethods(new PaymentProvider.PaymentDiscoveryRequest(
+                order.country() == null ? "" : order.country().trim().toUpperCase(java.util.Locale.ROOT),
+                order.currency().toUpperCase(java.util.Locale.ROOT), order.total()));
+        PaymentProvider.AvailablePaymentMethod selectedMethod = null;
+        if (selection != null && selection.methodReference() != null && !selection.methodReference().isBlank()) {
+            UUID referenceId;
+            try { referenceId = UUID.fromString(selection.methodReference()); }
+            catch (IllegalArgumentException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid payment method reference"); }
+            var references = jdbc.query("SELECT method_id,provider_plugin_id,provider_instance_id,provider_release_id,configuration_generation,country,currency,amount FROM payment_method_references WHERE reference_id=? AND expires_at>now()",
+                    (rs, n) -> new PaymentMethodReference(rs.getString(1), rs.getString(2), rs.getObject(3, UUID.class),
+                            (Long) rs.getObject(4), rs.getInt(5), rs.getString(6).trim(), rs.getString(7).trim(), rs.getBigDecimal(8)), referenceId);
+            if (references.isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Payment method reference expired; refresh available methods");
+            PaymentMethodReference reference = references.getFirst();
+            String country = order.country() == null ? "" : order.country().trim().toUpperCase(java.util.Locale.ROOT);
+            if (!reference.country().equals(country) || !reference.currency().equals(order.currency().toUpperCase(java.util.Locale.ROOT))
+                    || reference.amount() != null && reference.amount().compareTo(order.total()) != 0)
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Payment method reference does not match this order");
+            selectedMethod = discovery.methods().stream().filter(candidate -> candidate.methodId().equals(reference.methodId())
+                    && candidate.providerPluginId().equals(reference.pluginId())
+                    && java.util.Objects.equals(candidate.providerInstanceId(), reference.instanceId())
+                    && java.util.Objects.equals(candidate.releaseId(), reference.releaseId())
+                    && candidate.configurationGeneration() == reference.configurationGeneration()).findFirst()
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Selected payment method is no longer available"));
+        }
+        if (selectedMethod == null && selection != null && selection.methodReference() != null && !selection.methodReference().isBlank())
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Selected payment method is no longer available");
+        if (selectedMethod == null && discovery.methods().size() == 1) selectedMethod = discovery.methods().getFirst();
+        if (discovery.methods().size() > 1 && selectedMethod == null)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a payment method before starting checkout");
+        if (selectedMethod != null && !selectedMethod.hostedCheckout())
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Selected payment method cannot create hosted checkout");
+        if (selectedMethod == null && !discovery.failures().isEmpty() && discovery.methods().isEmpty())
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Payment method discovery is temporarily unavailable");
+        String selectedProviderIdentity = selectedMethod == null ? "default"
+                : selectedMethod.providerInstanceId() == null ? selectedMethod.providerPluginId()
+                : selectedMethod.providerInstanceId().toString();
+        String selectedMethodIdentity = selectedMethod == null ? "default" : selectedMethod.methodId();
+        String attemptDiscriminator = UUID.nameUUIDFromBytes((selectedProviderIdentity + ":" + selectedMethodIdentity)
+                .getBytes(StandardCharsets.UTF_8)).toString();
+        String idempotencyKey = "artio-order-" + orderId + "-" + attemptDiscriminator;
         PaymentProvider.CheckoutResult result;
         PaymentProvider.OwnedResult<PaymentProvider.CheckoutResult> owned;
         try {
             owned = extension.createCheckoutOwned(new PaymentProvider.CheckoutRequest(orderId.toString(), idempotencyKey,
                     order.total(), order.currency(), storefrontUrl + "/checkout?success=true&orderId=" + orderId + "&session_id={CHECKOUT_SESSION_ID}",
                     storefrontUrl + "/orders", Map.of("orderId", orderId.toString(), "expiresAt", expiresAt.toString(),
-                            "country", order.country() == null ? "" : order.country().trim())));
+                            "country", order.country() == null ? "" : order.country().trim()),
+                    selectedMethod == null ? null : selectedMethod.methodId()),
+                    selectedMethod == null ? null : selectedMethod.providerInstanceId());
             result = owned.result();
         } catch (PaymentProvider.CheckoutRejectedException rejected) {
             checkoutFailureCompensation.cancelRejectedCheckout(orderId);
@@ -112,8 +178,9 @@ public class PaymentController {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an invalid checkout session");
         }
         PaymentProvider.ProviderOwner owner = owned.owner();
-        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope,created_at,updated_at) VALUES (?,?,?,?,?,'EXTENSION','PENDING',?,?,?,?,?,?::jsonb,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",
-                UUID.randomUUID(), orderId, userId, order.total(), order.currency(), result.providerReference(),
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,payment_method_id,payment_obligation_id,status,provider_reference,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope,created_at,updated_at) VALUES (?,?,?,?,?,'EXTENSION',?,?, 'PENDING',?,?,?,?,?,?::jsonb,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",
+                UUID.randomUUID(), orderId, userId, order.total(), order.currency(),
+                selectedMethod == null ? null : selectedMethod.methodId(), orderId, result.providerReference(),
                 owner == null ? null : owner.instanceId(), owner == null ? null : owner.releaseId(),
                 owner == null ? null : owner.configurationGeneration(), owner == null ? null : owner.externalAccountFingerprint(),
                 owner == null ? "{}" : writeJson(owner.scope()));
@@ -448,4 +515,11 @@ public class PaymentController {
     private record OrderRow(BigDecimal total,String currency,String status,String country){}
     private record PendingPayment(UUID id,String providerReference,String method,PaymentProvider.ProviderOwner owner){}
     private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency, PaymentProvider.ProviderOwner owner, UUID id) { }
+    public record PaymentSelection(String methodReference) { }
+    public record PaymentMethodDiscoveryRequest(String country, String currency, BigDecimal amount) { }
+    public record PaymentMethodOption(String reference, String displayName) { }
+    public record PaymentMethodDiscoveryView(java.util.List<PaymentMethodOption> methods,
+            java.util.List<PaymentProvider.ProviderFailure> failures, boolean partialFailure) { }
+    private record PaymentMethodReference(String methodId, String pluginId, UUID instanceId, Long releaseId,
+            int configurationGeneration, String country, String currency, BigDecimal amount) { }
 }

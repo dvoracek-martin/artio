@@ -210,7 +210,7 @@ def operation(configuration, name, payload, envelope):
         # Token acquisition verifies that the registered API client credentials are accepted.
         access_token(configuration)
         return {"quotes": True, "shipmentCreation": True, "labels": True, "tracking": False, "countries": ["CH"]}
-    if name == "methods":
+    if name in ("methods", "listMethods"):
         if payload.get("destination", {}).get("countryCode") != "CH" or payload.get("currency") != "CHF":
             return {"methods": []}
         return {"methods": [

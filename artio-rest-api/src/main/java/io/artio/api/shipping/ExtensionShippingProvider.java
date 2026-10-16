@@ -49,7 +49,9 @@ public class ExtensionShippingProvider implements ShippingProvider {
                 || capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "track")
                 || capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "quote")
                 || capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "listMethods"))) {
-            return new ShippingCapabilities(false, capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "createShipment"),
+            return new ShippingCapabilities(capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "quote")
+                    && capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "listMethods"),
+                    capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "createShipment"),
                     capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "createShipment"),
                     capabilityInvoker.hasEnabledBinding(EXTENSION_POINT, "track"), List.of());
         }
@@ -69,27 +71,58 @@ public class ExtensionShippingProvider implements ShippingProvider {
     }
 
     @Override public List<ShippingMethod> methods(Address destination, String currency) {
-        JsonNode response = invoke("methods", Map.of("destination", destination, "currency", currency),
-                "methods:" + destination.countryCode() + ":" + currency);
-        JsonNode entries = response == null ? null : response.get("methods");
-        if (entries == null || !entries.isArray() || entries.size() > 100) throw protocol("Shipping plugin must return at most 100 methods");
-        List<ShippingMethod> result = new ArrayList<>();
-        try { for (JsonNode entry : entries) result.add(mapper.treeToValue(entry, ShippingMethod.class)); }
-        catch (Exception invalid) { throw protocol("Shipping plugin returned an invalid shipping method"); }
-        if (result.stream().anyMatch(method -> method.methodId() == null || method.methodId().isBlank())
-                || result.stream().map(ShippingMethod::methodId).distinct().count() != result.size()) {
-            throw protocol("Shipping plugin returned a method without an identifier");
+        return discoverMethods(destination, currency).methods();
+    }
+
+    @Override public ShippingMethodDiscovery discoverMethods(Address destination, String currency) {
+        validateDestination(destination, currency);
+        Map<String, String> scope = Map.of("destinationCountry", destination.countryCode(), "currency", currency);
+        Map<String, Object> payload = Map.of("destination", destination, "currency", currency);
+        if (capabilityInvoker != null) {
+            var aggregate = capabilityInvoker.aggregateRead(EXTENSION_POINT, "listMethods", scope, payload);
+            List<ShippingMethod> methods = new ArrayList<>();
+            List<ShippingProvider.ProviderFailure> failures = new ArrayList<>();
+            for (var provider : aggregate.results()) {
+                try {
+                    for (ShippingMethod method : parseMethods(provider.response())) {
+                        methods.add(namespace(method, provider.instanceId().toString()));
+                    }
+                } catch (RuntimeException invalid) {
+                    failures.add(new ShippingProvider.ProviderFailure(provider.instanceId(), "INVALID_METHOD_CATALOG"));
+                }
+            }
+            aggregate.failures().forEach(failure -> failures.add(new ShippingProvider.ProviderFailure(failure.instanceId(), failure.errorCode())));
+            if (!aggregate.results().isEmpty() || !aggregate.failures().isEmpty() || !legacyEnabled || pluginId.isBlank())
+                return new ShippingMethodDiscovery(methods, failures);
         }
-        return List.copyOf(result);
+        JsonNode response = invoke("methods", payload, "methods:" + destination.countryCode() + ":" + currency);
+        List<ShippingMethod> methods = parseMethods(response).stream().map(method -> namespace(method, pluginId)).toList();
+        return new ShippingMethodDiscovery(methods, List.of());
     }
 
     @Override public ShippingQuote quote(ShippingRequest request) {
-        ShippingQuote quote = read(invoke("quote", request, "quote:" + request.orderId() + ":" + request.methodId()), ShippingQuote.class);
+        MethodSelection selected = selection(request.methodId());
+        ShippingRequest providerRequest = new ShippingRequest(request.orderId(), selected.providerMethodId(), request.destination(),
+                request.parcelWeightKg(), request.declaredValue(), request.currency());
+        ShippingQuote quote;
+        if (selected.instanceId() != null && capabilityInvoker != null) {
+            var aggregate = capabilityInvoker.aggregateReadForInstance(EXTENSION_POINT, "quote",
+                    Map.of("destinationCountry", request.destination().countryCode(), "currency", request.currency()),
+                    selected.instanceId(), providerRequest);
+            if (aggregate.results().size() != 1) throw new ExtensionRuntimePort.ExtensionUnavailableException("Selected shipping provider is unavailable");
+            JsonNode response = aggregate.results().getFirst().response();
+            if (response.has("quote")) response = response.get("quote");
+            quote = read(response, ShippingQuote.class);
+        } else {
+            quote = read(invoke("quote", providerRequest, "quote:" + request.orderId() + ":" + selected.providerMethodId()), ShippingQuote.class);
+        }
         if (quote.methodId() == null || !quote.methodId().equals(request.methodId()) || quote.amount() == null
                 || quote.amount().signum() < 0 || quote.currency() == null || !quote.currency().matches("[A-Z]{3}")) {
-            throw protocol("Shipping plugin returned an invalid quote");
+            if (quote.methodId() == null || !quote.methodId().equals(selected.providerMethodId()) || quote.amount() == null
+                    || quote.amount().signum() < 0 || quote.currency() == null || !quote.currency().matches("[A-Z]{3}"))
+                throw protocol("Shipping plugin returned an invalid quote");
         }
-        return quote;
+        return new ShippingQuote(request.methodId(), quote.amount(), quote.currency(), quote.estimatedDelivery());
     }
 
     @Override public ShipmentResult createShipment(ShipmentRequest request) {
@@ -102,10 +135,17 @@ public class ExtensionShippingProvider implements ShippingProvider {
     }
 
     @Override public OwnedResult<ShipmentResult> createShipmentOwned(ShipmentRequest request) {
+        return createShipmentOwned(request, null);
+    }
+
+    @Override public OwnedResult<ShipmentResult> createShipmentOwned(ShipmentRequest request, UUID selectedInstanceId) {
         if (request.idempotencyKey() == null || request.idempotencyKey().isBlank())
             throw new IllegalArgumentException("Shipment idempotency key is required");
         Map<String, String> scope = Map.of("destinationCountry", request.destination().countryCode(), "currency", request.currency());
-        var invocation = v2("createShipment", scope, null, true, request.idempotencyKey(), request);
+        var invocation = selectedInstanceId == null
+                ? v2("createShipment", scope, null, true, request.idempotencyKey(), request)
+                : capabilityInvoker == null ? null : capabilityInvoker.invokeSelected(EXTENSION_POINT, "createShipment", scope,
+                        selectedInstanceId, stableKey("createShipment", request.idempotencyKey()), request);
         if (invocation == null) return ShippingProvider.super.createShipmentOwned(request);
         ShipmentResult result = validateShipment(read(invocation.response(), ShipmentResult.class));
         return new OwnedResult<>(result, owner(invocation.owner()));
@@ -145,11 +185,55 @@ public class ExtensionShippingProvider implements ShippingProvider {
         return result;
     }
 
+    private List<ShippingMethod> parseMethods(JsonNode response) {
+        JsonNode entries = response == null ? null : response.isArray() ? response : response.get("methods");
+        if (entries == null || !entries.isArray() || entries.size() > 100) throw protocol("Shipping plugin must return at most 100 methods");
+        List<ShippingMethod> result = new ArrayList<>();
+        try { for (JsonNode entry : entries) result.add(mapper.treeToValue(entry, ShippingMethod.class)); }
+        catch (Exception invalid) { throw protocol("Shipping plugin returned an invalid shipping method"); }
+        if (result.stream().anyMatch(method -> method.methodId() == null || !method.methodId().matches("[a-zA-Z0-9._-]{1,64}"))
+                || result.stream().map(ShippingMethod::methodId).distinct().count() != result.size())
+            throw protocol("Shipping plugin returned a method without a valid unique identifier");
+        return List.copyOf(result);
+    }
+
+    private static ShippingMethod namespace(ShippingMethod method, String provider) {
+        return new ShippingMethod(provider + ":" + method.methodId(), method.name(), method.estimatedDelivery(), method.metadata());
+    }
+
+    private MethodSelection selection(String value) {
+        if (value == null || value.isBlank() || value.length() > 120) throw new IllegalArgumentException("A valid shipping method is required");
+        int separator = value.indexOf(':');
+        if (separator <= 0 || separator == value.length() - 1) {
+            if (!legacyEnabled || pluginId.isBlank()) throw new IllegalArgumentException("Shipping method must identify its provider");
+            return new MethodSelection(null, value);
+        }
+        String provider = value.substring(0, separator);
+        String methodId = value.substring(separator + 1);
+        if (!methodId.matches("[a-zA-Z0-9._-]{1,64}")) throw new IllegalArgumentException("Invalid provider shipping method");
+        try { return new MethodSelection(UUID.fromString(provider), methodId); }
+        catch (IllegalArgumentException notInstanceId) {
+            if (!legacyEnabled || !pluginId.equals(provider)) throw new IllegalArgumentException("Shipping method provider is not configured");
+            return new MethodSelection(null, methodId);
+        }
+    }
+
+    private static void validateDestination(Address destination, String currency) {
+        if (destination == null || destination.countryCode() == null || !destination.countryCode().matches("[A-Z]{2}")
+                || currency == null || !currency.matches("[A-Z]{3}")) throw new IllegalArgumentException("Shipping discovery requires a destination country and currency");
+    }
+
+    private record MethodSelection(UUID instanceId, String providerMethodId) { }
+
     private CommerceCapabilityInvoker.Invocation v2(String operation, Map<String, String> scope, UUID pinnedInstance,
             boolean newCommitment, String idempotencyKey, Object payload) {
         if (capabilityInvoker == null) return null;
-        String key = UUID.nameUUIDFromBytes(("artio:" + operation + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8)).toString();
+        String key = stableKey(operation, idempotencyKey);
         return capabilityInvoker.invoke("shipping.provider.v1", operation, scope, pinnedInstance, newCommitment, key, payload);
+    }
+
+    private static String stableKey(String operation, String idempotencyKey) {
+        return UUID.nameUUIDFromBytes(("artio:" + operation + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private static ProviderOwner owner(CommerceCapabilityInvoker.Owner owner) {

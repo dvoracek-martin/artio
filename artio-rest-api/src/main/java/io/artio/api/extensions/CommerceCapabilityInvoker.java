@@ -44,6 +44,21 @@ public class CommerceCapabilityInvoker {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public Invocation invoke(String capabilityId, String operationName, Map<String, String> scope,
             UUID pinnedInstanceId, boolean newCommitment, String idempotencyKey, Object payload) {
+        return invokeRouted(capabilityId, operationName, scope, pinnedInstanceId, null, newCommitment,
+                idempotencyKey, payload);
+    }
+
+    /** Executes a new SELECT_ONE commitment against the customer's explicitly selected eligible instance. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public Invocation invokeSelected(String capabilityId, String operationName, Map<String, String> scope,
+            UUID selectedInstanceId, String idempotencyKey, Object payload) {
+        if (selectedInstanceId == null) throw new IllegalArgumentException("A selected provider instance is required");
+        return invokeRouted(capabilityId, operationName, scope, null, selectedInstanceId, true,
+                idempotencyKey, payload);
+    }
+
+    private Invocation invokeRouted(String capabilityId, String operationName, Map<String, String> scope,
+            UUID pinnedInstanceId, UUID selectedInstanceId, boolean newCommitment, String idempotencyKey, Object payload) {
         var operation = CapabilityRegistry.find(capabilityId).flatMap(c -> c.operation(operationName))
                 .orElseThrow(() -> new IllegalArgumentException("Unsupported Core capability operation"));
         Map<String, String> normalizedScope = scope == null ? Map.of() : Map.copyOf(scope);
@@ -60,7 +75,7 @@ public class CommerceCapabilityInvoker {
         }
         String payloadJson = write(payload);
         String requestJson = write(new Fingerprint(capabilityId, operationName, new java.util.TreeMap<>(normalizedScope),
-                pinnedInstanceId, payload));
+                pinnedInstanceId, selectedInstanceId, payload));
         String fingerprint = sha256(requestJson);
         Attempt existing = findAttempt(capabilityId, operationName, idempotencyKey);
         List<Target> targets;
@@ -87,7 +102,7 @@ public class CommerceCapabilityInvoker {
                 if (rows.isEmpty()) return null;
                 List<CapabilityRouter.Binding> candidates = rows.stream().map(BindingRow::binding).toList();
                 CapabilityRouter.RoutePlan route = new CapabilityRouter().resolve(new CapabilityRouter.RouteRequest(
-                        capabilityId, operationName, normalizedScope, pinnedInstanceId, newCommitment), candidates);
+                        capabilityId, operationName, normalizedScope, pinnedInstanceId, selectedInstanceId, newCommitment), candidates);
                 targets = route.bindingIds().stream().map(bindingId -> rows.stream()
                         .filter(row -> row.binding().bindingId().equals(bindingId)).findFirst()
                         .orElseThrow(() -> new IllegalStateException("Selected capability binding disappeared")))
@@ -278,6 +293,13 @@ public class CommerceCapabilityInvoker {
     /** Performs a bounded, side-effect-free read against every eligible binding. */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public AggregateInvocation aggregateRead(String capabilityId, String operationName, Map<String, String> scope, Object payload) {
+        return aggregateReadForInstance(capabilityId, operationName, scope, null, payload);
+    }
+
+    /** Performs a side-effect-free read against one explicitly selected eligible binding. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public AggregateInvocation aggregateReadForInstance(String capabilityId, String operationName, Map<String, String> scope,
+            UUID selectedInstanceId, Object payload) {
         var operation = CapabilityRegistry.find(capabilityId).flatMap(c -> c.operation(operationName))
                 .orElseThrow(() -> new IllegalArgumentException("Unsupported Core capability operation"));
         if (operation.policy() != CapabilityRegistry.Policy.AGGREGATE_READ || operation.sideEffecting())
@@ -286,7 +308,7 @@ public class CommerceCapabilityInvoker {
         List<BindingRow> rows = bindings(capabilityId, operationName);
         if (rows.isEmpty()) return new AggregateInvocation(List.of(), List.of());
         CapabilityRouter.RoutePlan route = new CapabilityRouter().resolve(new CapabilityRouter.RouteRequest(
-                capabilityId, operationName, normalizedScope, null, false), rows.stream().map(BindingRow::binding).toList());
+                capabilityId, operationName, normalizedScope, null, selectedInstanceId, false), rows.stream().map(BindingRow::binding).toList());
         if (route.bindingIds().size() > 32) throw new IllegalStateException("Aggregate provider count exceeds the safe request bound");
         List<Target> targets = route.bindingIds().stream().map(bindingId -> rows.stream()
                 .filter(row -> row.binding().bindingId().equals(bindingId)).findFirst()
@@ -456,7 +478,13 @@ public class CommerceCapabilityInvoker {
         }
         public boolean successful() { return response != null; }
     }
-    private record Fingerprint(String capabilityId, String operationName, Map<String, String> scope, UUID pinnedInstanceId, Object payload) { }
+    private record Fingerprint(String capabilityId, String operationName, Map<String, String> scope,
+            UUID pinnedInstanceId, UUID selectedInstanceId, Object payload) {
+        private Fingerprint(String capabilityId, String operationName, Map<String, String> scope,
+                UUID pinnedInstanceId, Object payload) {
+            this(capabilityId, operationName, scope, pinnedInstanceId, null, payload);
+        }
+    }
     private record BindingRow(CapabilityRouter.Binding binding) { }
     private record Attempt(UUID attemptId, String fingerprint, String state, String planJson, String requestSnapshot,
             String resultJson, java.time.Instant leaseUntil, Owner owner) { }

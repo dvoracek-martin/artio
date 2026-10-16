@@ -105,6 +105,21 @@ def operation(configuration, name, payload, envelope):
         return {"hostedCheckout": True, "authorization": False, "capture": False,
                 "cancellation": True, "refunds": True, "webhooks": True,
                 "maximumCheckoutExpirySeconds": 86400}
+    if name == "listMethods":
+        allowed_methods = configuration.get("allowedPaymentMethods", ["card"])
+        supported_methods = {"card", "twint", "paypal", "link", "klarna", "sepa_debit"}
+        if (not isinstance(allowed_methods, list) or not allowed_methods or len(allowed_methods) > 20
+                or any(not isinstance(method, str) or method not in supported_methods for method in allowed_methods)
+                or len(set(allowed_methods)) != len(allowed_methods)):
+            raise ProviderError(400, "Invalid allowed payment method configuration")
+        names = {"card": "Card", "twint": "TWINT", "paypal": "PayPal", "link": "Link",
+                 "klarna": "Klarna", "sepa_debit": "SEPA Direct Debit"}
+        countries = configuration.get("supportedCountries", [])
+        if not isinstance(countries, list) or len(countries) > 250 or any(
+                not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country) for country in countries):
+            raise ProviderError(400, "Invalid supported country configuration")
+        return {"methods": [{"methodId": method, "displayName": names[method],
+                "countries": countries, "currencies": [], "hostedCheckout": True} for method in allowed_methods]}
     if name == "createCheckout":
         currency = payload.get("currency", "")
         if not re.fullmatch(r"[A-Za-z]{3}", currency):
@@ -121,14 +136,15 @@ def operation(configuration, name, payload, envelope):
             "line_items[0][price_data][product_data][name]": "Artio order " + str(payload.get("orderId", ""))[:8],
             "line_items[0][quantity]": "1",
         }
-        allowed_methods = configuration.get("allowedPaymentMethods")
-        if allowed_methods is not None:
-            supported_methods = {"card", "twint", "paypal", "link", "klarna", "sepa_debit"}
-            if (not isinstance(allowed_methods, list) or not allowed_methods or len(allowed_methods) > 20
-                    or any(not isinstance(method, str) or method not in supported_methods for method in allowed_methods)
-                    or len(set(allowed_methods)) != len(allowed_methods)):
-                raise ProviderError(400, "Invalid allowed payment method configuration")
-            form["allowed_payment_method_types[]"] = allowed_methods
+        allowed_methods = configuration.get("allowedPaymentMethods", ["card"])
+        if (not isinstance(allowed_methods, list) or not allowed_methods or len(allowed_methods) > 20
+                or any(not isinstance(method, str) or method not in {"card", "twint", "paypal", "link", "klarna", "sepa_debit"} for method in allowed_methods)
+                or len(set(allowed_methods)) != len(allowed_methods)):
+            raise ProviderError(400, "Invalid allowed payment method configuration")
+        selected_method = payload.get("paymentMethodId")
+        if not isinstance(selected_method, str) or selected_method not in allowed_methods:
+            raise ProviderError(400, "Selected payment method is not enabled for this provider")
+        form["payment_method_types[]"] = [selected_method]
         expires = metadata.get("expiresAt")
         if isinstance(expires, str):
             try:

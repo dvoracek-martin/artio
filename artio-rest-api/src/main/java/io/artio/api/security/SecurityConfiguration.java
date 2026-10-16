@@ -116,6 +116,7 @@ public class SecurityConfiguration {
                 .requestMatchers(HttpMethod.GET, "/api/v1/setup/status").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/setup/progress", "/api/v1/setup/complete", "/api/v1/setup/resume", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/payments/provider/webhook").permitAll()
                 .requestMatchers("/api/v1/public/**", "/actuator/health/**", "/actuator/info", "/api/v1/products/**", "/api/v1/variants/**", "/api/v1/categories/**", "/api/v1/brands/**", "/api/v1/attributes/**", "/api/v1/bundles/**", "/api/v1/pricing/quote").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/payments/methods").permitAll()
                 .requestMatchers("/oauth2/**","/login/oauth2/**").permitAll()
                 .requestMatchers("/v3/api-docs/**").permitAll()
                 .requestMatchers("/api/v1/admin/system/**").hasRole("SUPERADMIN")

@@ -41,6 +41,29 @@ class CapabilityRouterTests {
     }
 
     @Test
+    void explicitCustomerSelectionWinsForNewCheckoutOnlyWhenTheInstanceIsEligible() {
+        var preferred = binding("payment.process", Map.of(), 100, CapabilityRouter.InstanceState.ENABLED, true);
+        var selected = binding("payment.process", Map.of(), 0, CapabilityRouter.InstanceState.ENABLED, true);
+        var route = new CapabilityRouter.RouteRequest("payment.provider.v1", "createCheckout", Map.of(), null,
+                selected.instanceId(), true);
+
+        assertThat(router.resolve(route, List.of(preferred, selected)).instanceIds()).containsExactly(selected.instanceId());
+        var drainingSelection = new CapabilityRouter.RouteRequest("payment.provider.v1", "createCheckout", Map.of(), null,
+                binding("payment.process", Map.of(), 0, CapabilityRouter.InstanceState.DRAINING, true).instanceId(), true);
+        assertThatThrownBy(() -> router.resolve(drainingSelection, List.of(preferred, selected)))
+                .isInstanceOf(CapabilityRouter.RoutingException.class).hasMessageContaining("No eligible plugin instance");
+    }
+
+    @Test
+    void cannotMixNewProviderSelectionWithHistoricalOwnerPin() {
+        var selected = UUID.randomUUID();
+        var request = new CapabilityRouter.RouteRequest("payment.provider.v1", "refund", Map.of(), UUID.randomUUID(), selected, false);
+        assertThatThrownBy(() -> router.resolve(request, List.of()))
+                .isInstanceOf(CapabilityRouter.RoutingException.class)
+                .hasMessageContaining("historical owner and a new selection");
+    }
+
+    @Test
     void pinnedHistoricalOperationNeverFallsBackEvenWhenInstanceIsUnhealthy() {
         var historic = binding("payment.process", Map.of(), 0, CapabilityRouter.InstanceState.UNHEALTHY, false,
                 "payment.provider.v1", "refund");

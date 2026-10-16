@@ -3,15 +3,23 @@ package io.artio.extensions.commerce;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 /** Provider-neutral payment port implemented by payment Docker extensions. */
 public interface PaymentProvider {
     PaymentCapabilities capabilities();
+    default PaymentMethodDiscovery discoverMethods(PaymentDiscoveryRequest request) {
+        return new PaymentMethodDiscovery(List.of(), List.of());
+    }
     CheckoutResult createCheckout(CheckoutRequest request);
     default OwnedResult<CheckoutResult> createCheckoutOwned(CheckoutRequest request) {
         return new OwnedResult<>(createCheckout(request), null);
+    }
+    default OwnedResult<CheckoutResult> createCheckoutOwned(CheckoutRequest request, UUID selectedInstanceId) {
+        if (selectedInstanceId != null) throw new IllegalArgumentException("This payment provider cannot honor an instance selection");
+        return createCheckoutOwned(request);
     }
     PaymentResult capture(String providerReference, String idempotencyKey);
     default OwnedResult<PaymentResult> capture(ProviderOwner owner, String providerReference, String idempotencyKey) {
@@ -56,9 +64,32 @@ public interface PaymentProvider {
         }
     }
 
+    record PaymentDiscoveryRequest(String country, String currency, BigDecimal amount) { }
+    record PaymentMethodDiscovery(List<AvailablePaymentMethod> methods, List<ProviderFailure> failures) {
+        public PaymentMethodDiscovery { methods = List.copyOf(methods); failures = List.copyOf(failures); }
+        public boolean partialFailure() { return !failures.isEmpty(); }
+    }
+    record AvailablePaymentMethod(String selectionId, String methodId, String displayName, String providerPluginId,
+            UUID providerInstanceId, Long releaseId, int configurationGeneration, boolean hostedCheckout) { }
+    record ProviderFailure(String providerId, String errorCode) { }
+    record PaymentMethod(String methodId, String displayName, List<String> countries, List<String> currencies,
+                         boolean hostedCheckout) {
+        public PaymentMethod {
+            if (methodId == null || !methodId.matches("[a-z][a-z0-9._-]{0,63}"))
+                throw new IllegalArgumentException("Invalid payment method identifier");
+            if (displayName == null || displayName.isBlank() || displayName.length() > 80)
+                throw new IllegalArgumentException("Invalid payment method display name");
+            countries = countries == null ? List.of() : List.copyOf(countries);
+            currencies = currencies == null ? List.of() : currencies.stream().map(value -> value.toUpperCase(java.util.Locale.ROOT)).toList();
+        }
+    }
     record CheckoutRequest(String orderId, String idempotencyKey, BigDecimal amount, String currency,
-                           String successUrl, String cancelUrl, Map<String, String> metadata) {
+                           String successUrl, String cancelUrl, Map<String, String> metadata, String paymentMethodId) {
         public CheckoutRequest { metadata = metadata == null ? Map.of() : Map.copyOf(metadata); }
+        public CheckoutRequest(String orderId, String idempotencyKey, BigDecimal amount, String currency,
+                String successUrl, String cancelUrl, Map<String, String> metadata) {
+            this(orderId, idempotencyKey, amount, currency, successUrl, cancelUrl, metadata, null);
+        }
     }
 
     record CheckoutResult(String providerReference, String checkoutUrl, PaymentState state) { }

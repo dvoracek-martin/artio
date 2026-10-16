@@ -719,7 +719,7 @@ class CatalogApiIntegrationTests {
                 aggregateArrivals.await(1, TimeUnit.SECONDS);
                 return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(
                         providerUnavailable.get() && runtimeIdentity.endsWith(secondInstanceId.toString().replace("-", "")) ? 503 : 200,
-                        "{\"methods\":[{\"id\":\"card\",\"label\":\"Card\"}]}");
+                        "{\"methods\":[{\"methodId\":\"card\",\"displayName\":\"Card\",\"countries\":[\"CH\"],\"currencies\":[\"CHF\"],\"hostedCheckout\":true}]}");
             } finally { aggregateInFlight.decrementAndGet(); }
         });
         var aggregateBeans = new org.springframework.beans.factory.support.StaticListableBeanFactory(Map.of("aggregateRuntime", aggregateRuntime));
@@ -775,6 +775,24 @@ class CatalogApiIntegrationTests {
         assertThat(secondPlan.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(secondPlan.getBody().instanceIds()).containsExactly(secondInstanceId);
         jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED' WHERE plugin_id=?", pluginId);
+
+        org.mockito.Mockito.when(aggregateRuntime.invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq("payment.provider.v1"), org.mockito.ArgumentMatchers.eq("createCheckout"),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Duration.class))).thenAnswer(call -> {
+            int frozenAttempts = jdbc.queryForObject("SELECT count(*) FROM extension_operation_attempts WHERE capability_id='payment.provider.v1' "
+                    + "AND operation_name='createCheckout' AND instance_id=? AND attempt_state='IN_PROGRESS'", Integer.class, instanceId);
+            assertThat(frozenAttempts).isEqualTo(1);
+            assertThat((String) call.getArgument(6)).contains("\"paymentMethodId\":\"card\"");
+            return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(200,
+                    "{\"providerReference\":\"selected-session\",\"checkoutUrl\":\"https://pay.example.test/selected\",\"state\":\"PENDING\"}");
+        });
+        var selectedCheckout = aggregateInvoker.invokeSelected("payment.provider.v1", "createCheckout", Map.of("country", "CH", "currency", "CHF"),
+                instanceId, "attempt-selected", Map.of("orderId", "order-selected", "paymentMethodId", "card"));
+        assertThat(selectedCheckout.owner().instanceId()).isEqualTo(instanceId);
+        assertThat(selectedCheckout.response().path("providerReference").asText()).isEqualTo("selected-session");
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE capability_id='payment.provider.v1' "
+                + "AND operation_name='createCheckout' AND idempotency_key='attempt-selected'", String.class)).isEqualTo("SUCCEEDED");
 
         var aggregate = aggregateInvoker.aggregateRead("payment.provider.v1", "listMethods", Map.of("country", "CH"), Map.of("country", "CH", "currency", "CHF"));
         assertThat(aggregate.results()).hasSize(2);
@@ -1500,6 +1518,80 @@ class CatalogApiIntegrationTests {
         assertThat(inventory.reservationsByOrder(orderId)).singleElement()
                 .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
                 .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
+    }
+
+    @Test
+    void paymentMethodReferenceIsOpaqueShortLivedAndPersistedWithItsCheckout() {
+        UUID orderId = UUID.randomUUID();
+        UUID sellableId = UUID.randomUUID();
+        var warehouse = inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "PAY-" + orderId.toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Payment reference warehouse", "CH-ZH"));
+        inventory.receive(warehouse.id(), sellableId, BigDecimal.ONE);
+        inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(
+                orderId, warehouse.id(), sellableId, BigDecimal.ONE));
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                        + "VALUES (?,?,'PENDING',12.5,0,0,12.5,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
+                orderId, adminUserId, "payment-reference-" + orderId);
+        var discovery = http.postForEntity("/api/v1/payments/methods", Map.of("country", "CH", "currency", "CHF"), Map.class);
+        assertThat(discovery.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<Map> options = (List<Map>) discovery.getBody().get("methods");
+        assertPaymentOptionShape(options);
+        Map<?, ?> card = findPaymentOption(options, "Card");
+        String staleCardReference = (String) card.get("reference");
+        assertThat(jdbc.queryForObject("SELECT method_id FROM payment_method_references WHERE reference_id=?", String.class,
+                UUID.fromString(staleCardReference))).isEqualTo("card");
+        assertThat(jdbc.queryForObject("SELECT expires_at>now() AND expires_at<=now()+interval '10 minutes' FROM payment_method_references WHERE reference_id=?",
+                Boolean.class, UUID.fromString(staleCardReference))).isTrue();
+
+        jdbc.update("UPDATE orders SET shipping_country='DE' WHERE id=?", orderId);
+        var wrongMarket = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", staleCardReference), ApiError.class, orderId);
+        assertThat(wrongMarket.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        jdbc.update("UPDATE orders SET shipping_country='CH' WHERE id=?", orderId);
+        jdbc.update("UPDATE payment_method_references SET expires_at=now()-interval '1 second' WHERE reference_id=?",
+                UUID.fromString(staleCardReference));
+        var expired = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", staleCardReference), ApiError.class, orderId);
+        assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        discovery = http.postForEntity("/api/v1/payments/methods", Map.of("country", "CH", "currency", "CHF"), Map.class);
+        options = (List<Map>) discovery.getBody().get("methods");
+        assertPaymentOptionShape(options);
+        card = findPaymentOption(options, "Card");
+        Map<?, ?> paypal = findPaymentOption(options, "PayPal");
+        String cardReference = (String) card.get("reference");
+        String paypalReference = (String) paypal.get("reference");
+
+        var response = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", cardReference), Map.class, orderId);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var retry = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", cardReference), Map.class, orderId);
+        assertThat(retry.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var changedMethod = adminExchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
+                Map.of("methodReference", paypalReference), Map.class, orderId);
+        assertThat(changedMethod.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT payment_method_id FROM payments WHERE order_id=? AND method='EXTENSION' AND payment_method_id='card'",
+                String.class, orderId)).isEqualTo("card");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE order_id=? AND method='EXTENSION' AND status='PENDING'",
+                Integer.class, orderId)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE order_id=? AND method='EXTENSION' AND payment_method_id='paypal'",
+                Integer.class, orderId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE order_id=? AND method='EXTENSION' AND payment_obligation_id=?",
+                Integer.class, orderId, orderId)).isEqualTo(2);
+    }
+
+    private static Map<?, ?> findPaymentOption(List<Map> options, String displayName) {
+        return options.stream().filter(option -> displayName.equals(option.get("displayName"))).findFirst().orElseThrow();
+    }
+
+    private static void assertPaymentOptionShape(List<Map> options) {
+        for (Map<?, ?> option : options) {
+            assertThat(option.keySet()).hasSize(2);
+            assertThat(option.containsKey("reference")).isTrue();
+            assertThat(option.containsKey("displayName")).isTrue();
+            assertThat(UUID.fromString((String) option.get("reference"))).isNotNull();
+        }
     }
 
     @Test
@@ -2366,14 +2458,24 @@ class CatalogApiIntegrationTests {
         @Bean
         @Primary
         PaymentProvider integrationPaymentProvider(ObjectMapper mapper) {
+            var sessions = new java.util.concurrent.ConcurrentHashMap<String, PaymentProvider.CheckoutResult>();
             return new PaymentProvider() {
+                @Override public PaymentMethodDiscovery discoverMethods(PaymentDiscoveryRequest request) {
+                    if (!"CH".equals(request.country()) || !"CHF".equals(request.currency()))
+                        return new PaymentMethodDiscovery(List.of(), List.of());
+                    return new PaymentMethodDiscovery(List.of(
+                            new AvailablePaymentMethod("integration-test:card", "card", "Card", "integration-test", null, null, 0, true),
+                            new AvailablePaymentMethod("integration-test:paypal", "paypal", "PayPal", "integration-test", null, null, 0, true)), List.of());
+                }
                 @Override public PaymentCapabilities capabilities() {
                     return new PaymentCapabilities(true, false, true, true, true, true, Optional.of(Duration.ofMinutes(31)));
                 }
                 @Override public CheckoutResult createCheckout(CheckoutRequest request) {
                     RuntimeException failure = PROVIDER_CHECKOUT_FAILURE.getAndSet(null);
                     if (failure != null) throw failure;
-                    return new CheckoutResult("test-" + request.orderId(), "https://payments.example.test/checkout", PaymentState.PENDING);
+                    String identity = request.orderId() + ":" + request.paymentMethodId();
+                    return sessions.computeIfAbsent(identity, ignored -> new CheckoutResult("test-" + request.orderId() + "-"
+                            + request.paymentMethodId(), "https://payments.example.test/checkout", PaymentState.PENDING));
                 }
                 @Override public PaymentResult capture(String reference, String key) {
                     return new PaymentResult(reference, PaymentState.CAPTURED, null, null, null);

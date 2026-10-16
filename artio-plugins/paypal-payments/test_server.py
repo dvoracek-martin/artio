@@ -32,6 +32,13 @@ class PayPalTests(unittest.TestCase):
         with self.assertRaises(server.ProviderError):
             server.amount_text("10.001", "CHF")
 
+    def test_discovers_paypal_and_rejects_a_different_selected_method(self):
+        methods = server.operation(self.config, "listMethods", {"country": "CH", "currency": "CHF"}, self.envelope)
+        self.assertEqual("paypal", methods["methods"][0]["methodId"])
+        self.assertIn("CHF", methods["methods"][0]["currencies"])
+        with self.assertRaisesRegex(server.ProviderError, "not enabled"):
+            server.operation(self.config, "createCheckout", {"paymentMethodId": "card"}, self.envelope)
+
     def test_reconciliation_returns_exact_provider_amount_and_currency(self):
         response = {"status": "COMPLETED", "purchase_units": [{"payments": {"captures": [
             {"amount": {"value": "12.34", "currency_code": "USD"}}
@@ -72,6 +79,7 @@ class PayPalTests(unittest.TestCase):
     def test_checkout_uses_paypal_request_id_and_returns_approval_link(self, request):
         result = server.operation(self.config, "createCheckout", {
             "orderId": "order-1", "amount": "42.50", "currency": "CHF",
+            "paymentMethodId": "paypal",
             "successUrl": "https://shop.test/checkout?success=true", "cancelUrl": "https://shop.test/orders"
         }, self.envelope)
         self.assertEqual("ORDER-12345678", result["providerReference"])

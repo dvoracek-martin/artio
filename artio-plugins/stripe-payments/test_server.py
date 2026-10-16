@@ -39,6 +39,7 @@ class StripeExtensionTests(unittest.TestCase):
         with patch.object(server, "stripe_request", return_value=response) as request:
             result = server.operation({"stripeSecretKey": "sk_test_secret"}, "createCheckout", {
                 "orderId": "order-123", "amount": "12.50", "currency": "CHF",
+            "paymentMethodId": "card",
                 "successUrl": "https://shop.test/success", "cancelUrl": "https://shop.test/cancel",
                 "metadata": {"expiresAt": "2030-01-01T12:00:00Z"},
             }, {"idempotencyKey": "3b241101-e2bb-4255-8caf-4136c566a962"})
@@ -79,13 +80,31 @@ class StripeExtensionTests(unittest.TestCase):
         with patch.object(server, "stripe_request", return_value=response) as request:
             server.operation({"stripeSecretKey": "sk_test_secret", "allowedPaymentMethods": ["twint"]}, "createCheckout", {
                 "orderId": "order-ch", "amount": "12.50", "currency": "CHF",
+            "paymentMethodId": "twint",
                 "successUrl": "https://shop.test/success", "cancelUrl": "https://shop.test/cancel", "metadata": {},
             }, {"idempotencyKey": "stable-twint-order"})
         form = request.call_args.args[3]
-        self.assertEqual(["twint"], form["allowed_payment_method_types[]"])
+        self.assertEqual(["twint"], form["payment_method_types[]"])
         with self.assertRaises(server.ProviderError):
             server.operation({"stripeSecretKey": "sk_test_secret", "allowedPaymentMethods": ["unknown"]}, "createCheckout", {
                 "orderId": "order-ch", "amount": "12.50", "currency": "CHF",
+                "successUrl": "https://shop.test/success", "cancelUrl": "https://shop.test/cancel", "metadata": {},
+            }, {"idempotencyKey": "stable-twint-order"})
+
+    def test_discovers_configured_methods_and_checkout_requires_selected_method(self):
+        methods = server.operation({"allowedPaymentMethods": ["card", "twint"]}, "listMethods",
+                                   {"country": "CH", "currency": "CHF"}, {})
+        self.assertEqual(["card", "twint"], [method["methodId"] for method in methods["methods"]])
+        response = {"id": "cs_test_twint", "url": "https://checkout.stripe.test/twint"}
+        with patch.object(server, "stripe_request", return_value=response) as request:
+            server.operation({"stripeSecretKey": "sk_test_secret", "allowedPaymentMethods": ["card", "twint"]}, "createCheckout", {
+                "orderId": "order-ch", "amount": "12.50", "currency": "CHF", "paymentMethodId": "twint",
+                "successUrl": "https://shop.test/success", "cancelUrl": "https://shop.test/cancel", "metadata": {},
+            }, {"idempotencyKey": "stable-twint-order"})
+        self.assertEqual(["twint"], request.call_args.args[3]["payment_method_types[]"])
+        with self.assertRaises(server.ProviderError):
+            server.operation({"stripeSecretKey": "sk_test_secret", "allowedPaymentMethods": ["card"]}, "createCheckout", {
+                "orderId": "order-ch", "amount": "12.50", "currency": "CHF", "paymentMethodId": "twint",
                 "successUrl": "https://shop.test/success", "cancelUrl": "https://shop.test/cancel", "metadata": {},
             }, {"idempotencyKey": "stable-twint-order"})
 

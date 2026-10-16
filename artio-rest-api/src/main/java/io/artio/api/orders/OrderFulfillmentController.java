@@ -48,7 +48,9 @@ public class OrderFulfillmentController {
                 if(!provider.capabilities().shipmentCreation())throw new ResponseStatusException(HttpStatus.CONFLICT,"Configured shipping provider cannot create shipments");
                 try{
                     ShippingProvider.Address destination=mapper.readValue(order.address(),ShippingProvider.Address.class);
-                    var owned=provider.createShipmentOwned(new ShippingProvider.ShipmentRequest(id.toString(),order.methodId(),destination,order.weightKg(),order.declaredValue(),order.currency(),"ship-order-"+id));
+                    String methodId=order.methodId();UUID selectedInstanceId=null;int separator=methodId.indexOf(':');
+                    if(separator>0){try{selectedInstanceId=UUID.fromString(methodId.substring(0,separator));methodId=methodId.substring(separator+1);}catch(IllegalArgumentException legacyProvider){methodId=methodId.substring(separator+1);}}
+                    var owned=provider.createShipmentOwned(new ShippingProvider.ShipmentRequest(id.toString(),methodId,destination,order.weightKg(),order.declaredValue(),order.currency(),"ship-order-"+id),selectedInstanceId);
                     var result=owned.result();owner=owned.owner();
                     shipmentReference=result.shipmentReference();labelUrl=result.labelUrl();if(result.trackingReference()!=null&&!result.trackingReference().isBlank())trackingNumber=result.trackingReference();
                 }catch(ResponseStatusException failure){throw failure;}catch(Exception failure){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Shipping provider could not create the shipment");}

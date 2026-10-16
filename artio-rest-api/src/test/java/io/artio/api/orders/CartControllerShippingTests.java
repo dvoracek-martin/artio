@@ -40,13 +40,17 @@ class CartControllerShippingTests {
         when(provider.capabilities()).thenReturn(new ShippingCapabilities(true,true,true,false,List.of("CH")));
         when(provider.methods(any(),org.mockito.ArgumentMatchers.eq("CHF"))).thenReturn(List.of(
                 new ShippingMethod("swiss-post-pri","PostPac Priority","Merchant configured",Map.of())));
+        when(provider.discoverMethods(any(),org.mockito.ArgumentMatchers.eq("CHF"))).thenReturn(
+                new ShippingProvider.ShippingMethodDiscovery(List.of(
+                        new ShippingMethod("swiss-post-pri","PostPac Priority","Merchant configured",Map.of())), List.of()));
         when(provider.quote(any())).thenReturn(new ShippingQuote("swiss-post-pri",new BigDecimal("9.50"),"CHF","Merchant configured"));
         var destination=new Address("ch","8000","Zürich","Main 1",null,"Ada Example");
 
         var methods=controller.shippingMethods("ch","8000","Zürich","Main 1","Ada Example");
         var quote=controller.shippingQuote(new CartController.ShippingQuoteRequest("swiss-post-pri",destination,BigDecimal.ONE,new BigDecimal("80.00")),auth());
 
-        assertThat(methods).extracting(CartController.ShippingMethodView::methodId).containsExactly("swiss-post-pri");
+        assertThat(methods.methods()).extracting(CartController.ShippingMethodView::methodId).containsExactly("swiss-post-pri");
+        assertThat(methods.partialFailure()).isFalse();
         assertThat(quote.amount()).isEqualByComparingTo("9.50");
         verify(provider).quote(org.mockito.ArgumentMatchers.argThat(request -> request.destination().countryCode().equals("CH")
                 && request.orderId().equals("cart:"+userId) && request.methodId().equals("swiss-post-pri")));

@@ -49,14 +49,18 @@ def invoke(operation, payload=None):
     return request('/v1/invoke', 'POST', value, True)
 status, capabilities = invoke('capabilities')
 assert status == 200 and capabilities.get('hostedCheckout') is True
+status, methods = invoke('listMethods', {'country': 'CH', 'currency': 'CHF'})
+assert status == 200 and methods.get('methods') and methods['methods'][0].get('hostedCheckout') is True
 if provider == 'stripe':
     assert capabilities.get('refunds') is True and capabilities.get('capture') is False
-    assert invoke('createCheckout', {'amount': '10.00', 'currency': 'CHF', 'orderId': 'acceptance'})[0] == 503
+    assert methods['methods'][0]['methodId'] == 'card'
+    assert invoke('createCheckout', {'amount': '10.00', 'currency': 'CHF', 'orderId': 'acceptance', 'paymentMethodId': 'card'})[0] == 503
     assert invoke('cancel', {'providerReference': 'invalid'})[0] == 400
     assert invoke('capture', {})[0] == 409
 elif provider == 'paypal':
     assert capabilities.get('capture') is True and capabilities.get('cancellation') is False
-    assert invoke('createCheckout', {'amount': '10.00', 'currency': 'CHF', 'orderId': 'acceptance'})[0] == 503
+    assert methods['methods'][0]['methodId'] == 'paypal'
+    assert invoke('createCheckout', {'amount': '10.00', 'currency': 'CHF', 'orderId': 'acceptance', 'paymentMethodId': 'paypal'})[0] == 503
     assert invoke('capture', {'providerReference': 'invalid'})[0] == 400
     assert invoke('cancel', {})[0] == 409
 else:

@@ -14,6 +14,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -69,6 +71,46 @@ public class ExtensionPaymentProvider implements PaymentProvider {
         }
     }
 
+    @Override public PaymentMethodDiscovery discoverMethods(PaymentDiscoveryRequest request) {
+        if (request == null || request.country() == null || !request.country().matches("[A-Z]{2}")
+                || request.currency() == null || !request.currency().matches("[A-Z]{3}"))
+            throw new IllegalArgumentException("Payment discovery requires an ISO country and currency");
+        Map<String, String> scope = Map.of("country", request.country(), "currency", request.currency());
+        Map<String, Object> payload = Map.of("country", request.country(), "currency", request.currency(),
+                "amount", request.amount() == null ? java.math.BigDecimal.ZERO : request.amount());
+        List<AvailablePaymentMethod> methods = new ArrayList<>();
+        List<ProviderFailure> failures = new ArrayList<>();
+        CommerceCapabilityInvoker.AggregateInvocation aggregate = capabilityInvoker == null
+                ? new CommerceCapabilityInvoker.AggregateInvocation(List.of(), List.of())
+                : capabilityInvoker.aggregateRead(EXTENSION_POINT, "listMethods", scope, payload);
+        for (var result : aggregate.results()) {
+            try {
+                for (PaymentMethod method : parseMethods(result.response())) {
+                    if (supports(method, request)) methods.add(new AvailablePaymentMethod(
+                            result.instanceId() + ":" + method.methodId(), method.methodId(), method.displayName(),
+                            result.pluginId(), result.instanceId(), result.releaseId(), result.configurationGeneration(),
+                            method.hostedCheckout()));
+                }
+            } catch (RuntimeException invalid) {
+                failures.add(new ProviderFailure(result.instanceId().toString(), "INVALID_METHOD_CATALOG"));
+            }
+        }
+        aggregate.failures().forEach(result -> failures.add(new ProviderFailure(result.instanceId().toString(), result.errorCode())));
+        if (aggregate.results().isEmpty() && aggregate.failures().isEmpty() && legacyEnabled && !pluginId.isBlank()) {
+            try {
+                var response = invoke("listMethods", payload, "discovery-" + request.country() + "-" + request.currency());
+                for (PaymentMethod method : parseMethods(response)) {
+                    if (supports(method, request)) methods.add(new AvailablePaymentMethod(
+                            pluginId + ":" + method.methodId(), method.methodId(), method.displayName(), pluginId,
+                            null, null, 0, method.hostedCheckout()));
+                }
+            } catch (RuntimeException unavailable) {
+                failures.add(new ProviderFailure(pluginId, "PROVIDER_UNAVAILABLE"));
+            }
+        }
+        return new PaymentMethodDiscovery(methods.stream().distinct().toList(), failures);
+    }
+
     @Override public CheckoutResult createCheckout(CheckoutRequest request) {
         try {
             return read(invoke("createCheckout", request, request.idempotencyKey()), CheckoutResult.class);
@@ -88,6 +130,17 @@ public class ExtensionPaymentProvider implements PaymentProvider {
         CommerceCapabilityInvoker.Invocation invocation = v2("createCheckout", scope, null, true,
                 request.idempotencyKey(), request);
         if (invocation == null) return PaymentProvider.super.createCheckoutOwned(request);
+        return new OwnedResult<>(read(invocation.response(), CheckoutResult.class), owner(invocation.owner()));
+    }
+
+    @Override public OwnedResult<CheckoutResult> createCheckoutOwned(CheckoutRequest request, UUID selectedInstanceId) {
+        if (selectedInstanceId == null) return createCheckoutOwned(request);
+        Map<String, String> scope = new LinkedHashMap<>();
+        scope.put("currency", request.currency());
+        String country = request.metadata().get("country");
+        if (country != null && country.matches("[A-Z]{2}")) scope.put("country", country);
+        CommerceCapabilityInvoker.Invocation invocation = capabilityInvoker.invokeSelected(EXTENSION_POINT, "createCheckout",
+                scope, selectedInstanceId, request.idempotencyKey(), request);
         return new OwnedResult<>(read(invocation.response(), CheckoutResult.class), owner(invocation.owner()));
     }
 
@@ -190,6 +243,28 @@ public class ExtensionPaymentProvider implements PaymentProvider {
         JsonNode value = response.get(field);
         if (value == null || !value.isBoolean()) throw new IllegalArgumentException("Missing boolean");
         return value.booleanValue();
+    }
+
+    private List<PaymentMethod> parseMethods(JsonNode response) {
+        JsonNode values = response == null ? null : response.isArray() ? response : response.get("methods");
+        if (values == null || !values.isArray() || values.size() > 32)
+            throw protocol("Payment plugin returned an invalid method catalog");
+        List<PaymentMethod> methods = new ArrayList<>();
+        java.util.Set<String> identifiers = new java.util.HashSet<>();
+        for (JsonNode value : values) {
+            PaymentMethod method;
+            try { method = mapper.treeToValue(value, PaymentMethod.class); }
+            catch (Exception invalid) { throw protocol("Payment plugin returned an invalid method catalog"); }
+            if (!identifiers.add(method.methodId())) throw protocol("Payment plugin returned duplicate method identifiers");
+            methods.add(method);
+        }
+        return List.copyOf(methods);
+    }
+
+    private static boolean supports(PaymentMethod method, PaymentDiscoveryRequest request) {
+        return method.hostedCheckout()
+                && (method.countries().isEmpty() || method.countries().contains(request.country()))
+                && (method.currencies().isEmpty() || method.currencies().contains(request.currency()));
     }
 
     private static ExtensionRuntimePort.ExtensionProtocolException protocol(String message) {

@@ -107,6 +107,9 @@ class SwissPostTests(unittest.TestCase):
     def test_maps_official_domestic_services_and_disables_unimplemented_tracking(self):
         methods = server.operation(self.config, "methods", {"destination": {"countryCode": "CH"}, "currency": "CHF"}, self.envelope)
         self.assertEqual({"swiss-post-eco", "swiss-post-pri"}, {entry["methodId"] for entry in methods["methods"]})
+        v2_methods = server.operation(self.config, "listMethods", {"destination": {"countryCode": "CH"}, "currency": "CHF"}, self.envelope)
+        self.assertEqual(methods, v2_methods)
+        self.assertEqual([], server.operation(self.config, "listMethods", {"destination": {"countryCode": "DE"}, "currency": "EUR"}, self.envelope)["methods"])
         with patch.object(server, "access_token", return_value="test-token"):
             capabilities = server.operation(self.config, "capabilities", {}, self.envelope)
         self.assertFalse(capabilities["tracking"])

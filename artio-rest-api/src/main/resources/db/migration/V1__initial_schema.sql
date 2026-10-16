@@ -319,6 +319,8 @@ CREATE TABLE payments (
   refunded_amount NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0 AND refunded_amount <= amount),
   currency CHAR(3) NOT NULL,
   method VARCHAR(32) NOT NULL,
+  payment_method_id VARCHAR(64) CHECK (payment_method_id IS NULL OR payment_method_id ~ '^[a-z][a-z0-9._-]{0,63}$'),
+  payment_obligation_id UUID REFERENCES orders(id),
   status VARCHAR(32) NOT NULL,
   provider_reference VARCHAR(255) NOT NULL,
   provider_instance_id UUID,
@@ -1005,6 +1007,27 @@ ALTER TABLE order_shipments ADD CONSTRAINT order_shipments_provider_instance_fk
     FOREIGN KEY (provider_instance_id) REFERENCES extension_plugin_instances(instance_id);
 ALTER TABLE order_shipments ADD CONSTRAINT order_shipments_provider_release_fk
     FOREIGN KEY (provider_release_id) REFERENCES extension_plugin_releases(release_id);
+
+CREATE TABLE payment_method_references (
+  reference_id UUID PRIMARY KEY,
+  method_id VARCHAR(64) NOT NULL CHECK (method_id ~ '^[a-z][a-z0-9._-]{0,63}$'),
+  provider_plugin_id VARCHAR(128) NOT NULL,
+  provider_instance_id UUID,
+  provider_release_id BIGINT,
+  configuration_generation INTEGER NOT NULL CHECK (configuration_generation >= 0),
+  country CHAR(2) NOT NULL CHECK (country ~ '^[A-Z]{2}$'),
+  currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  amount NUMERIC(19,4),
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((provider_instance_id IS NULL AND provider_release_id IS NULL)
+      OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL))
+);
+ALTER TABLE payment_method_references ADD CONSTRAINT payment_method_references_instance_fk
+    FOREIGN KEY (provider_instance_id) REFERENCES extension_plugin_instances(instance_id) ON DELETE CASCADE;
+ALTER TABLE payment_method_references ADD CONSTRAINT payment_method_references_release_fk
+    FOREIGN KEY (provider_release_id) REFERENCES extension_plugin_releases(release_id) ON DELETE CASCADE;
+CREATE INDEX payment_method_references_expiry_idx ON payment_method_references(expires_at);
 
 -- v2 declarations are immutable release metadata; the package release row remains the common runtime identity.
 CREATE TABLE extension_plugin_v2_releases (

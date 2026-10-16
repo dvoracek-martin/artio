@@ -180,4 +180,55 @@ class ExtensionPaymentProviderTests {
         assertThat(capabilities.cancellation()).isTrue();
         assertThat(capabilities.refunds()).isFalse();
     }
+
+    @Test
+    void aggregatesAndNamespacesMethodsByProviderInstance() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        when(routed.aggregateRead(eq("payment.provider.v1"), eq("listMethods"), eq(Map.of("country", "CH", "currency", "CHF")),
+                org.mockito.ArgumentMatchers.any())).thenReturn(new CommerceCapabilityInvoker.AggregateInvocation(
+                java.util.List.of(
+                        new CommerceCapabilityInvoker.AggregateProviderResult(first, "payments.stripe", 4, 2,
+                                new ObjectMapper().readTree("{\"methods\":[{\"methodId\":\"card\",\"displayName\":\"Card\",\"countries\":[\"CH\"],\"currencies\":[\"CHF\"],\"hostedCheckout\":true}] }"), null),
+                        new CommerceCapabilityInvoker.AggregateProviderResult(second, "payments.paypal", 8, 1,
+                                new ObjectMapper().readTree("{\"methods\":[{\"methodId\":\"paypal\",\"displayName\":\"PayPal\",\"countries\":[\"US\"],\"currencies\":[\"USD\"],\"hostedCheckout\":true}] }"), null)),
+                java.util.List.of()));
+        var adapter = new ExtensionPaymentProvider(invoker, new ObjectMapper(), routed, "", "none");
+
+        var discovery = adapter.discoverMethods(new PaymentProvider.PaymentDiscoveryRequest("CH", "CHF", new BigDecimal("12.50")));
+
+        assertThat(discovery.methods()).singleElement().satisfies(method -> {
+            assertThat(method.selectionId()).isEqualTo(first + ":card");
+            assertThat(method.providerInstanceId()).isEqualTo(first);
+            assertThat(method.providerPluginId()).isEqualTo("payments.stripe");
+            assertThat(method.releaseId()).isEqualTo(4L);
+            assertThat(method.configurationGeneration()).isEqualTo(2);
+        });
+        assertThat(discovery.failures()).isEmpty();
+    }
+
+    @Test
+    void newCheckoutUsesTheExplicitProviderInstanceAndCarriesTheSelectedMethod() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("country", "CH", "currency", "CHF");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 42L, 3, "a".repeat(64), scope);
+        when(routed.invokeSelected(eq("payment.provider.v1"), eq("createCheckout"), eq(scope), eq(instanceId),
+                eq("artio-order-order-123"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(new ObjectMapper().readTree(
+                        "{\"providerReference\":\"session-selected\",\"checkoutUrl\":\"https://pay.test/session\",\"state\":\"PENDING\"}"), owner));
+        var adapter = new ExtensionPaymentProvider(invoker, new ObjectMapper(), routed, "", "none");
+        var request = new CheckoutRequest("order-123", "artio-order-order-123", new BigDecimal("12.50"), "CHF",
+                "https://shop.test/success", "https://shop.test/cancel", Map.of("country", "CH"), "card");
+
+        var result = adapter.createCheckoutOwned(request, instanceId);
+
+        assertThat(result.result().providerReference()).isEqualTo("session-selected");
+        assertThat(result.owner().instanceId()).isEqualTo(instanceId);
+        org.mockito.ArgumentCaptor<Object> payload = org.mockito.ArgumentCaptor.forClass(Object.class);
+        verify(routed).invokeSelected(eq("payment.provider.v1"), eq("createCheckout"), eq(scope), eq(instanceId),
+                eq("artio-order-order-123"), payload.capture());
+        assertThat(((CheckoutRequest) payload.getValue()).paymentMethodId()).isEqualTo("card");
+    }
 }

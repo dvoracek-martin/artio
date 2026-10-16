@@ -47,18 +47,22 @@ public class CartController {
     public CartController(JdbcTemplate jdbc, PricingApplicationService pricing, InventoryApplicationService inventory, BundleApplicationService bundles,ObjectMapper mapper,@Value("${artio.checkout.shipping-cost:0.00}") BigDecimal shippingCost,ObjectProvider<PaymentProvider> paymentProvider,ObjectProvider<ShippingProvider> shippingProvider,io.artio.api.licensing.LicensingService licensing) { this.jdbc = jdbc; this.pricing = pricing; this.inventory=inventory; this.bundles=bundles;this.mapper=mapper;this.shippingCost=shippingCost;this.paymentProvider=paymentProvider;this.shippingProvider=shippingProvider;this.licensing=licensing; }
 
     @GetMapping("/shipping-methods")
-    public List<ShippingMethodView> shippingMethods(@RequestParam String country, @RequestParam(required=false) String postalCode,
+    public ShippingMethodsView shippingMethods(@RequestParam String country, @RequestParam(required=false) String postalCode,
             @RequestParam(required=false) String locality, @RequestParam(required=false) String addressLine1, @RequestParam(required=false) String recipientName) {
         Market market = marketForCountry(country);
         var destination = new ShippingProvider.Address(country.toUpperCase(java.util.Locale.ROOT), postalCode, locality,
                 addressLine1, null, recipientName);
         ShippingProvider provider = shippingProvider.getIfAvailable();
-        if (provider == null || !provider.capabilities().quotes()) return List.of(new ShippingMethodView("standard", "Standard delivery", null, shippingCost, market.currency()));
-        if (blank(postalCode) || blank(locality) || blank(addressLine1) || blank(recipientName)) return List.of();
+        if (provider == null || !provider.capabilities().quotes()) return new ShippingMethodsView(
+                List.of(new ShippingMethodView("standard", "Standard delivery", null, shippingCost, market.currency())), List.of(), false);
+        if (blank(postalCode) || blank(locality) || blank(addressLine1) || blank(recipientName)) return new ShippingMethodsView(List.of(), List.of(), false);
         var capabilities = provider.capabilities();
-        if (!capabilities.countries().contains(destination.countryCode())) return List.of();
-        return provider.methods(destination, market.currency()).stream()
-                .map(method -> new ShippingMethodView(method.methodId(), method.name(), method.estimatedDelivery(), null, market.currency())).toList();
+        if (!capabilities.countries().isEmpty() && !capabilities.countries().contains(destination.countryCode()))
+            return new ShippingMethodsView(List.of(), List.of(), false);
+        var discovery = provider.discoverMethods(destination, market.currency());
+        return new ShippingMethodsView(discovery.methods().stream()
+                .map(method -> new ShippingMethodView(method.methodId(), method.name(), method.estimatedDelivery(), null, market.currency())).toList(),
+                discovery.failures(), discovery.partialFailure());
     }
 
     @PostMapping("/shipping-quote")
@@ -73,7 +77,7 @@ public class CartController {
             return new ShippingQuoteView("standard", shippingCost, market.currency(), null);
         }
         if(blank(destination.postalCode())||blank(destination.locality())||blank(destination.addressLine1())||blank(destination.recipientName()))throw new IllegalArgumentException("Recipient and complete delivery address are required");
-        if (!provider.capabilities().countries().contains(country)) throw new IllegalArgumentException("Shipping provider does not serve this country");
+        if (!provider.capabilities().countries().isEmpty() && !provider.capabilities().countries().contains(country)) throw new IllegalArgumentException("Shipping provider does not serve this country");
         var method = provider.methods(destination, market.currency()).stream()
                 .filter(candidate -> candidate.methodId().equals(request.methodId())).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Unknown shipping method"));
@@ -175,7 +179,7 @@ public class CartController {
         if (providerQuotes) {
             if (request.shippingMethodId() == null || request.shippingDetails() == null) throw new IllegalArgumentException("Choose a shipping method and provide a structured delivery address");
             var destination = request.shippingDetails().toAddress(request.shippingCountry());
-            if (!provider.capabilities().countries().contains(destination.countryCode())) throw new IllegalArgumentException("Shipping provider does not serve this country");
+            if (!provider.capabilities().countries().isEmpty() && !provider.capabilities().countries().contains(destination.countryCode())) throw new IllegalArgumentException("Shipping provider does not serve this country");
             var method = provider.methods(destination, currency.getCurrencyCode()).stream()
                     .filter(candidate -> candidate.methodId().equals(request.shippingMethodId())).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("Selected shipping method is no longer available"));
@@ -275,6 +279,8 @@ public class CartController {
     }
     public record ShippingQuoteRequest(String methodId, ShippingProvider.Address destination, BigDecimal parcelWeightKg, BigDecimal declaredValue) { }
     public record ShippingMethodView(String methodId,String name,String estimatedDelivery,BigDecimal flatAmount,String currency) { }
+    public record ShippingMethodsView(List<ShippingMethodView> methods, List<ShippingProvider.ProviderFailure> failures,
+            boolean partialFailure) { public ShippingMethodsView { methods = List.copyOf(methods); failures = List.copyOf(failures); } }
     public record ShippingQuoteView(String methodId,BigDecimal amount,String currency,String estimatedDelivery) { }
     public record ItemView(UUID variantId, BigDecimal quantity, BigDecimal unitPrice, String currency,UUID bundleId) { }
     public record CartView(UUID cartId, List<ItemView> items) { }

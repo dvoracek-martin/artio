@@ -97,7 +97,18 @@ def operation(configuration, name, payload, envelope):
         return {"hostedCheckout": True, "authorization": False, "capture": True,
                 "cancellation": False, "refunds": True, "webhooks": True,
                 "maximumCheckoutExpirySeconds": None}
+    if name == "listMethods":
+        countries = configuration.get("supportedCountries", [])
+        if not isinstance(countries, list) or len(countries) > 250 or any(
+                not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country) for country in countries):
+            raise ProviderError(400, "Invalid supported country configuration")
+        return {"methods": [{"methodId": "paypal", "displayName": "PayPal", "countries": countries,
+                "currencies": ["AUD", "BRL", "CAD", "CHF", "CZK", "DKK", "EUR", "GBP", "HKD", "HUF",
+                               "ILS", "JPY", "MXN", "MYR", "NOK", "NZD", "PHP", "PLN", "SEK", "SGD", "THB", "TWD", "USD"],
+                "hostedCheckout": True}]}
     if name == "createCheckout":
+        if payload.get("paymentMethodId") != "paypal":
+            raise ProviderError(400, "Selected payment method is not enabled for this provider")
         amount = amount_text(payload.get("amount"), payload.get("currency"))
         request = {"intent": "CAPTURE", "purchase_units": [{
             "reference_id": str(payload.get("orderId", "")), "custom_id": str(payload.get("orderId", "")),

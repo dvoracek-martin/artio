@@ -23,6 +23,7 @@ public final class CapabilityRouter {
         validateScope(request.scope());
 
         if (operation.policy() == CapabilityRegistry.Policy.PINNED_ONE) {
+            if (request.selectedInstanceId() != null) throw new RoutingException("A historical owner and a new selection cannot be supplied together");
             if (request.pinnedInstanceId() == null) throw new RoutingException("Pinned operation requires its historical instance owner");
             return bindings.stream().filter(b -> b.instanceId().equals(request.pinnedInstanceId())
                     && b.capabilityId().equals(request.capabilityId()) && b.operationName().equals(request.operationName())
@@ -31,12 +32,17 @@ public final class CapabilityRouter {
                     .orElseThrow(() -> new RoutingException("Historical operation owner is unavailable; fallback is forbidden"));
         }
         if (request.pinnedInstanceId() != null) throw new RoutingException("Only a pinned operation may supply a historical owner");
+        if (request.selectedInstanceId() != null
+                && operation.policy() != CapabilityRegistry.Policy.SELECT_ONE
+                && operation.policy() != CapabilityRegistry.Policy.AGGREGATE_READ)
+            throw new RoutingException("An explicit instance selection is not valid for this operation policy");
         List<Binding> eligible = bindings.stream()
                 .filter(b -> b.capabilityId().equals(request.capabilityId()) && b.operationName().equals(request.operationName()))
                 .filter(b -> b.state() == BindingState.ACTIVE && b.healthy())
                 .filter(b -> !request.newCommitment() || b.instanceState() != InstanceState.DRAINING)
                 .filter(b -> b.permissions().contains(operation.requiredPermission()))
                 .filter(b -> matches(b.scope(), request.scope()))
+                .filter(b -> request.selectedInstanceId() == null || request.selectedInstanceId().equals(b.instanceId()))
                 .toList();
         if (eligible.isEmpty()) throw new RoutingException("No eligible plugin instance is bound to this operation");
 
@@ -96,11 +102,15 @@ public final class CapabilityRouter {
     }
 
     public record RouteRequest(String capabilityId, String operationName, Map<String, String> scope,
-                               UUID pinnedInstanceId, boolean newCommitment) {
+                               UUID pinnedInstanceId, UUID selectedInstanceId, boolean newCommitment) {
         public RouteRequest {
             Objects.requireNonNull(capabilityId, "capabilityId");
             Objects.requireNonNull(operationName, "operationName");
             scope = scope == null ? Map.of() : Map.copyOf(scope);
+        }
+        public RouteRequest(String capabilityId, String operationName, Map<String, String> scope,
+                UUID pinnedInstanceId, boolean newCommitment) {
+            this(capabilityId, operationName, scope, pinnedInstanceId, null, newCommitment);
         }
     }
 

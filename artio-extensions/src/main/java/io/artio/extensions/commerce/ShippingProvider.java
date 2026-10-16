@@ -9,10 +9,17 @@ import java.util.UUID;
 public interface ShippingProvider {
     ShippingCapabilities capabilities();
     List<ShippingMethod> methods(Address destination, String currency);
+    default ShippingMethodDiscovery discoverMethods(Address destination, String currency) {
+        return new ShippingMethodDiscovery(methods(destination, currency), List.of());
+    }
     ShippingQuote quote(ShippingRequest request);
     ShipmentResult createShipment(ShipmentRequest request);
     default OwnedResult<ShipmentResult> createShipmentOwned(ShipmentRequest request) {
         return new OwnedResult<>(createShipment(request), null);
+    }
+    default OwnedResult<ShipmentResult> createShipmentOwned(ShipmentRequest request, UUID selectedInstanceId) {
+        if (selectedInstanceId != null) throw new IllegalArgumentException("This shipping provider cannot honor an instance selection");
+        return createShipmentOwned(request);
     }
     TrackingResult track(String trackingReference);
     default OwnedResult<TrackingResult> track(ProviderOwner owner, String trackingReference) {
@@ -29,6 +36,11 @@ public interface ShippingProvider {
                                 List<String> countries) {
         public ShippingCapabilities { countries = countries == null ? List.of() : List.copyOf(countries); }
     }
+    record ShippingMethodDiscovery(List<ShippingMethod> methods, List<ProviderFailure> failures) {
+        public ShippingMethodDiscovery { methods = List.copyOf(methods); failures = List.copyOf(failures); }
+        public boolean partialFailure() { return !failures.isEmpty(); }
+    }
+    record ProviderFailure(UUID instanceId, String errorCode) { }
     record Address(String countryCode, String postalCode, String locality, String addressLine1,
                    String addressLine2, String recipientName) { }
     record ShippingMethod(String methodId, String name, String estimatedDelivery, Map<String, String> metadata) {

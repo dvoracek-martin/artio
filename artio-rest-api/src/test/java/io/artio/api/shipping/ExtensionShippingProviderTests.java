@@ -12,9 +12,11 @@ import io.artio.api.extensions.CommerceCapabilityInvoker;
 import io.artio.extensions.commerce.ShippingProvider;
 import io.artio.extensions.commerce.ShippingProvider.Address;
 import io.artio.extensions.commerce.ShippingProvider.ShipmentRequest;
+import io.artio.extensions.commerce.ShippingProvider.ShippingMethod;
 import io.artio.extensions.commerce.ShippingProvider.ShippingRequest;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -130,5 +132,58 @@ class ExtensionShippingProviderTests {
         assertThat(capabilities.shipmentCreation()).isTrue();
         assertThat(capabilities.tracking()).isTrue();
         assertThat(capabilities.quotes()).isFalse();
+    }
+
+    @Test
+    void aggregatesAndNamespacesV2CarrierMethodsAndQuotesThroughTheSelectedInstance() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var destination = new Address("CH", "8000", "Zürich", "Main 1", null, "Ada");
+        var listScope = Map.of("destinationCountry", "CH", "currency", "CHF");
+        when(routed.aggregateRead(eq("shipping.provider.v1"), eq("listMethods"), eq(listScope),
+                org.mockito.ArgumentMatchers.any())).thenReturn(new CommerceCapabilityInvoker.AggregateInvocation(List.of(
+                new CommerceCapabilityInvoker.AggregateProviderResult(instanceId, "shipping.swiss-post", 9, 3,
+                        new ObjectMapper().readTree("{\"methods\":[{\"methodId\":\"priority\",\"name\":\"Priority\",\"estimatedDelivery\":\"Tomorrow\"}]}"), null)), List.of()));
+        var adapter = new ExtensionShippingProvider(invoker, new ObjectMapper(), routed, "", "static");
+
+        var methods = adapter.discoverMethods(destination, "CHF");
+        assertThat(methods.methods()).extracting(ShippingMethod::methodId).containsExactly(instanceId + ":priority");
+        assertThat(methods.partialFailure()).isFalse();
+
+        var request = new ShippingRequest("cart:customer", instanceId + ":priority", destination,
+                BigDecimal.ONE, BigDecimal.TEN, "CHF");
+        var providerRequest = new ShippingRequest(request.orderId(), "priority", destination, BigDecimal.ONE, BigDecimal.TEN, "CHF");
+        when(routed.aggregateReadForInstance(eq("shipping.provider.v1"), eq("quote"), eq(listScope), eq(instanceId), eq(providerRequest)))
+                .thenReturn(new CommerceCapabilityInvoker.AggregateInvocation(List.of(
+                        new CommerceCapabilityInvoker.AggregateProviderResult(instanceId, "shipping.swiss-post", 9, 3,
+                                new ObjectMapper().readTree("{\"methodId\":\"priority\",\"amount\":\"8.50\",\"currency\":\"CHF\",\"estimatedDelivery\":\"Tomorrow\"}"), null)), List.of()));
+
+        var quote = adapter.quote(request);
+
+        assertThat(quote.methodId()).isEqualTo(instanceId + ":priority");
+        assertThat(quote.amount()).isEqualByComparingTo("8.50");
+        verify(routed).aggregateReadForInstance(eq("shipping.provider.v1"), eq("quote"), eq(listScope), eq(instanceId), eq(providerRequest));
+    }
+
+    @Test
+    void shipmentCreationHonorsExplicitlySelectedEligibleInstance() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("destinationCountry", "CH", "currency", "CHF");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 81L, 2, "c".repeat(64), scope);
+        var request = new ShipmentRequest("order-selected", "priority", new Address("CH", "8000", "Zürich", "Main 1", null, "Ada"),
+                BigDecimal.ONE, BigDecimal.TEN, "CHF", "ship-selected");
+        when(routed.invokeSelected(eq("shipping.provider.v1"), eq("createShipment"), eq(scope), eq(instanceId),
+                eq(UUID.nameUUIDFromBytes("artio:createShipment:ship-selected".getBytes(StandardCharsets.UTF_8)).toString()), eq(request)))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(new ObjectMapper().readTree(
+                        "{\"shipmentReference\":\"shipment-selected\",\"trackingReference\":\"track-selected\"}"), owner));
+        var adapter = new ExtensionShippingProvider(invoker, new ObjectMapper(), routed, "", "static");
+
+        var created = adapter.createShipmentOwned(request, instanceId);
+
+        assertThat(created.owner().instanceId()).isEqualTo(instanceId);
+        assertThat(created.result().shipmentReference()).isEqualTo("shipment-selected");
+        verify(routed).invokeSelected(eq("shipping.provider.v1"), eq("createShipment"), eq(scope), eq(instanceId),
+                org.mockito.ArgumentMatchers.anyString(), eq(request));
     }
 }
