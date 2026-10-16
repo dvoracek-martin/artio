@@ -24,7 +24,8 @@
               "src/backoffice.css"
             ],
             "allowedCommonJsDependencies": [
-              "qrcode"
+              "qrcode",
+              "dijkstrajs"
             ]
           },
           "configurations": {

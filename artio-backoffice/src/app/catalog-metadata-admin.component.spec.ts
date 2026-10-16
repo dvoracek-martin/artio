@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CatalogMetadataAdminComponent } from './catalog-metadata-admin.component';
 import { setBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 
@@ -65,5 +65,49 @@ describe('CatalogMetadataAdminComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent?.trim()).toBe(message);
+  });
+
+  it('opens the category editor as an accessible modal and keeps provider errors in the form', async () => {
+    const previousShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: vi.fn(function (this: HTMLDialogElement) {
+        Object.defineProperty(this, 'open', { configurable: true, value: true });
+      })
+    });
+    try {
+      const fixture = TestBed.createComponent(CatalogMetadataAdminComponent);
+      fixture.detectChanges();
+      const http = TestBed.inject(HttpTestingController);
+      http.expectOne('/api/v1/categories').flush([{ id: 'cat-1', name: 'Hardware', parentId: null, active: true }]);
+      http.expectOne('/api/v1/brands').flush([]);
+      http.expectOne('/api/v1/attribute-definitions').flush([]);
+      http.expectOne('/api/v1/products').flush([]);
+      fixture.detectChanges();
+
+      fixture.componentInstance.editCategory({ id: 'cat-1', name: 'Hardware', parentId: null, active: true });
+      fixture.detectChanges();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      fixture.detectChanges();
+
+      const dialog = fixture.nativeElement.querySelector('dialog') as HTMLDialogElement;
+      expect(dialog.open).toBe(true);
+      expect(dialog.getAttribute('aria-labelledby')).toBe('catalog-editor-title');
+      expect(dialog.querySelector('#catalog-editor-title')?.textContent?.trim()).toBe('Edit category');
+      expect((dialog.querySelector('#catalog-edit-name') as HTMLInputElement).labels?.[0]?.textContent?.trim()).toBe('Name');
+
+      fixture.componentInstance.saveCatalogEdit();
+      fixture.detectChanges();
+      expect(dialog.querySelector('[role="status"]')?.textContent?.trim()).toBe('Saving catalog data…');
+      const update = http.expectOne('/api/v1/categories/cat-1');
+      expect(update.request.body).toEqual({ name: 'Hardware', parentId: null, active: true });
+      update.flush({ detail: 'Category update is temporarily unavailable.' }, { status: 503, statusText: 'Unavailable' });
+      fixture.detectChanges();
+      expect(dialog.querySelector('[role="alert"]')?.textContent?.trim()).toBe('Category update is temporarily unavailable.');
+      expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(false);
+    } finally {
+      if (previousShowModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', previousShowModal);
+      else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
+    }
   });
 });
