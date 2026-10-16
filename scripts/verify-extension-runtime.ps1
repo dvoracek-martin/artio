@@ -54,7 +54,6 @@ try {
         if ($LASTEXITCODE -ne 0 -or -not $digestReference -or $digestReference -notmatch '@sha256:[a-f0-9]{64}$') {
             throw "Could not resolve immutable digest for reference extension version $version."
         }
-        $createdImageReferences.Add($digestReference.Trim())
         Set-Item -Path "Env:ARTIO_TEST_EXTENSION_IMAGE_V$version" -Value $digestReference.Trim()
     }
 
@@ -70,7 +69,6 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $egressDigest -or $egressDigest -notmatch '@sha256:[a-f0-9]{64}$') {
         throw 'Could not resolve immutable digest for the provider-egress gateway fixture.'
     }
-    $createdImageReferences.Add($egressDigest.Trim())
     Set-Item -Path 'Env:ARTIO_TEST_EGRESS_IMAGE' -Value $egressDigest.Trim()
 
     $storageLocalTag = "artio-object-storage:$runSuffix"
@@ -85,7 +83,6 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $storageDigest -or $storageDigest -notmatch '@sha256:[a-f0-9]{64}$') {
         throw 'Could not resolve immutable digest for the object-storage fixture.'
     }
-    $createdImageReferences.Add($storageDigest.Trim())
     Set-Item -Path 'Env:ARTIO_TEST_OBJECT_STORAGE_IMAGE' -Value $storageDigest.Trim()
 
     Push-Location $repoRoot
@@ -93,7 +90,10 @@ try {
         $verificationArguments = @(':artio-rest-api:integrationTest', '--rerun', '--no-daemon')
         foreach ($test in $Tests) { $verificationArguments += @('--tests', $test) }
         $verificationArguments += @('--tests', 'io.artio.api.extensions.ObjectStorageDockerIntegrationTests')
-        $gradleWrapper = if ($IsWindows) { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
+        $gradleWrapper = if ($env:OS -eq 'Windows_NT') { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
+        if (-not (Test-Path -LiteralPath $gradleWrapper -PathType Leaf)) {
+            throw "Gradle wrapper was not found at '$gradleWrapper'."
+        }
         & $gradleWrapper @verificationArguments
         if ($LASTEXITCODE -ne 0) { throw 'The real Docker extension lifecycle integration test failed.' }
     } finally { Pop-Location }
@@ -104,9 +104,10 @@ try {
     Remove-Item Env:ARTIO_TEST_OBJECT_STORAGE_IMAGE -ErrorAction SilentlyContinue
     Remove-Item Env:ARTIO_TEST_RUN_ID -ErrorAction SilentlyContinue
     if ($registryStarted) {
-        $registryVolumes = @(docker inspect $registryName --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{end}}{{end}}' 2>$null |
-            Where-Object { $_ -and $_ -ne '<no value>' })
-        docker rm --force --volumes $registryName | Out-Null
+        $registryDetails = @(docker inspect $registryName 2>$null | ConvertFrom-Json)
+        $registryVolumes = @($registryDetails[0].Mounts | Where-Object { $_.Type -eq 'volume' } |
+            ForEach-Object { $_.Name })
+        docker rm --force $registryName | Out-Null
         foreach ($volumeName in $registryVolumes) { docker volume rm $volumeName 2>$null | Out-Null }
     }
 
