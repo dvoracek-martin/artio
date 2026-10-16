@@ -42,6 +42,9 @@ describe('Storefront payment return', () => {
     localStorage.removeItem('artio-token');
     localStorage.removeItem('artio-locale');
     history.replaceState({}, '', '/');
+    document.querySelector('link[rel="canonical"]')?.remove();
+    document.querySelector('script[data-artio-seo="website"]')?.remove();
+    document.querySelector('meta[name="robots"]')?.remove();
   });
 
   it('shows confirmation only after Core reports the returned order as paid', () => {
@@ -75,6 +78,25 @@ describe('Storefront payment return', () => {
     expect(fixture.componentInstance.paymentReturnConfirmed).toBe(false);
     expect(fixture.nativeElement.textContent).not.toContain('Thank you for your order.');
     expect(fixture.nativeElement.textContent).toContain('We could not check the payment just now. Your order status remains unchanged.');
+  });
+
+  it('marks checkout return pages private and removes transient parameters from canonical URLs', () => {
+    const { fixture } = createComponent('PENDING', true, '/checkout?success=true&orderId=order-1&session_id=temporary');
+
+    expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex,nofollow');
+    expect(document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href).toBe(`${location.origin}/checkout`);
+    const schema = JSON.parse(document.querySelector('script[data-artio-seo="website"]')?.textContent ?? '{}');
+    expect(schema['@type']).toBe('WebSite');
+    expect(fixture.nativeElement.textContent).not.toContain('Thank you for your order.');
+  });
+
+  it('publishes an indexable canonical and localized document language for the public shop', () => {
+    createComponent(undefined, false, '/shop?campaign=summer');
+
+    expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('index,follow');
+    expect(document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href).toBe(`${location.origin}/shop`);
+    expect(document.documentElement.lang).toBe('en');
+    expect(document.querySelector('meta[property="og:type"]')?.getAttribute('content')).toBe('website');
   });
 
   it('gives checkout address and payment controls visible accessible labels', () => {
