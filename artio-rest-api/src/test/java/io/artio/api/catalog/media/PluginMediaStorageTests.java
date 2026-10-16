@@ -108,4 +108,33 @@ class PluginMediaStorageTests {
         verify(source).read(key);
         verify(source, org.mockito.Mockito.never()).delete(key);
     }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void recoversADeleteIntentPersistedBeforeCoreRestart() throws Exception {
+        UUID tombstone = UUID.randomUUID();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            org.springframework.jdbc.core.RowMapper mapper = invocation.getArgument(1);
+            java.sql.ResultSet row = mock(java.sql.ResultSet.class);
+            when(row.getString("storage_key")).thenReturn(key);
+            when(row.getObject("tombstone_id", UUID.class)).thenReturn(tombstone);
+            return java.util.List.of(mapper.mapRow(row, 0));
+        }).when(jdbc).query(org.mockito.ArgumentMatchers.contains("object_state='DELETE_PENDING'"),
+                any(org.springframework.jdbc.core.RowMapper.class), eq(25));
+        when(invoker.invoke(eq("storage.object.v1"), eq("delete"), eq(Map.of()), eq(null), eq(true), any(), any()))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(mapper.readTree("""
+                        {"receipts":[{"deleted":true}],"allReplicasAcknowledged":true}
+                        """), owner));
+
+        int recovered = storage.recoverPendingDeletes(25);
+
+        assertThat(recovered).isEqualTo(1);
+        org.mockito.ArgumentCaptor<Object[]> updateArgs = org.mockito.ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).update(org.mockito.ArgumentMatchers.contains("object_state='TOMBSTONED'"), updateArgs.capture());
+        assertThat(updateArgs.getValue()).containsExactly(key, tombstone);
+        String idempotencyKey = UUID.nameUUIDFromBytes(("artio-media:delete:" + key).getBytes(StandardCharsets.UTF_8)).toString();
+        verify(invoker).invoke(eq("storage.object.v1"), eq("delete"), eq(Map.of()), eq(null), eq(true), eq(idempotencyKey),
+                eq(Map.of("key", key, "routingKey", UUID.nameUUIDFromBytes(("artio-media:put:0:" + key)
+                        .getBytes(StandardCharsets.UTF_8)).toString(), "tombstoneId", tombstone.toString())));
+    }
 }

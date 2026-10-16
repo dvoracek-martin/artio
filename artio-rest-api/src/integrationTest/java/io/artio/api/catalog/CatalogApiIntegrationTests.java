@@ -602,7 +602,7 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void registersV2ReleasePersistsExplicitBindingAndRoutesOnlyEnabledDeclaredInstances() {
+    void registersV2ReleasePersistsExplicitBindingAndRoutesOnlyEnabledDeclaredInstances() throws Exception {
         String pluginId = "test.v2-payment-" + UUID.randomUUID().toString().substring(0, 8);
         var packageManifest = new io.artio.extensions.PluginManifest("2", pluginId, "V2 Payment", "Artio",
                 "1.0.0", "Capability-based payment test plugin", "0.1.0", "9.0.0",
@@ -877,6 +877,50 @@ class CatalogApiIntegrationTests {
         pluginMediaStorage.delete(testMediaKey);
         assertThat(jdbc.queryForObject("SELECT object_state FROM catalog_media_storage_objects WHERE storage_key=?", String.class, testMediaKey))
                 .isEqualTo("TOMBSTONED");
+
+        // Simulate Core stopping after persisting DELETE_PENDING but before reaching the plugin.
+        String pendingDeleteKey = UUID.randomUUID() + ".png";
+        pluginMediaStorage.store(pendingDeleteKey, testMediaBytes);
+        UUID pendingTombstone = UUID.nameUUIDFromBytes(pendingDeleteKey.getBytes(StandardCharsets.UTF_8));
+        jdbc.update("UPDATE catalog_media_storage_objects SET object_state='DELETE_PENDING',tombstone_id=? WHERE storage_key=?",
+                pendingTombstone, pendingDeleteKey);
+        String deleteIdempotencyKey = UUID.nameUUIDFromBytes(("artio-media:delete:" + pendingDeleteKey).getBytes(StandardCharsets.UTF_8)).toString();
+        jdbc.update("DELETE FROM extension_operation_attempts WHERE idempotency_key=?", deleteIdempotencyKey);
+        var restartedCoreStorage = new io.artio.api.catalog.media.PluginMediaStorage(storageInvoker, jdbc,
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        assertThat(restartedCoreStorage.recoverPendingDeletes(25)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT object_state FROM catalog_media_storage_objects WHERE storage_key=?", String.class,
+                pendingDeleteKey)).isEqualTo("TOMBSTONED");
+
+        // Exercise the bounded local-source backfill against PostgreSQL and the live Core invocation path.
+        String backfillKey = "00000000-0000-4000-8000-000000000001.png";
+        UUID backfillProductId = UUID.randomUUID();
+        byte[] sourceBytes = "verified local legacy media".getBytes(StandardCharsets.UTF_8);
+        java.nio.file.Path legacyMediaDirectory = java.nio.file.Files.createTempDirectory("artio-media-backfill-");
+        java.nio.file.Files.write(legacyMediaDirectory.resolve(backfillKey), sourceBytes);
+        jdbc.update("INSERT INTO catalog_product(id,name,sku,active,created_at,updated_at) VALUES (?,?,?,TRUE,now(),now())",
+                backfillProductId, "Backfill test", "BF-" + backfillProductId.toString().substring(0, 8));
+        jdbc.update("INSERT INTO catalog_product_media(id,product_id,storage_key,content_type,width,height,alt_text,position) "
+                        + "VALUES (?,?,?,'image/png',1,1,'',0)", UUID.randomUUID(), backfillProductId, backfillKey);
+        try {
+            var sourceFactory = new io.artio.api.catalog.media.MediaStorageMigrationSourceFactory("local",
+                    legacyMediaDirectory.toString(), "", "us-east-1", "", true, "products");
+            var backfillService = new io.artio.api.catalog.media.MediaStorageBackfillService(jdbc, restartedCoreStorage, sourceFactory);
+            var backfill = backfillService.backfill("00000000-0000-4000-8000-000000000000.png", 1);
+            assertThat(backfill.inspected()).isEqualTo(1);
+            assertThat(backfill.migrated()).isEqualTo(1);
+            assertThat(backfill.failed()).isZero();
+            assertThat(restartedCoreStorage.read(backfillKey)).isEqualTo(sourceBytes);
+            assertThat(java.nio.file.Files.readAllBytes(legacyMediaDirectory.resolve(backfillKey))).isEqualTo(sourceBytes);
+        } finally {
+            jdbc.update("DELETE FROM catalog_product WHERE id=?", backfillProductId);
+            try (var paths = java.nio.file.Files.walk(legacyMediaDirectory)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { java.nio.file.Files.deleteIfExists(path); }
+                    catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                });
+            }
+        }
 
         String objectPutKey = UUID.randomUUID().toString();
         assertThatThrownBy(() -> commerceCapabilityInvoker.invoke("storage.object.v1", "put", Map.of(), null, true,

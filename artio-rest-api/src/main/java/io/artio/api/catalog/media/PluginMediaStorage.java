@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -127,13 +128,38 @@ public final class PluginMediaStorage implements MediaStorage {
         UUID tombstone = UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
         jdbc.update("UPDATE catalog_media_storage_objects SET object_state='DELETE_PENDING',tombstone_id=?,updated_at=now() "
                 + "WHERE storage_key=? AND object_state<>'TOMBSTONED'", tombstone, key);
+        finishDelete(key, tombstone);
+    }
+
+    /** Replays durable deletion intents after process restart or a transient provider failure. */
+    @Scheduled(fixedDelayString = "${artio.catalog.media.tombstone-recovery-interval-ms:5000}")
+    public void recoverPendingDeletes() {
+        recoverPendingDeletes(25);
+    }
+
+    public int recoverPendingDeletes(int limit) {
+        if (limit < 1 || limit > 100) throw new IllegalArgumentException("Tombstone recovery batch must be between 1 and 100");
+        var pending = jdbc.query("SELECT storage_key,tombstone_id FROM catalog_media_storage_objects "
+                        + "WHERE object_state='DELETE_PENDING' AND tombstone_id IS NOT NULL ORDER BY updated_at,storage_key LIMIT ?",
+                (rs, row) -> new PendingDelete(rs.getString("storage_key"), rs.getObject("tombstone_id", UUID.class)), limit);
+        for (PendingDelete item : pending) {
+            try {
+                finishDelete(item.storageKey(), item.tombstoneId());
+            } catch (RuntimeException failure) {
+                // Keep the durable intent for the next scheduled attempt; one failed provider must not block the batch.
+            }
+        }
+        return pending.size();
+    }
+
+    private void finishDelete(String key, UUID tombstone) {
         JsonNode response = invoke("delete", stableId("delete", key), Map.of("key", key,
                 "routingKey", stableId("put:0", key), "tombstoneId", tombstone.toString())).response();
         JsonNode receipts = response.path("receipts");
         if (!receipts.isArray() || receipts.isEmpty() || !response.path("allReplicasAcknowledged").asBoolean(false))
             throw new IllegalStateException("Object storage replicas have not all acknowledged the deletion tombstone");
-        jdbc.update("UPDATE catalog_media_storage_objects SET object_state='TOMBSTONED',tombstone_id=?,updated_at=now() WHERE storage_key=?",
-                tombstone, key);
+        jdbc.update("UPDATE catalog_media_storage_objects SET object_state='TOMBSTONED',updated_at=now() "
+                + "WHERE storage_key=? AND object_state='DELETE_PENDING' AND tombstone_id=?", key, tombstone);
     }
 
     private CommerceCapabilityInvoker.Invocation invoke(String operation, String idempotencyKey, Object payload) {
@@ -188,4 +214,5 @@ public final class PluginMediaStorage implements MediaStorage {
     }
 
     private record ExistingObject(String checksum, String state) { }
+    private record PendingDelete(String storageKey, UUID tombstoneId) { }
 }
