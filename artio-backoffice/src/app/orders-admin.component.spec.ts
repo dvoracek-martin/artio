@@ -35,4 +35,50 @@ describe('OrdersAdminComponent', () => {
     fixture.componentInstance.returnAction({ id: 'return-1' }, 'review', true, false);
     expect(actions).toEqual(['createShipment', 'return']);
   });
+
+  it('renders an accessible refund action bound to the selected captured payment', () => {
+    const fixture = TestBed.createComponent(OrdersAdminComponent);
+    const payment = { id: 'payment-1', method: 'card', status: 'CAPTURED', providerReference: 'provider-1', refundedAmount: '0.00', amount: '25.00', currency: 'CHF' };
+    const actions: unknown[] = [];
+    fixture.componentInstance.selectedOrder = {
+      id: 'order-1', status: 'PAID', customerEmail: 'ada@example.test', createdAt: '2026-01-01T00:00:00Z',
+      subtotal: '25.00', tax: '0.00', shipping: '0.00', total: '25.00', currency: 'CHF',
+      shippingAddress: '', billingAddress: '', lines: [], payments: [payment],
+    };
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+
+    const refundButton = [...fixture.nativeElement.querySelectorAll('button')]
+      .find(button => (button.textContent as string).trim() === 'Refund');
+    expect(refundButton).toBeDefined();
+    expect(refundButton?.getAttribute('aria-label')).toBeNull();
+    refundButton?.click();
+
+    expect(actions).toEqual([{ type: 'refund', payment }]);
+  });
+
+  it('binds return approval and rejection buttons to the displayed return request', () => {
+    const fixture = TestBed.createComponent(OrdersAdminComponent);
+    const returnRequest = { id: 'return-1', status: 'REQUESTED', reason: 'wrong size', createdAt: '2026-01-01T00:00:00Z', items: [] };
+    const actions: unknown[] = [];
+    fixture.componentInstance.selectedOrder = {
+      id: 'order-1', status: 'PAID', customerEmail: 'ada@example.test', createdAt: '2026-01-01T00:00:00Z',
+      subtotal: '25.00', tax: '0.00', shipping: '0.00', total: '25.00', currency: 'CHF',
+      shippingAddress: '', billingAddress: '', lines: [], payments: [],
+    };
+    fixture.componentInstance.returns = [returnRequest];
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+
+    const buttons = [...fixture.nativeElement.querySelectorAll('button')];
+    expect(buttons.map(button => (button.textContent as string).trim())).toContain('Approve');
+    expect(buttons.map(button => (button.textContent as string).trim())).toContain('Reject');
+    buttons.find(button => (button.textContent as string).trim() === 'Approve')?.click();
+    buttons.find(button => (button.textContent as string).trim() === 'Reject')?.click();
+
+    expect(actions).toEqual([
+      { type: 'return', item: returnRequest, action: 'review', approve: true, restock: false },
+      { type: 'return', item: returnRequest, action: 'review', approve: false, restock: false },
+    ]);
+  });
 });
