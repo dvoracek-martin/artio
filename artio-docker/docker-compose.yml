@@ -154,6 +154,18 @@ services:
         condition: service_completed_successfully
       extension-controller:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/8080;
+          printf "GET /actuator/health/readiness HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3;
+          IFS= read -r status <&3;
+          [[ "$$status" == *" 200 "* ]]'
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
 
   extension-egress:
     build:
@@ -306,7 +318,7 @@ services:
       - "${ARTIO_BIND_ADDRESS:-127.0.0.1}:${ARTIO_STOREFRONT_PORT:-4200}:80"
     depends_on:
       rest-api:
-        condition: service_started
+        condition: service_healthy
 
   backoffice:
     build:
@@ -319,7 +331,7 @@ services:
       - "${ARTIO_BIND_ADDRESS:-127.0.0.1}:${ARTIO_BACKOFFICE_PORT:-4201}:80"
     depends_on:
       rest-api:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   artio-postgres-data:
