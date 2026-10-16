@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -148,7 +149,8 @@ class ExtensionInstallationJobIntegrationTests {
         var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
                 runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
                 new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
-                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30), 1_800_000, 300_000);
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30),
+                new DataSourceTransactionManager(jdbc.getDataSource()), 1_800_000, 300_000);
 
         try {
             worker.runPending();
@@ -180,13 +182,50 @@ class ExtensionInstallationJobIntegrationTests {
         var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
                 runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
                 new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
-                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30), 1_800_000, 300_000);
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30),
+                new DataSourceTransactionManager(jdbc.getDataSource()), 1_800_000, 300_000);
         try {
             worker.runPending();
 
             assertThat(jobs.get(job.jobId()).state()).isEqualTo("INSTALLED");
             assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(2);
             org.mockito.Mockito.verify(runtime).install(manifest, Map.of());
+        } finally {
+            worker.stopLeaseRenewals();
+        }
+    }
+
+    @Test
+    void expiredLeaseCannotFinalizePluginLifecycleState() throws Exception {
+        String pluginId = "installation.expired-finalize";
+        PluginManifest manifest = manifest(pluginId);
+        String manifestJson = mapper.writeValueAsString(manifest);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, manifestJson, manifest.image());
+        var job = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, UUID.randomUUID(), "expired-finalize-0001");
+        UUID staleToken = UUID.randomUUID();
+        jdbc.update("UPDATE extension_installation_jobs SET state='VERIFYING_ARTIFACTS',lease_token=?,lease_until=now()-interval '1 second' "
+                        + "WHERE job_id=?", staleToken, job.jobId());
+        var runtime = org.mockito.Mockito.mock(ExtensionRuntimePort.class);
+        var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class),
+                org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class),
+                new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30),
+                new DataSourceTransactionManager(jdbc.getDataSource()), 1_800_000, 300_000);
+        try {
+            var staleJob = new ExtensionInstallationJobWorker.InstallJob(job.jobId(), pluginId, null,
+                    "legacy:" + pluginId, manifestJson,
+                    jdbc.queryForObject("SELECT permission_snapshot::text FROM extension_installation_jobs WHERE job_id=?",
+                            String.class, job.jobId()),
+                    jdbc.queryForObject("SELECT image_snapshot::text FROM extension_installation_jobs WHERE job_id=?",
+                            String.class, job.jobId()), staleToken, "REGISTERED", null, null);
+
+            assertThat(worker.finalizeInstallation(staleJob)).isFalse();
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("VERIFYING_ARTIFACTS");
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
+                    .isEqualTo("CONFIGURED");
         } finally {
             worker.stopLeaseRenewals();
         }
@@ -212,7 +251,8 @@ class ExtensionInstallationJobIntegrationTests {
         var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
                 runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
                 new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
-                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30), 1_500, 250);
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30),
+                new DataSourceTransactionManager(jdbc.getDataSource()), 1_500, 250);
         var installStarted = new CountDownLatch(1);
         var finishInstall = new CountDownLatch(1);
         var installCalls = new AtomicInteger();

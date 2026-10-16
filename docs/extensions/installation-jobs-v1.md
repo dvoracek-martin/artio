@@ -4,6 +4,8 @@
 
 While work is active, the worker extends its PostgreSQL lease using the same fencing token; defaults are a 30-minute lease renewed every 5 minutes. Configure ARTIO_EXTENSION_INSTALLATION_LEASE_DURATION_MS and ARTIO_EXTENSION_INSTALLATION_LEASE_RENEWAL_MS when needed; the renewal interval must be less than half the lease duration. This prevents a healthy long-running worker from losing ownership. If Core exits, renewals stop and another worker may reclaim the active job after the lease expires. The retry uses the frozen manifest and image snapshots.
 
+Runtime I/O stays outside database transactions. Final lifecycle registration and job completion share one short transaction: it locks the job by its current fencing token, requires an unexpired lease, updates plugin lifecycle state, then marks the job INSTALLED before releasing the row. A worker that lost its lease cannot publish a stale success.
+
 The persisted phase is visible while the isolated Extension Controller performs the operation, including DOWNLOADING_OR_IMPORTING. Per-image controller progress and automatic quarantine/terminal-job retention remain open. Lease renewal uses the existing current V1 database schema and requires no migration.
 
 Installing a registered extension is a durable Core operation. Submit `POST /api/v1/admin/extensions/installations` with `pluginId`, optional `instanceId`, and an `idempotencyKey` containing 8–128 safe characters. Core validates the registered manifest and dependencies, snapshots the manifest, permissions, runtime identity and image list, records the actor, and responds `202 Accepted` with a `jobId` before runtime I/O begins.

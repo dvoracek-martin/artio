@@ -21,6 +21,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
@@ -42,12 +44,14 @@ public class ExtensionInstallationJobWorker {
     private final long leaseDurationMillis;
     private final long leaseRenewalMillis;
     private final ScheduledExecutorService leaseRenewals;
+    private final TransactionTemplate transactions;
 
     public ExtensionInstallationJobWorker(JdbcTemplate jdbc, ObjectMapper mapper,
             ObjectProvider<ExtensionRuntimePort> runtimeProvider,
             ExtensionRegistryCredentialService registryCredentials,
             OciArchiveInspector archiveInspector,
             OciArchiveQuarantineStore quarantine,
+            PlatformTransactionManager transactionManager,
             @Value("${artio.extensions.installations.lease-duration-ms:1800000}") long leaseDurationMillis,
             @Value("${artio.extensions.installations.lease-renewal-ms:300000}") long leaseRenewalMillis) {
         if (leaseDurationMillis < 1_000 || leaseRenewalMillis < 250 || leaseRenewalMillis * 2 >= leaseDurationMillis) {
@@ -61,6 +65,7 @@ public class ExtensionInstallationJobWorker {
         this.quarantine = quarantine;
         this.leaseDurationMillis = leaseDurationMillis;
         this.leaseRenewalMillis = leaseRenewalMillis;
+        this.transactions = new TransactionTemplate(transactionManager);
         ThreadFactory threadFactory = task -> {
             Thread thread = new Thread(task, "artio-installation-lease-renewal");
             thread.setDaemon(true);
@@ -159,19 +164,8 @@ public class ExtensionInstallationJobWorker {
                 if (job.instanceId() == null) runtime.install(manifest, auth);
                 else runtime.installInstance(job.runtimeIdentity(), manifest, auth);
             }
-            if (!transition(job, "VERIFYING_ARTIFACTS") || !transition(job, "REGISTERING_RELEASE")) return;
-            if (job.instanceId() == null) {
-                jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", job.pluginId());
-                jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
-                        + "WHERE plugin_id=? AND compatibility_mode='LEGACY_V1' AND lifecycle_state IN ('VALIDATED','CONFIGURED','FAILED')", job.pluginId());
-            } else {
-                jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
-                        + "WHERE instance_id=? AND lifecycle_state IN ('CONFIGURED','FAILED')", job.instanceId());
-            }
-            int completed = jdbc.update("UPDATE extension_installation_jobs SET state='INSTALLED',lease_token=NULL,lease_until=NULL,error_code=NULL,"
-                            + "completed_at=now(),updated_at=now() WHERE job_id=? AND lease_token=?",
-                    job.jobId(), job.leaseToken());
-            if (completed == 1 && "ARCHIVE".equals(job.sourceKind())) {
+            if (!transition(job, "VERIFYING_ARTIFACTS") || !finalizeInstallation(job)) return;
+            if ("ARCHIVE".equals(job.sourceKind())) {
                 try { quarantine.delete(archivePath(job.quarantineName())); }
                 catch (java.io.IOException cleanupFailure) {
                     // Keep the installation complete; a periodic quarantine cleanup can remove stale files safely.
@@ -203,6 +197,34 @@ public class ExtensionInstallationJobWorker {
                 state, job.jobId(), job.leaseToken()) == 1;
     }
 
+    boolean finalizeInstallation(InstallJob job) {
+        Boolean finalized = transactions.execute(status -> {
+            int claimed = jdbc.update("UPDATE extension_installation_jobs SET state='REGISTERING_RELEASE',updated_at=now() "
+                            + "WHERE job_id=? AND lease_token=? AND lease_until>now() AND state='VERIFYING_ARTIFACTS'",
+                    job.jobId(), job.leaseToken());
+            if (claimed != 1) return false;
+
+            if (job.instanceId() == null) {
+                jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", job.pluginId());
+                jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
+                        + "WHERE plugin_id=? AND compatibility_mode='LEGACY_V1' AND lifecycle_state IN ('VALIDATED','CONFIGURED','FAILED')", job.pluginId());
+            } else {
+                jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
+                        + "WHERE instance_id=? AND lifecycle_state IN ('CONFIGURED','FAILED')", job.instanceId());
+            }
+
+            int completed = jdbc.update("UPDATE extension_installation_jobs SET state='INSTALLED',lease_token=NULL,lease_until=NULL,error_code=NULL,"
+                            + "completed_at=now(),updated_at=now() WHERE job_id=? AND lease_token=? AND lease_until>now() AND state='REGISTERING_RELEASE'",
+                    job.jobId(), job.leaseToken());
+            if (completed != 1) {
+                status.setRollbackOnly();
+                return false;
+            }
+            return true;
+        });
+        return Boolean.TRUE.equals(finalized);
+    }
+
     private Path archivePath(String quarantineName) {
         Path archive = quarantine.pathFor(quarantineName);
         if (!Files.isRegularFile(archive)) {
@@ -225,7 +247,7 @@ public class ExtensionInstallationJobWorker {
         }
     }
 
-    private record InstallJob(UUID jobId, String pluginId, UUID instanceId, String runtimeIdentity,
+    record InstallJob(UUID jobId, String pluginId, UUID instanceId, String runtimeIdentity,
             String manifestJson, String permissionJson, String imageJson, UUID leaseToken, String sourceKind,
             String quarantineName, String archiveSha256) { }
     private record PermissionSnapshot(List<String> permissions) { }
