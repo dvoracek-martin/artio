@@ -1,6 +1,5 @@
 package io.artio.api.extensions;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.InputStream;
 import java.net.URI;
@@ -41,7 +40,7 @@ public final class MarketplaceCatalogClient {
         }
     }
 
-    public JsonNode plugins(String q, String category, String country, String coreVersion,
+    public Object plugins(String q, String category, String country, String coreVersion,
             boolean includePrerelease, String locale, int page, int size) {
         Map<String, String> query = new LinkedHashMap<>();
         add(query, "q", q);
@@ -55,7 +54,7 @@ public final class MarketplaceCatalogClient {
         return get("/api/v1/marketplace/plugins", query);
     }
 
-    public JsonNode releaseManifest(String pluginId, String version, String coreVersion,
+    public Object releaseManifest(String pluginId, String version, String coreVersion,
             String country, boolean includePrerelease) {
         if (pluginId == null || !pluginId.matches("[a-z0-9][a-z0-9._-]{0,127}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pluginId is invalid");
@@ -69,7 +68,7 @@ public final class MarketplaceCatalogClient {
                 + pathSegment(version) + "/manifest", query);
     }
 
-    private JsonNode get(String path, Map<String, String> query) {
+    private Object get(String path, Map<String, String> query) {
         if (baseUrl.isBlank())
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Marketplace is not configured");
         String encodedQuery = query.entrySet().stream()
@@ -93,7 +92,9 @@ public final class MarketplaceCatalogClient {
                 byte[] bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1);
                 if (bytes.length > MAX_RESPONSE_BYTES)
                     throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Marketplace response exceeded the size limit");
-                return mapper.readTree(bytes);
+                // Spring Boot 4 serializes with Jackson 3. Return ordinary JSON values here so
+                // the Jackson 2 client tree is not exposed as a bean with its internal fields.
+                return mapper.readValue(bytes, Object.class);
             }
         } catch (ResponseStatusException failure) {
             throw failure;

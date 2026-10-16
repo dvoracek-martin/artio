@@ -2,6 +2,7 @@ package io.artio.api.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -170,7 +171,11 @@ class CatalogApiIntegrationTests {
         registry.add("artio.security.encryption-keyring", () -> "{\"" + io.artio.api.security.EncryptionService.keyId(PREVIOUS_TEST_ENCRYPTION_KEY)
                 + "\":\"" + PREVIOUS_TEST_ENCRYPTION_KEY + "\"}");
         registry.add("artio.setup.token", () -> "integration-test-setup-token-value-32-bytes-minimum");
-        registry.add("artio.extensions.trusted-registries", () -> "ghcr.io");
+        registry.add("artio.extensions.trusted-registries", () -> {
+            String acceptanceRegistry = System.getenv("ARTIO_EXTENSION_TRUSTED_REGISTRIES");
+            return acceptanceRegistry == null || acceptanceRegistry.isBlank()
+                    ? "ghcr.io" : "ghcr.io," + acceptanceRegistry;
+        });
         registry.add("artio.inventory.expiry-interval-ms", () -> "3600000");
         registry.add("artio.events.outbox-poll-interval-ms", () -> "3600000");
         registry.add("artio.events.kafka.enabled", () -> "true");
@@ -553,7 +558,8 @@ class CatalogApiIntegrationTests {
                 io.artio.api.extensions.ExtensionManagementController.ManifestValidationResponse.class);
         assertThat(validation.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(validation.getBody()).isNotNull();
-        assertThat(validation.getBody().valid()).isTrue();
+        assertThat(validation.getBody().valid()).as("Core manifest validation errors: %s", validation.getBody().errors())
+                .isTrue();
 
         var mutable = new io.artio.extensions.PluginManifest("1", "payments.example", "Example Payments", "Artio",
                 "1.0.0", "Example provider", "0.1.0", "1.0.0", "ghcr.io/artio/example-payments:latest",
@@ -564,6 +570,48 @@ class CatalogApiIntegrationTests {
         assertThat(rejected.getBody()).isNotNull();
         assertThat(rejected.getBody().valid()).isFalse();
         assertThat(rejected.getBody().errors()).contains("image must be pinned by sha256 digest", "unsupported permission: host-access");
+    }
+
+    @Test
+    void importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured() throws Exception {
+        String marketplacePluginId = System.getenv("ARTIO_MARKETPLACE_TEST_PLUGIN_ID");
+        String marketplaceVersion = System.getenv("ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION");
+        assumeTrue(marketplacePluginId != null && !marketplacePluginId.isBlank()
+                && marketplaceVersion != null && !marketplaceVersion.isBlank()
+                && System.getenv("ARTIO_MARKETPLACE_BASE_URL") != null,
+                "Set ARTIO_MARKETPLACE_BASE_URL, ARTIO_MARKETPLACE_TEST_PLUGIN_ID and ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION for live Marketplace acceptance");
+
+        var listing = adminExchange("/api/v1/admin/extensions/marketplace/plugins?q=reference",
+                HttpMethod.GET, null, Map.class);
+        assertThat(listing.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(listing.getBody()).isNotNull();
+        assertThat(listing.getBody().get("content").toString()).contains(marketplacePluginId);
+
+        var fetched = adminExchange("/api/v1/admin/extensions/marketplace/plugins/{id}/releases/{version}/manifest?country=US",
+                HttpMethod.GET, null, Map.class, marketplacePluginId, marketplaceVersion);
+        assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(fetched.getBody()).isNotNull();
+        var manifest = mapper.convertValue(fetched.getBody(), io.artio.extensions.PluginManifest.class);
+        assertThat(manifest.id()).isEqualTo(marketplacePluginId);
+        assertThat(manifest.version()).isEqualTo(marketplaceVersion);
+        assertThat(manifest.image()).contains("@sha256:");
+
+        var validation = adminExchange("/api/v1/admin/extensions/validate", HttpMethod.POST, manifest,
+                io.artio.api.extensions.ExtensionManagementController.ManifestValidationResponse.class);
+        assertThat(validation.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(validation.getBody()).isNotNull();
+        assertThat(validation.getBody().valid()).as("Imported Marketplace manifest validation errors: %s", validation.getBody().errors())
+                .isTrue();
+
+        var registered = adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, manifest,
+                io.artio.api.extensions.ExtensionManagementController.PluginView.class);
+        assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(registered.getBody()).isNotNull();
+        assertThat(registered.getBody().manifest().image()).isEqualTo(manifest.image());
+
+        var removed = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, manifest.id());
+        assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(removed.getBody()).containsEntry("lifecycleState", "UNINSTALLED");
     }
 
     @Test

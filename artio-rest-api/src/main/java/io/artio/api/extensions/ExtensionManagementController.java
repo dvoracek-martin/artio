@@ -117,7 +117,7 @@ public class ExtensionManagementController {
 
     @GetMapping("/marketplace/plugins")
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
-    public JsonNode marketplacePlugins(@RequestParam(required = false) String q,
+    public Object marketplacePlugins(@RequestParam(required = false) String q,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String country,
             @RequestParam(defaultValue = "false") boolean includePrerelease,
@@ -133,7 +133,7 @@ public class ExtensionManagementController {
 
     @GetMapping("/marketplace/plugins/{pluginId}/releases/{version}/manifest")
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
-    public JsonNode marketplaceManifest(@PathVariable String pluginId, @PathVariable String version,
+    public Object marketplaceManifest(@PathVariable String pluginId, @PathVariable String version,
             @RequestParam(required = false) String country,
             @RequestParam(defaultValue = "false") boolean includePrerelease) {
         if (country != null && !country.matches("[A-Z]{2}"))

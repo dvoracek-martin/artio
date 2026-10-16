@@ -32,7 +32,8 @@ class MarketplaceCatalogClientTests {
 
         var page = client().plugins("Swiss Post", null, "CH", "1.4.2", false, "de", 0, 20);
 
-        assertThat(page.path("content").get(0).path("pluginId").asText()).isEqualTo("shipping.demo");
+        assertThat(((java.util.Map<?, ?>) ((java.util.List<?>) ((java.util.Map<?, ?>) page).get("content")).get(0))
+                .get("pluginId")).isEqualTo("shipping.demo");
         assertThat(requestUri.get()).contains("coreVersion=1.4.2", "country=CH", "q=Swiss+Post", "locale=de");
         assertThat(requestUri.get()).startsWith("/api/v1/marketplace/plugins?");
     }
@@ -47,7 +48,7 @@ class MarketplaceCatalogClientTests {
 
         var manifest = client().releaseManifest("shipping.demo", "1.2.3", "1.4.2", "CH", false);
 
-        assertThat(manifest.path("id").asText()).isEqualTo("shipping.demo");
+        assertThat(((java.util.Map<?, ?>) manifest).get("id")).isEqualTo("shipping.demo");
         assertThat(requestUri.get()).startsWith("/api/v1/marketplace/plugins/shipping.demo/releases/1.2.3/manifest?");
         assertThat(requestUri.get()).contains("coreVersion=1.4.2", "country=CH");
     }
