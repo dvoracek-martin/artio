@@ -629,14 +629,15 @@ class CatalogApiIntegrationTests {
                 .dockerHost(dockerConfig.getDockerHost()).sslConfig(dockerConfig.getSSLConfig()).maxConnections(6)
                 .connectionTimeout(Duration.ofSeconds(5)).responseTimeout(Duration.ofSeconds(120)).build();
         com.github.dockerjava.api.DockerClient docker = null;
+        io.artio.api.extensions.DockerExtensionRuntime liveRuntime = null;
         try {
             docker = com.github.dockerjava.core.DockerClientImpl.getInstance(dockerConfig, dockerTransport);
-            var runtime = new io.artio.api.extensions.DockerExtensionRuntime(docker, "artio-extensions", 8080,
+            liveRuntime = new io.artio.api.extensions.DockerExtensionRuntime(docker, "artio-extensions", 8080,
                     new io.artio.api.security.ExtensionCredentialService(ACTIVE_TEST_ENCRYPTION_KEY),
                     "http://extension-egress:3128");
             @SuppressWarnings("unchecked") org.springframework.beans.factory.ObjectProvider<io.artio.extensions.ExtensionRuntimePort>
                     runtimeProvider = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
-            org.mockito.Mockito.when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+            org.mockito.Mockito.when(runtimeProvider.getIfAvailable()).thenReturn(liveRuntime);
             var worker = new io.artio.api.extensions.ExtensionInstallationJobWorker(jdbc,
                     new com.fasterxml.jackson.databind.ObjectMapper(), runtimeProvider, extensionRegistryCredentials,
                     ociArchiveInspector, archiveQuarantineStore);
@@ -646,8 +647,25 @@ class CatalogApiIntegrationTests {
             assertThat(completed.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(completed.getBody()).isNotNull();
             assertThat(completed.getBody().state()).isEqualTo("INSTALLED");
+            String v2ManifestJson = jdbc.queryForObject("SELECT manifest::text FROM extension_plugin_v2_releases WHERE plugin_id=?",
+                    String.class, marketplacePluginId);
+            var v2Manifest = new com.fasterxml.jackson.databind.ObjectMapper().readTree(v2ManifestJson);
+            String v2Image = v2Manifest.path("packageManifest").path("image").asText();
+            assertThat(v2Manifest.path("packageManifest").path("manifestVersion").asText()).isEqualTo("2");
+            assertThat(v2Image).isEqualTo(System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V2"));
+            String manifestJson = jdbc.queryForObject("SELECT manifest::text FROM extension_plugin_releases WHERE plugin_id=? AND version=?",
+                    String.class, marketplacePluginId, marketplaceVersion);
+            var installedManifest = new com.fasterxml.jackson.databind.ObjectMapper().readValue(manifestJson,
+                    io.artio.extensions.PluginManifest.class);
+            assertThat(installedManifest.manifestVersion()).isEqualTo("1");
+            assertThat(installedManifest.image()).isEqualTo(v2Image);
+            docker.inspectImageCmd(installedManifest.image()).exec();
         } finally {
             try {
+                if (liveRuntime != null) {
+                    try { liveRuntime.disable(marketplacePluginId); }
+                    finally { liveRuntime.uninstall(marketplacePluginId); }
+                }
                 var removed = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, marketplacePluginId);
                 assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
                 assertThat(removed.getBody()).containsEntry("lifecycleState", "UNINSTALLED");
