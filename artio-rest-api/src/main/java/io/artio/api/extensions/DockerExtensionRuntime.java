@@ -12,6 +12,7 @@ import com.github.dockerjava.api.model.Volume;
 import io.artio.api.security.ExtensionCredentialService;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.ExtensionRuntimePort;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
@@ -72,15 +73,23 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     }
 
     public void install(PluginManifest manifest) {
-        try {
-            for (RuntimeService service : services(manifest)) {
-                requirePinnedImage(service.image());
-                docker.pullImageCmd(service.image()).start().awaitCompletion(120, TimeUnit.SECONDS);
-            }
+        for (RuntimeService service : services(manifest)) {
+            pullImage(service.image());
+        }
+    }
+
+    private void pullImage(String image) {
+        requirePinnedImage(image);
+        boolean completed;
+        try (var callback = docker.pullImageCmd(image).start()) {
+            completed = callback.awaitCompletion(120, TimeUnit.SECONDS);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Extension image pull was interrupted", interrupted);
+            throw new IllegalStateException("Extension image pull was interrupted for " + image, interrupted);
+        } catch (IOException | RuntimeException failure) {
+            throw new IllegalStateException("Extension image pull failed for " + image, failure);
         }
+        if (!completed) throw new IllegalStateException("Extension image pull timed out for " + image + " after 120 seconds");
     }
 
     @Override

@@ -6,10 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.InspectContainerCmd;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.command.PullImageCmd;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.NetworkSettings;
+import com.github.dockerjava.api.model.PullResponseItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
@@ -20,9 +23,33 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DockerExtensionRuntimeTests {
+    @Test
+    void incompleteImagePullFailsInstallationAndClosesThePullCallback() throws Exception {
+        String image = "ghcr.io/artio/payments@sha256:" + "a".repeat(64);
+        var manifest = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "1.0.0",
+                "Payment adapter", "0.1.0", "1.0.0", image,
+                java.util.List.of(), java.util.List.of(), Map.of(), java.util.List.of(), "/health", "/diagnostics");
+        DockerClient docker = mock(DockerClient.class);
+        PullImageCmd pull = mock(PullImageCmd.class);
+        @SuppressWarnings("unchecked")
+        ResultCallback.Adapter<PullResponseItem> callback = mock(ResultCallback.Adapter.class);
+        when(docker.pullImageCmd(image)).thenReturn(pull);
+        when(pull.start()).thenReturn(callback);
+        when(callback.awaitCompletion(120, java.util.concurrent.TimeUnit.SECONDS)).thenReturn(false);
+        var runtime = new DockerExtensionRuntime(docker, "artio-extensions", 8080,
+                new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
+
+        assertThatThrownBy(() -> runtime.install(manifest))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("timed out")
+                .hasMessageContaining(image);
+        verify(callback).close();
+    }
+
     @Test
     void containerNamesAreSafeBoundedAndCollisionResistant() {
         String dotted = DockerExtensionRuntime.containerName("payments.stripe");
