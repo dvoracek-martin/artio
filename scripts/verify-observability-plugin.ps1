@@ -47,10 +47,14 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Could not tag $($image.Name) for the temporary registry." }
         docker push $registryTag
         if ($LASTEXITCODE -ne 0) { throw "Could not push $($image.Name) to the temporary registry." }
-        $digestReference = docker image inspect $registryTag --format '{{index .RepoDigests 0}}'
-        if ($LASTEXITCODE -ne 0 -or -not $digestReference -or $digestReference -notmatch '@sha256:[a-f0-9]{64}$') {
+        $accept = 'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'
+        $manifestResponse = Invoke-WebRequest -Uri "http://127.0.0.1:${registryPort}/v2/$($image.Name)/manifests/$testTag" `
+            -Method Head -Headers @{ Accept = $accept } -UseBasicParsing -TimeoutSec 15
+        $manifestDigest = $manifestResponse.Headers['Docker-Content-Digest']
+        if (-not $manifestDigest -or $manifestDigest -notmatch '^sha256:[a-f0-9]{64}$') {
             throw "Could not resolve immutable digest for $($image.Name)."
         }
+        $digestReference = "localhost:${registryPort}/$($image.Name)@$manifestDigest"
         $createdImageReferences.Add($digestReference.Trim())
         Set-Item -Path "Env:$($image.Variable)" -Value $digestReference.Trim()
     }

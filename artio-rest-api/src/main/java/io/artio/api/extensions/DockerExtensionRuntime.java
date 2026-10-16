@@ -607,7 +607,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         } while (System.nanoTime() < deadline);
         disableInstance(runtimeIdentity, pluginId);
         throw new ExtensionRuntimePort.ExtensionUnavailableException(
-                "Extension did not become healthy within 30 seconds (last health check: " + lastHealthStatus + ")");
+                "Extension service '" + serviceId + "' did not become healthy within 30 seconds (last health check: "
+                        + lastHealthStatus + ")");
     }
 
     private ExtensionRuntimePort.RuntimeHealth serviceHealth(String runtimeIdentity, String pluginId,
