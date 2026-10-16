@@ -1,9 +1,12 @@
 package io.artio.api.extensions;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import io.artio.extensions.ExtensionRuntimePort;
+import io.artio.extensions.PluginManifest;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -20,13 +23,18 @@ import org.springframework.web.bind.annotation.RestController;
 public final class ObservabilityUiController {
     private static final String UI_PREFIX = "/api/v1/admin/extensions/observability.artio/ui";
     private final ObjectProvider<ExtensionRuntimePort> runtime;
+    private final JdbcTemplate jdbc;
+    private final ObjectMapper mapper;
 
-    public ObservabilityUiController(ObjectProvider<ExtensionRuntimePort> runtime) {
+    public ObservabilityUiController(ObjectProvider<ExtensionRuntimePort> runtime, JdbcTemplate jdbc, ObjectMapper mapper) {
         this.runtime = runtime;
+        this.jdbc = jdbc;
+        this.mapper = mapper;
     }
 
     @GetMapping("/ui-session")
     public ResponseEntity<Void> openSession(JwtAuthenticationToken authentication, HttpServletRequest request) {
+        requireAllowed();
         String forwarded = request.getHeader("X-Forwarded-Proto");
         boolean secure = request.isSecure() || forwarded != null && "https".equalsIgnoreCase(forwarded);
         ResponseCookie session = ResponseCookie.from("artio_observability_session", authentication.getToken().getTokenValue())
@@ -38,6 +46,7 @@ public final class ObservabilityUiController {
 
     @GetMapping({"/ui", "/ui/**"})
     public ResponseEntity<byte[]> proxy(JwtAuthenticationToken authentication, HttpServletRequest request) {
+        requireAllowed();
         String requestUri = request.getRequestURI();
         if (requestUri == null || !requestUri.startsWith(UI_PREFIX)) return ResponseEntity.notFound().build();
         String path = requestUri.substring(UI_PREFIX.length());
@@ -62,5 +71,17 @@ public final class ObservabilityUiController {
     private static org.springframework.http.MediaType parseContentType(String value) {
         try { return org.springframework.http.MediaType.parseMediaType(value); }
         catch (RuntimeException invalid) { return org.springframework.http.MediaType.APPLICATION_OCTET_STREAM; }
+    }
+
+    private void requireAllowed() {
+        String manifest = jdbc.query("SELECT manifest::text FROM extension_plugins WHERE plugin_id='observability.artio' "
+                        + "AND lifecycle_state<>'UNINSTALLED'", rs -> rs.next() ? rs.getString(1) : null);
+        if (manifest == null) throw new org.springframework.web.server.ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE, "Observability extension is unavailable");
+        try {
+            ExtensionSecurityPolicy.requireAllowed(jdbc, mapper.readValue(manifest, PluginManifest.class));
+        } catch (java.io.IOException invalid) {
+            throw new IllegalStateException("Observability extension manifest is invalid", invalid);
+        }
     }
 }

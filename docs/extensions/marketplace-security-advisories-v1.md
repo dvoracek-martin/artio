@@ -1,0 +1,11 @@
+# Marketplace security advisories, version 1
+
+Core consumes `GET /api/v1/marketplace/security/advisories` using the configured Marketplace origin. It verifies the complete Ed25519 envelope locally using `ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS`, a comma-separated list of `key-id=base64url-X509-public-key` entries. The advisory signing root is separate from the official release descriptor key in `ARTIO_MARKETPLACE_TRUSTED_KEYS`; Marketplace private keys never leave Marketplace.
+
+Core accepts only the exact snapshot and entry schema, rejects duplicate JSON properties, unknown fields, invalid release identities, unsupported locales, invalid digest inventories, stale or overlong snapshots, unknown signers, and invalid signatures. The feed sequence is monotonic. A repeated sequence is accepted only when its payload digest matches the stored digest. Failed, unavailable, expired, or invalid feeds do not alter the last verified policy.
+
+The single development schema snapshot in `artio-rest-api/src/main/resources/db/migration/V1__initial_schema.sql` stores current release advisory status, the last verified feed state, append-only sync audit, permanent exact `sha256:` image bans, and per-target containment results. No new database migration version is introduced during development. An image digest, once banned, is never removed by a later feed.
+
+Core checks exact main and sidecar image digests before registration, install, enable, retry, and plugin invocation. Scheduled reconciliation locally stops legacy plugins and isolated plugin instances whose current manifest contains a banned digest. It records `STOPPED` only after the local runtime confirms the stop; failures remain visible as `STOP_FAILED`. Containment does not rewrite plugin lifecycle history. Event delivery is terminally marked `SECURITY_BLOCKED` when its pinned release is banned. Backoffice administrators can inspect feed freshness, release statuses, permanent bans, and containment outcomes at `GET /api/v1/admin/extensions/security/advisories`.
+
+The feed is advisory information signed by Marketplace, but Core enforces its locally verified exact digest bans. Marketplace has no remote control channel into Core. Release status and feed freshness do not erase existing payments, refunds, shipment, event, or other plugin obligations.

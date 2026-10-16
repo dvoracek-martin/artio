@@ -1083,7 +1083,7 @@ CREATE TABLE extension_installation_jobs (
     permission_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(permission_snapshot)='object'),
     image_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(image_snapshot)='array'),
     state VARCHAR(32) NOT NULL CHECK (state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS',
-        'REGISTERING_RELEASE','INSTALLED','CONFIGURATION_REQUIRED','READY','FAILED','CANCELLED')),
+        'REGISTERING_RELEASE','INSTALLED','CONFIGURATION_REQUIRED','READY','FAILED','CANCELLED','SECURITY_BLOCKED')),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     lease_token UUID,
     lease_until TIMESTAMPTZ,
@@ -1104,6 +1104,90 @@ CREATE UNIQUE INDEX extension_installation_jobs_one_active_plugin_idx ON extensi
     WHERE instance_id IS NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
 CREATE UNIQUE INDEX extension_installation_jobs_one_active_instance_idx ON extension_installation_jobs(plugin_id,instance_id)
     WHERE instance_id IS NOT NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
+
+-- The current development schema keeps only this V1 snapshot. Signed Marketplace
+-- support/security state and permanent exact OCI digest bans are Core-owned.
+CREATE TABLE extension_marketplace_advisory_state (
+    singleton_id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton_id),
+    sequence BIGINT NOT NULL DEFAULT 0 CHECK (sequence >= 0),
+    payload_sha256 CHAR(64),
+    issued_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    last_attempt_at TIMESTAMPTZ,
+    last_success_at TIMESTAMPTZ,
+    last_error_code VARCHAR(64),
+    CHECK (payload_sha256 IS NULL OR payload_sha256 ~ '^[a-f0-9]{64}$'),
+    CHECK ((sequence=0 AND payload_sha256 IS NULL) OR (sequence>0 AND payload_sha256 IS NOT NULL))
+);
+INSERT INTO extension_marketplace_advisory_state(singleton_id) VALUES (TRUE);
+
+CREATE TABLE extension_marketplace_release_advisories (
+    plugin_id VARCHAR(160) NOT NULL,
+    version VARCHAR(80) NOT NULL,
+    advisory_id UUID NOT NULL,
+    release_descriptor_digest VARCHAR(71) NOT NULL CHECK (release_descriptor_digest ~ '^sha256:[a-f0-9]{64}$'),
+    image_digests JSONB NOT NULL CHECK (jsonb_typeof(image_digests)='array'),
+    banned_image_digests JSONB NOT NULL CHECK (jsonb_typeof(banned_image_digests)='array'),
+    support_status VARCHAR(16) NOT NULL CHECK (support_status IN ('SUPPORTED','UNSUPPORTED','REMOVED')),
+    security_status VARCHAR(16) NOT NULL CHECK (security_status IN ('ALLOWED','BANNED')),
+    status VARCHAR(16) NOT NULL CHECK (status IN ('SUPPORTED','UNSUPPORTED','REMOVED','BANNED')),
+    severity VARCHAR(16) NOT NULL CHECK (severity IN ('INFO','LOW','MEDIUM','HIGH','CRITICAL')),
+    reason_code VARCHAR(48) NOT NULL CHECK (reason_code ~ '^[A-Z][A-Z0-9_]{0,47}$'),
+    explanations JSONB NOT NULL CHECK (jsonb_typeof(explanations)='object'),
+    advisory_issued_at TIMESTAMPTZ NOT NULL,
+    feed_sequence BIGINT NOT NULL CHECK (feed_sequence > 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (plugin_id,version),
+    CHECK (status = CASE WHEN security_status='BANNED' THEN 'BANNED' ELSE support_status END)
+);
+CREATE INDEX extension_marketplace_advisory_status_idx
+    ON extension_marketplace_release_advisories(security_status,support_status,plugin_id);
+
+CREATE TABLE extension_marketplace_banned_artifacts (
+    image_digest VARCHAR(71) PRIMARY KEY CHECK (image_digest ~ '^sha256:[a-f0-9]{64}$'),
+    first_plugin_id VARCHAR(160) NOT NULL,
+    first_version VARCHAR(80) NOT NULL,
+    release_descriptor_digest VARCHAR(71) NOT NULL CHECK (release_descriptor_digest ~ '^sha256:[a-f0-9]{64}$'),
+    reason_code VARCHAR(48) NOT NULL CHECK (reason_code ~ '^[A-Z][A-Z0-9_]{0,47}$'),
+    feed_sequence BIGINT NOT NULL CHECK (feed_sequence > 0),
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX extension_marketplace_banned_artifacts_source_idx
+    ON extension_marketplace_banned_artifacts(first_plugin_id,first_version);
+CREATE FUNCTION artio_marketplace_banned_artifacts_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'extension_marketplace_banned_artifacts is append-only'; END $$;
+CREATE TRIGGER extension_marketplace_banned_artifacts_immutable
+    BEFORE UPDATE OR DELETE ON extension_marketplace_banned_artifacts
+    FOR EACH ROW EXECUTE FUNCTION artio_marketplace_banned_artifacts_immutable();
+
+CREATE TABLE extension_security_blocked_targets (
+    runtime_identity VARCHAR(256) PRIMARY KEY,
+    plugin_id VARCHAR(128) NOT NULL REFERENCES extension_plugins(plugin_id),
+    instance_id UUID,
+    banned_image_digests JSONB NOT NULL CHECK (jsonb_typeof(banned_image_digests)='array'),
+    containment_status VARCHAR(16) NOT NULL CHECK (containment_status IN ('STOPPED','STOP_FAILED')),
+    last_error_code VARCHAR(64),
+    first_blocked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    stopped_at TIMESTAMPTZ,
+    FOREIGN KEY (instance_id,plugin_id) REFERENCES extension_plugin_instances(instance_id,plugin_id),
+    CHECK ((containment_status='STOPPED' AND last_error_code IS NULL AND stopped_at IS NOT NULL)
+        OR (containment_status='STOP_FAILED' AND last_error_code IS NOT NULL AND stopped_at IS NULL))
+);
+CREATE INDEX extension_security_blocked_targets_status_idx
+    ON extension_security_blocked_targets(containment_status,last_attempt_at);
+
+CREATE TABLE extension_marketplace_advisory_sync_audit (
+    sync_id UUID PRIMARY KEY,
+    outcome VARCHAR(16) NOT NULL CHECK (outcome IN ('APPLIED','UNCHANGED','REJECTED','UNAVAILABLE')),
+    feed_sequence BIGINT,
+    payload_sha256 CHAR(64),
+    error_code VARCHAR(64),
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (payload_sha256 IS NULL OR payload_sha256 ~ '^[a-f0-9]{64}$')
+);
+CREATE INDEX extension_marketplace_advisory_sync_audit_time_idx
+    ON extension_marketplace_advisory_sync_audit(occurred_at DESC);
 
 -- Historical provider ownership deliberately restricts removal of an instance or release while
 -- payments and shipments still refer to it.
@@ -1302,7 +1386,7 @@ CREATE TABLE extension_event_deliveries (
     event_type VARCHAR(160) NOT NULL,
     schema_version INTEGER NOT NULL CHECK (schema_version > 0),
     payload_snapshot JSONB NOT NULL CHECK (jsonb_typeof(payload_snapshot) = 'object'),
-    state VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (state IN ('PENDING','IN_PROGRESS','DELIVERED','RETRY','DEAD_LETTER')),
+    state VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (state IN ('PENDING','IN_PROGRESS','DELIVERED','RETRY','DEAD_LETTER','SECURITY_BLOCKED')),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     lease_token UUID,

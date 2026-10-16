@@ -92,6 +92,11 @@ public final class MarketplaceCatalogClient {
         }
     }
 
+    /** Fetch the signed policy snapshot as bytes; the security worker verifies before parsing it. */
+    public byte[] signedAdvisories() {
+        return getBytes("/api/v1/marketplace/security/advisories");
+    }
+
     private byte[] getBytes(String path) {
         if (baseUrl.isBlank())
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Marketplace is not configured");

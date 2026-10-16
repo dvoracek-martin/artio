@@ -110,6 +110,57 @@ public class ExtensionManagementController {
                 .toList();
     }
 
+    @GetMapping("/security/advisories")
+    @Transactional(readOnly = true)
+    public Map<String, Object> securityAdvisories() {
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("sync", jdbc.query("SELECT sequence,payload_sha256,issued_at,expires_at,last_attempt_at,last_success_at,last_error_code "
+                        + "FROM extension_marketplace_advisory_state WHERE singleton_id=true", rs -> {
+                    if (!rs.next()) throw new IllegalStateException("Marketplace advisory state is unavailable");
+                    Map<String, Object> state = new java.util.LinkedHashMap<>();
+                    state.put("sequence", rs.getLong("sequence"));
+                    state.put("payloadSha256", rs.getString("payload_sha256"));
+                    state.put("issuedAt", rs.getTimestamp("issued_at"));
+                    state.put("expiresAt", rs.getTimestamp("expires_at"));
+                    state.put("lastAttemptAt", rs.getTimestamp("last_attempt_at"));
+                    state.put("lastSuccessAt", rs.getTimestamp("last_success_at"));
+                    state.put("lastErrorCode", rs.getString("last_error_code"));
+                    java.sql.Timestamp expires = rs.getTimestamp("expires_at");
+                    state.put("stale", expires == null || expires.toInstant().isBefore(java.time.Instant.now()));
+                    return state;
+                }));
+        response.put("releases", jdbc.query("SELECT plugin_id,version,release_descriptor_digest,support_status,security_status,status,severity,reason_code,"
+                        + "image_digests::text,banned_image_digests::text,feed_sequence,updated_at FROM extension_marketplace_release_advisories ORDER BY plugin_id,version",
+                (rs, row) -> Map.ofEntries(Map.entry("pluginId", rs.getString("plugin_id")),
+                        Map.entry("version", rs.getString("version")), Map.entry("releaseDescriptorDigest", rs.getString("release_descriptor_digest")),
+                        Map.entry("supportStatus", rs.getString("support_status")), Map.entry("securityStatus", rs.getString("security_status")),
+                        Map.entry("status", rs.getString("status")), Map.entry("severity", rs.getString("severity")),
+                        Map.entry("reasonCode", rs.getString("reason_code")), Map.entry("imageDigests", rs.getString("image_digests")),
+                        Map.entry("bannedImageDigests", rs.getString("banned_image_digests")), Map.entry("feedSequence", rs.getLong("feed_sequence")),
+                        Map.entry("updatedAt", rs.getTimestamp("updated_at").toInstant()))));
+        response.put("bannedArtifacts", jdbc.query("SELECT image_digest,first_plugin_id,first_version,release_descriptor_digest,reason_code,feed_sequence,first_seen_at "
+                        + "FROM extension_marketplace_banned_artifacts ORDER BY first_seen_at,image_digest",
+                (rs, row) -> Map.of("imageDigest", rs.getString("image_digest"), "pluginId", rs.getString("first_plugin_id"),
+                        "version", rs.getString("first_version"), "releaseDescriptorDigest", rs.getString("release_descriptor_digest"),
+                        "reasonCode", rs.getString("reason_code"), "feedSequence", rs.getLong("feed_sequence"),
+                        "firstSeenAt", rs.getTimestamp("first_seen_at").toInstant())));
+        response.put("blockedTargets", jdbc.query("SELECT runtime_identity,plugin_id,instance_id,banned_image_digests::text,containment_status,last_error_code,first_blocked_at,last_attempt_at,stopped_at "
+                        + "FROM extension_security_blocked_targets ORDER BY first_blocked_at DESC", (rs, row) -> {
+                    Map<String, Object> target = new java.util.LinkedHashMap<>();
+                    target.put("runtimeIdentity", rs.getString("runtime_identity"));
+                    target.put("pluginId", rs.getString("plugin_id"));
+                    target.put("instanceId", rs.getObject("instance_id", UUID.class));
+                    target.put("bannedImageDigests", rs.getString("banned_image_digests"));
+                    target.put("containmentStatus", rs.getString("containment_status"));
+                    target.put("lastErrorCode", rs.getString("last_error_code"));
+                    target.put("firstBlockedAt", rs.getTimestamp("first_blocked_at").toInstant());
+                    target.put("lastAttemptAt", rs.getTimestamp("last_attempt_at").toInstant());
+                    target.put("stoppedAt", rs.getTimestamp("stopped_at") == null ? null : rs.getTimestamp("stopped_at").toInstant());
+                    return target;
+                }));
+        return response;
+    }
+
     @GetMapping("/catalog")
     @Transactional(readOnly = true)
     public List<DistributionPluginProvisioningService.CatalogItem> catalog(
@@ -151,6 +202,7 @@ public class ExtensionManagementController {
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody PluginManifest manifest, JwtAuthenticationToken actor) {
+        ExtensionSecurityPolicy.requireAllowed(jdbc, manifest);
         if (exists(manifest.id())) return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin is already registered"));
         ManifestValidationResponse result = validateManifest(manifest, registeredPluginIds());
         if (!result.valid()) return ResponseEntity.badRequest().body(result);
@@ -173,6 +225,7 @@ public class ExtensionManagementController {
             return ResponseEntity.badRequest().body(Map.of("message", "v2 package manifest is required"));
         }
         PluginManifest source = manifest.packageManifest();
+        ExtensionSecurityPolicy.requireAllowed(jdbc, source);
         if (exists(source.id())) return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin is already registered"));
         List<String> errors = manifestValidator.validate(manifest, coreVersion, registeredPluginIds());
         if (!errors.isEmpty()) return ResponseEntity.badRequest().body(new ManifestValidationResponse(false, coreVersion, errors));
@@ -267,6 +320,7 @@ public class ExtensionManagementController {
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ExtensionRuntimePort.RuntimeHealth instanceHealth(@PathVariable String pluginId, @PathVariable UUID instanceId) {
         InstanceRow instance = findInstance(pluginId, instanceId);
+        requireAllowed(instance.manifest());
         try {
             return runtime().healthInstance(instance.runtimeIdentity(), instance.manifest());
         } catch (RuntimeException unavailable) {
@@ -377,6 +431,7 @@ public class ExtensionManagementController {
     public ResponseEntity<?> installInstance(@PathVariable String pluginId, @PathVariable UUID instanceId,
             JwtAuthenticationToken actor) {
         InstanceRow instance = findInstance(pluginId, instanceId);
+        requireAllowed(instance.manifest());
         if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(instance.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Instance must be configured or stopped before installation"));
         }
@@ -465,6 +520,7 @@ public class ExtensionManagementController {
     public ResponseEntity<?> enableInstance(@PathVariable String pluginId, @PathVariable UUID instanceId,
             JwtAuthenticationToken actor) {
         InstanceRow instance = findInstance(pluginId, instanceId);
+        requireAllowed(instance.manifest());
         if (!Set.of("INSTALLED", "DISABLED").contains(instance.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Instance must be installed and stopped before enabling"));
         }
@@ -996,6 +1052,7 @@ public class ExtensionManagementController {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> install(@PathVariable String pluginId, JwtAuthenticationToken actor) {
         PluginRow row = findPlugin(pluginId);
+        requireAllowed(row.manifest());
         if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(row.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be configured or stopped before installation"));
         }
@@ -1024,6 +1081,7 @@ public class ExtensionManagementController {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> enable(@PathVariable String pluginId, JwtAuthenticationToken actor) {
         PluginRow row = findPlugin(pluginId);
+        requireAllowed(row.manifest());
         if (!Set.of("INSTALLED", "DISABLED").contains(row.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin must be installed and stopped before enabling"));
         }
@@ -1051,6 +1109,7 @@ public class ExtensionManagementController {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> rotateCredentials(@PathVariable String pluginId, JwtAuthenticationToken actor) {
         PluginRow row = findPlugin(pluginId);
+        requireAllowed(row.manifest());
         ExtensionRuntimePort runtime = runtime();
         boolean wasEnabled;
         String restoreState;
@@ -1094,6 +1153,7 @@ public class ExtensionManagementController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the plugin before updating it"));
         }
         if (!pluginId.equals(replacement.id())) return ResponseEntity.badRequest().body(Map.of("message", "An update must retain the registered plugin id"));
+        requireAllowed(replacement);
         if (compareVersions(replacement.version(), current.manifest().version()) <= 0) {
             return ResponseEntity.badRequest().body(Map.of("message", "Update version must be greater than the installed version"));
         }
@@ -1138,6 +1198,7 @@ public class ExtensionManagementController {
                 (rs, row) -> read(rs.getString("manifest"), PluginManifest.class), pluginId, current.manifest().version())
                 .stream().findFirst().orElse(null);
         if (previous == null) return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "No earlier plugin release is available"));
+        requireAllowed(previous);
         var configuration = configurationValidator.validate(previous, current.publicConfiguration(), current.encryptedSecrets().keySet());
         if (!configuration.valid()) return ResponseEntity.status(HttpStatus.CONFLICT).body(new ConfigurationErrorResponse(configuration.errors()));
         ExtensionRuntimePort runtime = runtime();
@@ -1222,6 +1283,7 @@ public class ExtensionManagementController {
     @PostMapping("/{pluginId}/restore")
     public ResponseEntity<?> restoreRegistration(@PathVariable String pluginId, JwtAuthenticationToken actor) {
         PluginRow row = findPlugin(pluginId);
+        requireAllowed(row.manifest());
         if (!"UNINSTALLED".equals(row.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Only an uninstalled plugin can be restored"));
         }
@@ -1247,6 +1309,7 @@ public class ExtensionManagementController {
     public InvocationResponse invoke(@PathVariable String pluginId, @RequestBody InvocationRequest request,
                                      JwtAuthenticationToken actor) {
         PluginRow row = findPlugin(pluginId);
+        requireAllowed(row.manifest());
         if (!"ENABLED".equals(row.lifecycleState())) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, "Plugin is not enabled");
         }
@@ -1336,6 +1399,10 @@ public class ExtensionManagementController {
     }
 
     private void refreshProvisioning(String pluginId) { provisioning.refreshPlugin(pluginId); }
+
+    private void requireAllowed(PluginManifest manifest) {
+        ExtensionSecurityPolicy.requireAllowed(jdbc, manifest);
+    }
 
     private void setLegacyInstanceState(String pluginId, String state) {
         jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state=?,updated_at=now() "

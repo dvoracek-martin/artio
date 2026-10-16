@@ -53,12 +53,12 @@ public class PluginEventDeliveryWorker {
                        OR (state='IN_PROGRESS' AND lease_until<now())
                     ORDER BY available_at,created_at LIMIT ? FOR UPDATE SKIP LOCKED
                 )
-                RETURNING delivery_id,backfill_run_id,plugin_id,runtime_identity,configuration_generation,runtime_credential_generation,
+                    RETURNING delivery_id,backfill_run_id,plugin_id,runtime_identity,release_id,configuration_generation,runtime_credential_generation,
                     public_configuration_snapshot::text,encrypted_secrets_snapshot::text,payload_snapshot::text,
                     attempt_count,lease_token
                 """, (rs, row) -> new Delivery(rs.getObject("delivery_id", UUID.class),
                 rs.getObject("backfill_run_id", UUID.class), rs.getString("plugin_id"),
-                rs.getString("runtime_identity"), rs.getInt("configuration_generation"), rs.getInt("runtime_credential_generation"),
+                rs.getString("runtime_identity"), rs.getLong("release_id"), rs.getInt("configuration_generation"), rs.getInt("runtime_credential_generation"),
                 rs.getString("public_configuration_snapshot"), rs.getString("encrypted_secrets_snapshot"),
                 rs.getString("payload_snapshot"), rs.getInt("attempt_count"), rs.getObject("lease_token", UUID.class)), BATCH_SIZE);
         for (Delivery delivery : deliveries) dispatch(delivery);
@@ -66,6 +66,11 @@ public class PluginEventDeliveryWorker {
 
     private void dispatch(Delivery delivery) {
         try {
+            String v2ManifestJson = jdbc.query("SELECT manifest::text FROM extension_plugin_v2_releases WHERE release_id=? AND plugin_id=?",
+                    rs -> rs.next() ? rs.getString(1) : null, delivery.releaseId(), delivery.pluginId());
+            if (v2ManifestJson == null) throw new IllegalStateException("Event delivery release manifest is unavailable");
+            var v2Manifest = mapper.readValue(v2ManifestJson, io.artio.extensions.PluginManifestV2.class);
+            ExtensionSecurityPolicy.requireAllowed(jdbc, v2Manifest.packageManifest());
             ExtensionRuntimePort runtime = runtimeProvider.getIfAvailable();
             if (runtime == null) throw new ExtensionRuntimePort.ExtensionUnavailableException("Plugin runtime is unavailable");
             Map<String, Object> configuration = new HashMap<>(mapper.readValue(delivery.publicConfiguration(), PUBLIC_CONFIG));
@@ -92,6 +97,14 @@ public class PluginEventDeliveryWorker {
                                 + "SELECT 1 FROM extension_event_deliveries WHERE backfill_run_id=? AND state<>'DELIVERED')",
                         delivery.backfillRunId(), delivery.backfillRunId());
             }
+        } catch (ExtensionSecurityPolicy.BannedArtifactException blocked) {
+            jdbc.update("UPDATE extension_event_deliveries SET state='SECURITY_BLOCKED',lease_token=NULL,lease_until=NULL,"
+                    + "last_error_code='MARKETPLACE_SECURITY_ADVISORY',updated_at=now() WHERE delivery_id=? AND state='IN_PROGRESS' AND lease_token=?",
+                    delivery.deliveryId(), delivery.leaseToken());
+            if (delivery.backfillRunId() != null) {
+                jdbc.update("UPDATE extension_event_backfill_runs SET status='PARTIAL_FAILURE' WHERE run_id=? AND status='QUEUED'",
+                        delivery.backfillRunId());
+            }
         } catch (Exception failure) {
             String errorCode = failure.getClass().getSimpleName().replaceAll("[^A-Za-z0-9_]", "");
             if (errorCode.length() > 64) errorCode = errorCode.substring(0, 64);
@@ -108,7 +121,7 @@ public class PluginEventDeliveryWorker {
         }
     }
 
-    private record Delivery(UUID deliveryId, UUID backfillRunId, String pluginId, String runtimeIdentity, int configurationGeneration,
+    private record Delivery(UUID deliveryId, UUID backfillRunId, String pluginId, String runtimeIdentity, long releaseId, int configurationGeneration,
             int runtimeCredentialGeneration,
             String publicConfiguration, String encryptedSecrets, String payload, int attemptCount, UUID leaseToken) { }
 }

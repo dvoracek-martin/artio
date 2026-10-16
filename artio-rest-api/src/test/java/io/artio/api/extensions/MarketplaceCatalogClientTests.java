@@ -117,6 +117,20 @@ class MarketplaceCatalogClientTests {
                 .hasMessageContaining("size limit");
     }
 
+    @Test
+    void fetchesTheSignedAdvisorySnapshotFromTheVersionedPublicEndpoint() throws Exception {
+        AtomicReference<String> requestUri = new AtomicReference<>();
+        server = server(exchange -> {
+            requestUri.set(exchange.getRequestURI().toString());
+            respond(exchange, 200, "{\"payload\":{},\"signature\":{}}");
+        });
+
+        byte[] snapshot = client().signedAdvisories();
+
+        assertThat(new String(snapshot, StandardCharsets.UTF_8)).contains("payload", "signature");
+        assertThat(requestUri.get()).isEqualTo("/api/v1/marketplace/security/advisories");
+    }
+
     private MarketplaceCatalogClient client() {
         return new MarketplaceCatalogClient(new ObjectMapper(), "http://127.0.0.1:" + server.getAddress().getPort());
     }

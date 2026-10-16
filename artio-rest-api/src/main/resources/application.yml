@@ -69,6 +69,9 @@ artio:
   marketplace:
     base-url: ${ARTIO_MARKETPLACE_BASE_URL:}
     trusted-keys: ${ARTIO_MARKETPLACE_TRUSTED_KEYS:}
+    advisories:
+      trusted-keys: ${ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS:}
+      poll-interval-ms: ${ARTIO_MARKETPLACE_ADVISORY_POLL_INTERVAL_MS:21600000}
   cache:
     redis:
       enabled: ${ARTIO_CACHE_REDIS_ENABLED:false}

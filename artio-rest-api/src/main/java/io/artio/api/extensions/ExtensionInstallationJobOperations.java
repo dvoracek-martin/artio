@@ -26,6 +26,7 @@ public class ExtensionInstallationJobOperations {
     @Transactional
     public JobView request(String pluginId, UUID instanceId, String runtimeIdentity, long releaseId,
             PluginManifest manifest, UUID actorId, String idempotencyKey) {
+        ExtensionSecurityPolicy.requireAllowed(jdbc, manifest);
         jdbc.query("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", rs -> { }, actorId + ":" + idempotencyKey);
         JobView existing = jdbc.query("SELECT job_id,plugin_id,instance_id FROM extension_installation_jobs WHERE requested_by=? AND idempotency_key=?",
                 rs -> rs.next() ? new JobView(rs.getObject("job_id", UUID.class), rs.getString("plugin_id"),
@@ -87,9 +88,11 @@ public class ExtensionInstallationJobOperations {
 
     @Transactional
     public JobView retry(UUID jobId) {
-        Target target = jdbc.query("SELECT plugin_id,instance_id FROM extension_installation_jobs WHERE job_id=? AND state='FAILED'",
-                rs -> rs.next() ? new Target(rs.getString("plugin_id"), rs.getObject("instance_id", UUID.class)) : null, jobId);
+        Target target = jdbc.query("SELECT plugin_id,instance_id,manifest_snapshot::text FROM extension_installation_jobs WHERE job_id=? AND state='FAILED'",
+                rs -> rs.next() ? new Target(rs.getString("plugin_id"), rs.getObject("instance_id", UUID.class),
+                        readManifest(rs.getString(3))) : null, jobId);
         if (target == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "Only failed installation jobs can be retried");
+        ExtensionSecurityPolicy.requireAllowed(jdbc, target.manifest());
         String subjectLock = "installation:" + target.pluginId() + ":" + (target.instanceId() == null ? "legacy" : target.instanceId());
         jdbc.query("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", rs -> { }, subjectLock);
         Boolean active = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM extension_installation_jobs WHERE plugin_id=? "
@@ -116,8 +119,13 @@ public class ExtensionInstallationJobOperations {
         catch (JsonProcessingException failure) { throw new IllegalArgumentException("Could not snapshot installation metadata", failure); }
     }
 
+    private PluginManifest readManifest(String json) {
+        try { return mapper.readValue(json, PluginManifest.class); }
+        catch (Exception failure) { throw new IllegalStateException("Persisted installation manifest is invalid", failure); }
+    }
+
     public record JobView(UUID jobId, String pluginId, UUID instanceId, String runtimeIdentity, String sourceKind,
             Long releaseId, String releaseDigest, String state, int attemptCount, String errorCode,
             java.time.Instant createdAt, java.time.Instant updatedAt, java.time.Instant completedAt) { }
-    private record Target(String pluginId, UUID instanceId) { }
+    private record Target(String pluginId, UUID instanceId, PluginManifest manifest) { }
 }

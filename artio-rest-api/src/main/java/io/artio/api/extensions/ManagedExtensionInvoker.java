@@ -48,6 +48,7 @@ public class ManagedExtensionInvoker {
                 rs.getString("lifecycle_state"), rs.getInt("credential_generation")), pluginId)
                 .stream().findFirst().orElseThrow(() -> new ExtensionRuntimePort.ExtensionUnavailableException("Plugin is not installed"));
         if (!"ENABLED".equals(plugin.lifecycleState())) throw new ExtensionRuntimePort.ExtensionUnavailableException("Plugin is not enabled");
+        ExtensionSecurityPolicy.requireAllowed(jdbc, plugin.manifest());
         if (!plugin.manifest().extensionPoints().contains(extensionPoint)) throw new IllegalArgumentException("Plugin does not declare the required extension point");
         String requiredPermission = requiredPermission(extensionPoint, operation);
         if (!plugin.manifest().permissions().contains(requiredPermission)) {

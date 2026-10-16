@@ -248,6 +248,7 @@ public class CommerceCapabilityInvoker {
 
     private ExtensionRuntimePort.InvocationResult call(ExtensionRuntimePort runtime, Target target, String capability,
             String operation, String idempotencyKey, String payloadJson) {
+        requireTargetAllowed(target);
         Map<String, Object> config = new HashMap<>(target.publicConfiguration());
         target.encryptedSecrets().forEach((key, value) -> config.put(key, encryption.decrypt(value)));
         return runtime.invoke(target.runtimeIdentity(), target.runtimeCredentialGeneration(), capability,
@@ -324,6 +325,7 @@ public class CommerceCapabilityInvoker {
                         + sha256(write(new Fingerprint(capabilityId, operationName, new java.util.TreeMap<>(normalizedScope), null, payload))))
                         .getBytes(StandardCharsets.UTF_8)).toString();
                 try {
+                    requireTargetAllowed(target);
                     Map<String, Object> config = new HashMap<>(target.publicConfiguration());
                     target.encryptedSecrets().forEach((name, secret) -> config.put(name, encryption.decrypt(secret)));
                     var response = runtime.invoke(target.runtimeIdentity(), target.runtimeCredentialGeneration(), capabilityId,
@@ -374,6 +376,7 @@ public class CommerceCapabilityInvoker {
         Map<String, Object> config = new HashMap<>(target.publicConfiguration());
         target.encryptedSecrets().forEach((key, value) -> config.put(key, encryption.decrypt(value)));
         try {
+            requireTargetAllowed(target);
             var result = runtime.invoke(target.runtimeIdentity(), target.runtimeCredentialGeneration(), capability,
                     operation, idempotencyKey, write(config), write(payload), DEADLINE);
             if (result.statusCode() < 200 || result.statusCode() >= 300)
@@ -395,6 +398,17 @@ public class CommerceCapabilityInvoker {
                         trimToNull(rs.getString("external_account_fingerprint")),
                         read(rs.getString("public_configuration"), OBJECTS), read(rs.getString("encrypted_secrets"), STRINGS)) : null,
                 selected.binding().bindingId(), selected.binding().instanceId());
+    }
+
+    private void requireTargetAllowed(Target target) {
+        String manifest = jdbc.query("SELECT manifest::text FROM extension_plugin_v2_releases WHERE release_id=? AND plugin_id=?",
+                rs -> rs.next() ? rs.getString(1) : null, target.releaseId(), target.pluginId());
+        if (manifest == null) throw new ExtensionRuntimePort.ExtensionUnavailableException("Plugin release is unavailable");
+        try {
+            ExtensionSecurityPolicy.requireAllowed(jdbc, mapper.readValue(manifest, io.artio.extensions.PluginManifestV2.class).packageManifest());
+        } catch (java.io.IOException invalid) {
+            throw new IllegalStateException("Persisted plugin release manifest is invalid", invalid);
+        }
     }
 
     private Attempt findAttempt(String capability, String operation, String key) {

@@ -1,7 +1,9 @@
 package io.artio.api.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.junit.jupiter.api.Test;
@@ -10,7 +12,17 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.beans.factory.ObjectProvider;
+import java.util.List;
+import java.util.Map;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.api.payments.PaymentWebhookReceiptRetentionWorker;
+import io.artio.api.extensions.MarketplaceAdvisoryStore;
+import io.artio.api.extensions.SignedMarketplaceAdvisoryVerifier;
 
 /** Exercises the supported clean installation against PostgreSQL. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -193,10 +205,82 @@ class MigrationIntegrationTests {
                 .isEqualTo(1);
     }
 
+    @Test
+    void persistsMonotonicAdvisoriesAndNeverRemovesAnExactDigestBan() throws Exception {
+        try (var postgres = new PostgreSQLContainer<>("postgres:16-alpine")) {
+            postgres.start();
+            Flyway cleanInstall = flyway(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).load();
+            cleanInstall.migrate();
+            JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
+            var store = new MarketplaceAdvisoryStore(jdbc, new ObjectMapper());
+            String imageDigest = "sha256:" + "b".repeat(64);
+            var first = advisorySnapshot(1, "a".repeat(64), List.of(imageDigest), "BANNED", "BANNED");
+
+            assertThat(store.apply(first).changed()).isTrue();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_marketplace_banned_artifacts WHERE image_digest=?",
+                    Integer.class, imageDigest)).isEqualTo(1);
+
+            var later = advisorySnapshot(2, "c".repeat(64), List.of(), "SUPPORTED", "ALLOWED");
+            assertThat(store.apply(later).sequence()).isEqualTo(2);
+            assertThat(store.status().sequence()).isEqualTo(2);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_marketplace_banned_artifacts WHERE image_digest=?",
+                    Integer.class, imageDigest)).isEqualTo(1);
+            assertThatThrownBy(() -> store.apply(advisorySnapshot(2, "d".repeat(64), List.of(), "SUPPORTED", "ALLOWED")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("different content");
+            assertThatThrownBy(() -> jdbc.update("DELETE FROM extension_marketplace_banned_artifacts WHERE image_digest=?", imageDigest))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+
+            String manifestJson = new ObjectMapper().writeValueAsString(Map.of(
+                    "manifestVersion", "1.0", "id", "security.plugin", "name", "Security plugin", "vendor", "Artio",
+                    "version", "1.0.0", "description", "test", "minimumCoreVersion", "1.0.0", "maximumCoreVersion", "9.0.0",
+                    "image", "registry.example/public/plugins/security@" + imageDigest));
+            jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES ('security.plugin',?::jsonb,?,'ENABLED')",
+                    manifestJson, "registry.example/public/plugins/security@" + imageDigest);
+            var runtime = mock(ExtensionRuntimePort.class);
+            @SuppressWarnings("unchecked")
+            ObjectProvider<ExtensionRuntimePort> runtimeProvider = mock(ObjectProvider.class);
+            when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+            var containment = new io.artio.api.extensions.ExtensionSecurityContainmentWorker(jdbc, new ObjectMapper(), runtimeProvider);
+            containment.reconcile();
+            verify(runtime).disable("security.plugin");
+            assertThat(jdbc.queryForObject("SELECT containment_status FROM extension_security_blocked_targets WHERE plugin_id='security.plugin'", String.class))
+                    .isEqualTo("STOPPED");
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id='security.plugin'", String.class))
+                    .isEqualTo("ENABLED");
+
+            jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES ('security.failure',?::jsonb,?,'ENABLED')",
+                    manifestJson.replace("security.plugin", "security.failure"), "registry.example/public/plugins/security@" + imageDigest);
+            doThrow(new IllegalStateException("runtime unavailable")).when(runtime).disable("security.failure");
+            containment.reconcile();
+            assertThat(jdbc.queryForObject("SELECT containment_status FROM extension_security_blocked_targets WHERE plugin_id='security.failure'", String.class))
+                    .isEqualTo("STOP_FAILED");
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id='security.failure'", String.class))
+                    .isEqualTo("ENABLED");
+        }
+    }
+
     private static FluentConfiguration flyway(String url) {
         return Flyway.configure()
                 .dataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration");
+    }
+
+    private static FluentConfiguration flyway(String url, String username, String password) {
+        return Flyway.configure().dataSource(url, username, password).locations("classpath:db/migration");
+    }
+
+    private static SignedMarketplaceAdvisoryVerifier.VerifiedSnapshot advisorySnapshot(
+            long sequence, String payloadHash, List<String> banned, String status, String securityStatus) {
+        var advisory = new SignedMarketplaceAdvisoryVerifier.Advisory(
+                java.util.UUID.fromString("a16974a8-e9ad-405a-8418-a0e1dd23c135"), "shipping.demo", "1.2.3",
+                "sha256:" + "a".repeat(64), banned.isEmpty() ? List.of("sha256:" + "b".repeat(64)) : banned,
+                banned, "SUPPORTED", securityStatus, status, "INFO", securityStatus.equals("BANNED") ? "SECURITY_REVOKED" : "SUPPORTED_RELEASE",
+                java.util.Map.of("en", "Release status."), java.time.Instant.parse("2026-10-16T12:00:00Z"), sequence);
+        return new SignedMarketplaceAdvisoryVerifier.VerifiedSnapshot(sequence,
+                java.time.Instant.parse("2026-10-16T12:00:00Z"), java.time.Instant.parse("2026-10-17T12:00:00Z"),
+                payloadHash, List.of(advisory));
     }
 
 }

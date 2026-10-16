@@ -47,11 +47,13 @@ public class ExtensionInstallationJobWorker {
     }
 
     private void install(InstallJob job) {
+        PluginManifest manifest = null;
         try {
+            manifest = mapper.readValue(job.manifestJson(), PluginManifest.class);
+            if (!job.pluginId().equals(manifest.id())) throw new IllegalStateException("Installation manifest identity changed");
+            ExtensionSecurityPolicy.requireAllowed(jdbc, manifest);
             ExtensionRuntimePort runtime = runtimeProvider.getIfAvailable();
             if (runtime == null) throw new ExtensionRuntimePort.ExtensionUnavailableException("Plugin runtime is unavailable");
-            PluginManifest manifest = mapper.readValue(job.manifestJson(), PluginManifest.class);
-            if (!job.pluginId().equals(manifest.id())) throw new IllegalStateException("Installation manifest identity changed");
             if (!transition(job, "VERIFYING_SOURCE")) return;
             List<String> permissionSnapshot = mapper.readValue(job.permissionJson(), PermissionSnapshot.class).permissions();
             List<java.util.Map<String, String>> imageSnapshot = mapper.readValue(job.imageJson(), IMAGE_LIST);
@@ -76,6 +78,10 @@ public class ExtensionInstallationJobWorker {
                         + "WHERE instance_id=? AND lifecycle_state IN ('CONFIGURED','FAILED')", job.instanceId());
             }
             jdbc.update("UPDATE extension_installation_jobs SET state='INSTALLED',lease_token=NULL,lease_until=NULL,error_code=NULL,"
+                            + "completed_at=now(),updated_at=now() WHERE job_id=? AND lease_token=?",
+                    job.jobId(), job.leaseToken());
+        } catch (ExtensionSecurityPolicy.BannedArtifactException blocked) {
+            jdbc.update("UPDATE extension_installation_jobs SET state='SECURITY_BLOCKED',lease_token=NULL,lease_until=NULL,error_code='MARKETPLACE_SECURITY_ADVISORY',"
                             + "completed_at=now(),updated_at=now() WHERE job_id=? AND lease_token=?",
                     job.jobId(), job.leaseToken());
         } catch (Exception failure) {
