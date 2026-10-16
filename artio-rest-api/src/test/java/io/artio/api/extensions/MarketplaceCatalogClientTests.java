@@ -8,7 +8,13 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
+import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
+import java.security.Signature;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.HexFormat;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +57,52 @@ class MarketplaceCatalogClientTests {
         assertThat(((java.util.Map<?, ?>) manifest).get("id")).isEqualTo("shipping.demo");
         assertThat(requestUri.get()).startsWith("/api/v1/marketplace/plugins/shipping.demo/releases/1.2.3/manifest?");
         assertThat(requestUri.get()).contains("coreVersion=1.4.2", "country=CH");
+    }
+
+    @Test
+    void fetchesAndVerifiesTheSignedDescriptorBeforeReturningIt() throws Exception {
+        var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        ObjectMapper mapper = new ObjectMapper();
+        var manifest = mapper.createObjectNode();
+        String image = "registry.example/public/plugins/shipping-demo@sha256:" + "b".repeat(64);
+        manifest.put("id", "shipping.demo");
+        manifest.put("version", "1.2.3");
+        manifest.put("image", image);
+        var descriptor = mapper.createObjectNode();
+        descriptor.put("schemaVersion", 1);
+        descriptor.put("pluginId", "shipping.demo");
+        descriptor.put("version", "1.2.3");
+        descriptor.put("manifestDigest", "sha256:" + HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(io.artio.extensions.ReleaseDescriptorCanonicalizer
+                        .canonicalBytes(mapper.writeValueAsString(manifest)))));
+        descriptor.set("manifest", manifest);
+        var images = descriptor.putArray("images");
+        var imageRecord = images.addObject();
+        imageRecord.put("role", "MAIN");
+        imageRecord.put("repository", image.substring(0, image.lastIndexOf('@')));
+        imageRecord.put("digest", image.substring(image.lastIndexOf('@') + 1));
+        byte[] canonical = io.artio.extensions.ReleaseDescriptorCanonicalizer.canonicalBytes(mapper.writeValueAsString(descriptor));
+        Signature signer = Signature.getInstance("Ed25519");
+        signer.initSign(keys.getPrivate());
+        signer.update(canonical);
+        String envelope = mapper.writeValueAsString(Map.of(
+                "descriptor", descriptor,
+                "signature", Map.of("algorithm", "Ed25519", "keyId", "test-root",
+                        "value", Base64.getUrlEncoder().withoutPadding().encodeToString(signer.sign()))));
+        AtomicReference<String> requestUri = new AtomicReference<>();
+        server = server(exchange -> {
+            requestUri.set(exchange.getRequestURI().toString());
+            respond(exchange, 200, envelope);
+        });
+        var verifier = new OfficialReleaseDescriptorVerifier("test-root="
+                + Base64.getUrlEncoder().withoutPadding().encodeToString(keys.getPublic().getEncoded()));
+        var client = new MarketplaceCatalogClient(mapper,
+                "http://127.0.0.1:" + server.getAddress().getPort(), verifier);
+
+        var result = (java.util.Map<?, ?>) client.releaseDescriptor("shipping.demo", "1.2.3");
+
+        assertThat(result.get("pluginId")).isEqualTo("shipping.demo");
+        assertThat(requestUri.get()).isEqualTo("/api/v1/marketplace/plugins/shipping.demo/releases/1.2.3/descriptor");
     }
 
     @Test

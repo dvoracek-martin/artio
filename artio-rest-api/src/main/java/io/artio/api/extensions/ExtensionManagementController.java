@@ -140,6 +140,12 @@ public class ExtensionManagementController {
         return marketplace.releaseManifest(pluginId, version, coreVersion, country, includePrerelease);
     }
 
+    @GetMapping("/marketplace/plugins/{pluginId}/releases/{version}/descriptor")
+    @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public Object marketplaceReleaseDescriptor(@PathVariable String pluginId, @PathVariable String version) {
+        return marketplace.releaseDescriptor(pluginId, version);
+    }
+
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody PluginManifest manifest, JwtAuthenticationToken actor) {
         if (exists(manifest.id())) return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Plugin is already registered"));

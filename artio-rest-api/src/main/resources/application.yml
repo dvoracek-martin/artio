@@ -68,6 +68,7 @@ artio:
     token: ${ARTIO_SETUP_TOKEN:}
   marketplace:
     base-url: ${ARTIO_MARKETPLACE_BASE_URL:}
+    trusted-keys: ${ARTIO_MARKETPLACE_TRUSTED_KEYS:}
   cache:
     redis:
       enabled: ${ARTIO_CACHE_REDIS_ENABLED:false}

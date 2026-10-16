@@ -21,15 +21,19 @@ import org.springframework.web.server.ResponseStatusException;
 public final class MarketplaceCatalogClient {
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private final ObjectMapper mapper;
+    private final OfficialReleaseDescriptorVerifier descriptorVerifier;
     private final String baseUrl;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(3))
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public MarketplaceCatalogClient(ObjectMapper mapper,
-            @Value("${artio.marketplace.base-url:}") String baseUrl) {
+            @Value("${artio.marketplace.base-url:}") String baseUrl,
+            OfficialReleaseDescriptorVerifier descriptorVerifier) {
         this.mapper = mapper;
+        this.descriptorVerifier = descriptorVerifier;
         this.baseUrl = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
         if (!this.baseUrl.isEmpty()) {
             URI uri = URI.create(this.baseUrl);
@@ -38,6 +42,10 @@ public final class MarketplaceCatalogClient {
                 throw new IllegalArgumentException("artio.marketplace.base-url must be an absolute HTTP(S) URL without credentials, query or fragment");
             }
         }
+    }
+
+    public MarketplaceCatalogClient(ObjectMapper mapper, String baseUrl) {
+        this(mapper, baseUrl, new OfficialReleaseDescriptorVerifier(""));
     }
 
     public Object plugins(String q, String category, String country, String coreVersion,
@@ -66,6 +74,47 @@ public final class MarketplaceCatalogClient {
         query.put("includePrerelease", Boolean.toString(includePrerelease));
         return get("/api/v1/marketplace/plugins/" + pathSegment(pluginId) + "/releases/"
                 + pathSegment(version) + "/manifest", query);
+    }
+
+    /** Fetch and locally verify the signed, immutable official release descriptor. */
+    public Object releaseDescriptor(String pluginId, String version) {
+        if (pluginId == null || !pluginId.matches("[a-z0-9][a-z0-9._-]{0,127}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pluginId is invalid");
+        if (version == null || !version.matches("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "version must be a semantic version");
+        byte[] bytes = getBytes("/api/v1/marketplace/plugins/" + pathSegment(pluginId) + "/releases/"
+                + pathSegment(version) + "/descriptor");
+        var descriptor = descriptorVerifier.verify(bytes, pluginId, version);
+        try {
+            return mapper.readValue(mapper.writeValueAsBytes(descriptor), Object.class);
+        } catch (Exception failure) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Verified Marketplace descriptor could not be decoded");
+        }
+    }
+
+    private byte[] getBytes(String path) {
+        if (baseUrl.isBlank())
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Marketplace is not configured");
+        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .timeout(Duration.ofSeconds(20)).header("Accept", "application/json").GET().build();
+        try {
+            HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream body = response.body()) {
+                if (response.statusCode() < 200 || response.statusCode() >= 300)
+                    throw new ResponseStatusException(response.statusCode() == 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_GATEWAY,
+                            "Signed Marketplace release descriptor is unavailable");
+                byte[] bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1);
+                if (bytes.length > MAX_RESPONSE_BYTES)
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Marketplace response exceeded the size limit");
+                return bytes;
+            }
+        } catch (ResponseStatusException failure) { throw failure; }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Marketplace request was interrupted");
+        } catch (Exception failure) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Marketplace could not be reached");
+        }
     }
 
     private Object get(String path, Map<String, String> query) {

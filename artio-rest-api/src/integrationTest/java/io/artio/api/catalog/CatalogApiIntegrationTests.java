@@ -576,10 +576,12 @@ class CatalogApiIntegrationTests {
     void importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured() throws Exception {
         String marketplacePluginId = System.getenv("ARTIO_MARKETPLACE_TEST_PLUGIN_ID");
         String marketplaceVersion = System.getenv("ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION");
+        String marketplaceTrustedKeys = System.getenv("ARTIO_MARKETPLACE_TRUSTED_KEYS");
         assumeTrue(marketplacePluginId != null && !marketplacePluginId.isBlank()
                 && marketplaceVersion != null && !marketplaceVersion.isBlank()
-                && System.getenv("ARTIO_MARKETPLACE_BASE_URL") != null,
-                "Set ARTIO_MARKETPLACE_BASE_URL, ARTIO_MARKETPLACE_TEST_PLUGIN_ID and ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION for live Marketplace acceptance");
+                && System.getenv("ARTIO_MARKETPLACE_BASE_URL") != null
+                && marketplaceTrustedKeys != null && !marketplaceTrustedKeys.isBlank(),
+                "Set Marketplace URL, release identity and trusted signing key for live signed-descriptor acceptance");
 
         var listing = adminExchange("/api/v1/admin/extensions/marketplace/plugins?q=reference",
                 HttpMethod.GET, null, Map.class);
@@ -587,11 +589,15 @@ class CatalogApiIntegrationTests {
         assertThat(listing.getBody()).isNotNull();
         assertThat(listing.getBody().get("content").toString()).contains(marketplacePluginId);
 
-        var fetched = adminExchange("/api/v1/admin/extensions/marketplace/plugins/{id}/releases/{version}/manifest?country=US",
+        var fetched = adminExchange("/api/v1/admin/extensions/marketplace/plugins/{id}/releases/{version}/descriptor",
                 HttpMethod.GET, null, Map.class, marketplacePluginId, marketplaceVersion);
         assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(fetched.getBody()).isNotNull();
-        var manifestJson = mapper.valueToTree(fetched.getBody());
+        var descriptorJson = mapper.valueToTree(fetched.getBody());
+        assertThat(descriptorJson.path("pluginId").asText()).isEqualTo(marketplacePluginId);
+        assertThat(descriptorJson.path("version").asText()).isEqualTo(marketplaceVersion);
+        assertThat(descriptorJson.path("images").size()).isGreaterThanOrEqualTo(1);
+        var manifestJson = descriptorJson.path("manifest");
         String pluginId;
         if (manifestJson.has("packageManifest")) {
             var manifest = mapper.treeToValue(manifestJson, io.artio.extensions.PluginManifestV2.class);
