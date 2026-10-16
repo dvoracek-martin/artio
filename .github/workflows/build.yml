@@ -61,6 +61,9 @@ jobs:
       - name: Verify notification provider plugin container
         shell: pwsh
         run: ./scripts/verify-notification-provider-container.ps1
+      - name: Verify Swiss Post shipping plugin container
+        shell: pwsh
+        run: ./scripts/verify-swiss-post-provider-container.ps1
       - name: Build API container
         run: docker build -f artio-docker/Dockerfile -t artio/api:${GITHUB_SHA} .
       - name: Build storefront container

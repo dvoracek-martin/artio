@@ -24,6 +24,7 @@ OAuth token responses are cached only until 30 seconds before their `expires_in`
 
 ```powershell
 python -m unittest discover -s artio-plugins/swiss-post -p 'test_*.py' -v
+./scripts/verify-swiss-post-provider-container.ps1
 ```
 
-The tests mock provider responses. They verify quote mapping, label idempotency and uncertainty handling; they do not verify Swiss Post's live service.
+The unit tests mock provider responses. The restricted Docker acceptance verifies health, authentication, Swiss domestic quotes, and that a no-network ambiguous label attempt remains blocked after a container restart using a temporary plugin-owned volume. Both run without real credentials and do not verify Swiss Post's live service; the acceptance script removes only its own image, container and volume.
