@@ -24,7 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/orders")
+@RequestMapping("/api/v1/admin/orders")
 public class OrderFulfillmentController {
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;

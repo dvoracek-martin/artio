@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/products/{productId}/variants")
+@RequestMapping("/api/v1/products/{productId}/variants")
 public class VariantController {
     private final VariantApplicationService variants;
 
@@ -31,7 +31,7 @@ public class VariantController {
     public ResponseEntity<VariantResponse> create(@PathVariable UUID productId,
                                                    @RequestBody VariantRequest request) {
         var variant = variants.create(productId, request);
-        return ResponseEntity.created(URI.create("/api/products/" + productId + "/variants/" + variant.id()))
+        return ResponseEntity.created(URI.create("/api/v1/products/" + productId + "/variants/" + variant.id()))
                 .body(variant);
     }
 }

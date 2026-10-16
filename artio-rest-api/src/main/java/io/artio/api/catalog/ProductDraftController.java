@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 /** Creates the wizard's product, classification and first variant as one transaction. */
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@RequestMapping("/api/products/drafts")
+@RequestMapping("/api/v1/products/drafts")
 public class ProductDraftController {
     private final ProductApplicationService products;
     private final VariantApplicationService variants;

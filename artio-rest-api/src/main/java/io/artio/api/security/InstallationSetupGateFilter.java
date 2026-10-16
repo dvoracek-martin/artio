@@ -25,7 +25,7 @@ final class InstallationSetupGateFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return !path.startsWith("/api/") || path.startsWith("/api/setup/") || path.startsWith("/api/v1/setup/");
+        return !path.startsWith("/api/v1/") || path.startsWith("/api/v1/setup/") || path.startsWith("/api/v1/setup/");
     }
 
     @Override

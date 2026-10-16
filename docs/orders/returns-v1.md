@@ -12,7 +12,7 @@ Artio separates merchandise returns from payment refunds. A return request track
 
 ## Staff routes
 
-- `GET /api/v1/admin/orders/{orderId}/returns` lists requests for an order. ADMIN or SUPERADMIN is required by the `/api/admin/**` authorization rule.
+- `GET /api/v1/admin/orders/{orderId}/returns` lists requests for an order. ADMIN or SUPERADMIN is required by the `/api/v1/admin/**` authorization rule.
 - `POST /api/v1/admin/orders/{orderId}/returns/{returnId}/review` accepts `{ "approve": true|false, "note": "…" }`. Only `REQUESTED` requests can be reviewed. Repeated identical decisions are safe; opposing or later decisions return `409`.
 - `POST /api/v1/admin/orders/{orderId}/returns/{returnId}/receive` accepts `{ "restock": true|false, "warehouseId": "…", "note": "…" }`. Only approved requests can be received. When restocking is selected, a warehouse is mandatory and the returned variant quantity is received through the inventory application service in the same transaction. Receipt is idempotent after completion. A full return changes fulfillment status to `RETURNED`; partial returns leave the order's fulfillment state intact.
 

@@ -73,7 +73,7 @@ Community starts with no issuer trust file, signed document or refresh endpoint.
 
 `ARTIO_LICENSE_REFRESH_URL` optionally configures the HTTPS issuer endpoint. `ARTIO_LICENSE_REFRESH_CREDENTIAL_FILE` optionally names a protected bearer credential file, usually in the same secret volume. The token is never an environment-variable value. `ARTIO_LICENSE_REFRESH_INTERVAL_SECONDS` defaults to `21600`. These refresh settings apply to the API process only; workers evaluate the shared local state.
 
-All following canonical management routes require an authenticated SUPERADMIN (the `/api/...` compatibility alias remains available):
+All following canonical management routes require an authenticated SUPERADMIN (all routes use the `/api/v1/...` prefix):
 
 | Method and route | Behavior |
 |---|---|

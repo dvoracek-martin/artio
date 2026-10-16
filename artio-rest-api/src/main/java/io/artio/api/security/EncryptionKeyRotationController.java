@@ -17,7 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Rewraps persisted application ciphertext using the currently configured active key. No key material is accepted over HTTP. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/system/security/encryption")
+@RequestMapping("/api/v1/admin/system/security/encryption")
 public class EncryptionKeyRotationController {
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() { };
     private final JdbcTemplate jdbc;

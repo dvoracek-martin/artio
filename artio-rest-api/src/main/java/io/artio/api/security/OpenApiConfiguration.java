@@ -6,7 +6,6 @@ import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
-import java.util.ArrayList;
 import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,8 +21,7 @@ public class OpenApiConfiguration {
                 .info(new Info()
                         .title("Artio Core API")
                         .version("0.1.0")
-                        .description("Generated REST contract for Artio Core API v1. Use /api/v1 paths. "
-                                + "Unversioned /api routes remain compatibility aliases."))
+                        .description("Generated REST contract for Artio Core API v1. All REST routes use /api/v1."))
                 .components(new Components().addSecuritySchemes(BEARER_SCHEME,
                         new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")));
     }
@@ -39,31 +37,22 @@ public class OpenApiConfiguration {
                     }
                 });
             });
-            var versionedPaths = new ArrayList<java.util.Map.Entry<String, PathItem>>();
-            openApi.getPaths().forEach((path, pathItem) -> {
-                if ("/api".equals(path)) {
-                    versionedPaths.add(java.util.Map.entry("/api/v1", pathItem));
-                } else if (path.startsWith("/api/")) {
-                    versionedPaths.add(java.util.Map.entry("/api/v1" + path.substring("/api".length()), pathItem));
-                }
-            });
-            versionedPaths.forEach(entry -> openApi.getPaths().addPathItem(entry.getKey(), entry.getValue()));
         };
     }
 
     private static boolean isPublic(String path, PathItem.HttpMethod method) {
         if ("/graphql".equals(path)) return true;
         if (method == PathItem.HttpMethod.POST
-                && ("/api/auth/register".equals(path)
-                || "/api/auth/login".equals(path)
-                || "/api/payments/provider/webhook".equals(path)
-                || "/api/pricing/quote".equals(path))) return true;
-        if (path.startsWith("/api/public/")) return true;
+                && ("/api/v1/auth/register".equals(path)
+                || "/api/v1/auth/login".equals(path)
+                || "/api/v1/payments/provider/webhook".equals(path)
+                || "/api/v1/pricing/quote".equals(path))) return true;
+        if (path.startsWith("/api/v1/public/")) return true;
         return method == PathItem.HttpMethod.GET
-                && (path.equals("/api/products") || path.startsWith("/api/products/")
-                || path.equals("/api/categories") || path.startsWith("/api/categories/")
-                || path.equals("/api/brands") || path.startsWith("/api/brands/")
-                || path.equals("/api/attributes") || path.startsWith("/api/attributes/")
-                || path.equals("/api/bundles") || path.startsWith("/api/bundles/"));
+                && (path.equals("/api/v1/products") || path.startsWith("/api/v1/products/")
+                || path.equals("/api/v1/categories") || path.startsWith("/api/v1/categories/")
+                || path.equals("/api/v1/brands") || path.startsWith("/api/v1/brands/")
+                || path.equals("/api/v1/attributes") || path.startsWith("/api/v1/attributes/")
+                || path.equals("/api/v1/bundles") || path.startsWith("/api/v1/bundles/"));
     }
 }

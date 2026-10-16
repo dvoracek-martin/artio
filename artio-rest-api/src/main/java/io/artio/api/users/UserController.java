@@ -20,10 +20,10 @@ public class UserController {
     private final JdbcTemplate jdbc;
     public UserController(JdbcTemplate jdbc){this.jdbc=jdbc;}
 
-    @GetMapping("/api/users/me")
+    @GetMapping("/api/v1/users/me")
     public UserView me(JwtAuthenticationToken auth){return find(UUID.fromString(auth.getToken().getSubject()));}
 
-    @GetMapping("/api/admin/users")
+    @GetMapping("/api/v1/admin/users")
     public List<UserView> users(@RequestParam(defaultValue="") String q,@RequestParam(defaultValue="ALL") String activity,
             @RequestParam(defaultValue="100") int limit,@RequestParam(defaultValue="0") int offset){
         if(q.length()>120||limit<1||limit>200||offset<0||offset>1_000_000)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid customer search bounds");
@@ -38,16 +38,16 @@ public class UserController {
                 q.trim(),pattern,pattern,pattern,filter,filter,filter,filter,limit,offset);
     }
 
-    @PutMapping("/api/admin/users/{id}/active")
+    @PutMapping("/api/v1/admin/users/{id}/active")
     public UserView active(@PathVariable UUID id,@RequestBody ActiveRequest request,JwtAuthenticationToken auth){
         if(id.toString().equals(auth.getToken().getSubject()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Administrators cannot deactivate their own account");
         int changed=jdbc.update("UPDATE users SET active=? WHERE id=?",request.active(),id);if(changed==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found");return find(id);
     }
 
-    @PutMapping("/api/admin/users/{id}/email-verification")
+    @PutMapping("/api/v1/admin/users/{id}/email-verification")
     public UserView verified(@PathVariable UUID id,@RequestBody VerificationRequest request){int changed=jdbc.update("UPDATE users SET email_verified=? WHERE id=?",request.verified(),id);if(changed==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found");return find(id);}
 
-    @PutMapping("/api/admin/users/{id}/role")
+    @PutMapping("/api/v1/admin/users/{id}/role")
     public UserView role(@PathVariable UUID id,@RequestBody RoleRequest request,JwtAuthenticationToken auth){
         requireSuperadmin(auth,"Only a superadmin can assign roles");
         if(request==null||request.role()==null||!Set.of("CUSTOMER","ADMIN","SUPERADMIN").contains(request.role()))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Unknown role");
@@ -55,7 +55,7 @@ public class UserController {
         int changed=jdbc.update("UPDATE users SET role=?,permissions=CASE WHEN ?<>'ADMIN' OR btrim(permissions)='' THEN 'NONE' ELSE permissions END WHERE id=?",request.role(),request.role(),id);if(changed==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found");return find(id);
     }
 
-    @PutMapping("/api/admin/users/{id}/permissions")
+    @PutMapping("/api/v1/admin/users/{id}/permissions")
     public UserView permissions(@PathVariable UUID id,@RequestBody PermissionsRequest request){
         var authentication=org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         if(authentication==null||authentication.getAuthorities().stream().noneMatch(a->a.getAuthority().equals("ROLE_SUPERADMIN")))throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Only a superadmin can change global permissions");
@@ -67,7 +67,7 @@ public class UserController {
         int changed=jdbc.update("UPDATE users SET permissions=? WHERE id=?",stored,id);if(changed==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"User not found");return find(id);
     }
 
-    @PutMapping("/api/admin/users/{id}/access")
+    @PutMapping("/api/v1/admin/users/{id}/access")
     @Transactional
     public UserView access(@PathVariable UUID id,@RequestBody AccessRequest request,JwtAuthenticationToken auth){
         requireSuperadmin(auth,"Only a superadmin can assign account access");

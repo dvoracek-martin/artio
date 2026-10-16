@@ -8,7 +8,7 @@ The Backoffice uses the shared [Artio visual identity](../BRAND_IDENTITY.md): So
 
 The browser uploads selected images sequentially through the existing validated product media API. Activation, if selected, happens after all uploads succeed. During a failed upload, the current wizard retains the created product ID and completed uploads; Retry skips both product creation and completed uploads. Rejected pending images can be removed or replaced from the review step, while completed uploads remain protected. Returning to Products leaves the draft available for the existing media manager. Refreshing or leaving the page discards unsaved browser fields/files; uploaded media and the saved draft remain on the server. Leaving during an upload prevents the wizard from starting further uploads or activation once that in-flight request returns.
 
-For standalone Angular development, `npm start` in `artio-backoffice` listens on port 4201 and proxies `/api` to `http://localhost:8080`. Set `ARTIO_DEV_API_URL` before starting it to use another API endpoint. Deployed nginx continues to provide same-origin API access.
+For standalone Angular development, `npm start` in `artio-backoffice` listens on port 4201 and proxies `/api/v1` to `http://localhost:8080`. Set `ARTIO_DEV_API_URL` before starting it to use another API endpoint. Deployed nginx continues to provide same-origin API access.
 
 ## Verification (2026-10-14)
 

@@ -135,7 +135,7 @@ class PackagedExtensionControllerIntegrationTests {
                         .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json")
                         .header("Authorization", "Bearer " + TEST_TOKEN).POST(chunked)
                         .build(), HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(413);
-                for (String route : List.of("graphql", "api/products", "v3/api-docs")) {
+                for (String route : List.of("graphql", "api/v1/products", "v3/api-docs")) {
                     assertThat(http.send(HttpRequest.newBuilder(URI.create(base + route)).timeout(Duration.ofSeconds(5))
                             .GET().build(), HttpResponse.BodyHandlers.discarding()).statusCode()).as(route).isEqualTo(404);
                 }

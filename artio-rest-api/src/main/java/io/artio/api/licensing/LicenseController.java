@@ -14,7 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@RequestMapping("/api/admin/system/license")
+@RequestMapping("/api/v1/admin/system/license")
 public final class LicenseController {
     private final LicensingService licensing;
     public LicenseController(LicensingService licensing) { this.licensing = licensing; }

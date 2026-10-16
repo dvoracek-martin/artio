@@ -23,7 +23,7 @@ import org.springframework.http.HttpStatus;
 /** Read-only, bounded order search and detail views for authorized Backoffice staff. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/orders")
+@RequestMapping("/api/v1/admin/orders")
 public class AdminOrderQueryController {
     private static final int MAX_PAGE_SIZE = 100;
     private final JdbcTemplate jdbc;

@@ -18,7 +18,7 @@ public class CustomerOrderController {
     private final JdbcTemplate jdbc;
     public CustomerOrderController(JdbcTemplate jdbc) { this.jdbc=jdbc; }
 
-    @GetMapping("/api/orders/{orderId}/items")
+    @GetMapping("/api/v1/orders/{orderId}/items")
     public List<CustomerOrderLine> items(@PathVariable UUID orderId, JwtAuthenticationToken auth) {
         UUID customerId=UUID.fromString(auth.getToken().getSubject());
         if(jdbc.query("SELECT 1 FROM orders WHERE id=? AND user_id=?",(rs,row)->rs.getInt(1),orderId,customerId).isEmpty())

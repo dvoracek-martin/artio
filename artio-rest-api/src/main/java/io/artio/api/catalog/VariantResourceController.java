@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/variants")
+@RequestMapping("/api/v1/variants")
 public class VariantResourceController {
     private final VariantApplicationService variants;
 

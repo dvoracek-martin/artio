@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin")
+@RequestMapping("/api/v1/admin")
 public class ReportingController {
     private final JdbcTemplate jdbc;
     private final ReportingService reporting;

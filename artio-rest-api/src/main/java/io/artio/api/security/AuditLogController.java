@@ -12,7 +12,7 @@ import org.springframework.http.HttpStatus;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/audit-logs")
+@RequestMapping("/api/v1/admin/audit-logs")
 public class AuditLogController {
     private final JdbcTemplate jdbc;
     public AuditLogController(JdbcTemplate jdbc){this.jdbc=jdbc;}

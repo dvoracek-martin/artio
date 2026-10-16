@@ -22,7 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/auth/mfa/totp")
+@RequestMapping("/api/v1/auth/mfa/totp")
 public class MfaController {
     private final JdbcTemplate jdbc;
     private final EncryptionService encryption;

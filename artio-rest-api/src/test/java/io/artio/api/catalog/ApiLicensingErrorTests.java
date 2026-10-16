@@ -11,7 +11,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 class ApiLicensingErrorTests {
     @Test
     void unavailableFeatureReturnsStable403CodeAndOriginalVersionedPath() {
-        var request = new MockHttpServletRequest("GET", "/api/admin/reports/advanced");
+        var request = new MockHttpServletRequest("GET", "/api/v1/admin/reports/advanced");
         request.setAttribute(ApiVersioningFilter.ORIGINAL_REQUEST_PATH_ATTRIBUTE, "/api/v1/admin/reports/advanced");
         var result = new ApiExceptionHandler().notLicensed(new FeatureNotLicensedException(EnterpriseFeature.ADVANCED_REPORTING), request);
         assertThat(result.getStatusCode().value()).isEqualTo(403);

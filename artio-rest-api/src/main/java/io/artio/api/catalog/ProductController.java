@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/products")
+@RequestMapping("/api/v1/products")
 public class ProductController {
     private final ProductApplicationService products;
 
@@ -46,13 +46,13 @@ public class ProductController {
     @PostMapping
     public ResponseEntity<ProductResponse> create(@RequestBody ProductRequest request) {
         var product = products.create(request);
-        return ResponseEntity.created(URI.create("/api/products/" + product.id())).body(product);
+        return ResponseEntity.created(URI.create("/api/v1/products/" + product.id())).body(product);
     }
 
     @PostMapping("/{id}/duplicate")
     public ResponseEntity<ProductResponse> duplicate(@PathVariable UUID id,@RequestBody ProductRequest request){
         var product=products.duplicate(id,request);
-        return ResponseEntity.created(URI.create("/api/products/"+product.id())).body(product);
+        return ResponseEntity.created(URI.create("/api/v1/products/"+product.id())).body(product);
     }
 
     @PutMapping("/{id}")

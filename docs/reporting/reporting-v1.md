@@ -1,6 +1,6 @@
 # Operational reports v1
 
-All routes require ADMIN or SUPERADMIN. Canonical paths use `/api/v1`; the `/api` compatibility alias remains supported. Responses are read-only and assembled under a PostgreSQL repeatable-read transaction. No reporting request calls a license server or converts currencies implicitly.
+All routes require ADMIN or SUPERADMIN. All routes use `/api/v1`; unversioned routes are not exposed. Responses are read-only and assembled under a PostgreSQL repeatable-read transaction. No reporting request calls a license server or converts currencies implicitly.
 
 | Route | Edition | Scope |
 |---|---|---|

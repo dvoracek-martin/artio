@@ -18,7 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Safe operational counts and redrive controls for durable delivery queues. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/operations/outbox")
+@RequestMapping("/api/v1/admin/operations/outbox")
 public class OutboxOperationsController {
     private final JdbcTemplate jdbc;
     private final int webhookReceiptRetentionDays;

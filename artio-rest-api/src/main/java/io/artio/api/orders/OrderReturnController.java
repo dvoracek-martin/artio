@@ -25,7 +25,7 @@ public class OrderReturnController {
         this.inventory = inventory;
     }
 
-    @PostMapping("/api/orders/{orderId}/returns")
+    @PostMapping("/api/v1/orders/{orderId}/returns")
     @Transactional
     public ReturnView request(@PathVariable UUID orderId, @RequestHeader("Idempotency-Key") String key,
             @RequestBody ReturnRequest request, JwtAuthenticationToken auth) {
@@ -87,7 +87,7 @@ public class OrderReturnController {
                 Instant.now(), null, null, loadLines(returnId));
     }
 
-    @GetMapping("/api/orders/{orderId}/returns")
+    @GetMapping("/api/v1/orders/{orderId}/returns")
     public List<ReturnView> customerReturns(@PathVariable UUID orderId, JwtAuthenticationToken auth) {
         UUID customerId = userId(auth);
         if (jdbc.query("SELECT 1 FROM orders WHERE id=? AND user_id=?", (rs, row) -> rs.getInt(1), orderId, customerId).isEmpty())
@@ -95,14 +95,14 @@ public class OrderReturnController {
         return findReturns(orderId);
     }
 
-    @GetMapping("/api/admin/orders/{orderId}/returns")
+    @GetMapping("/api/v1/admin/orders/{orderId}/returns")
     public List<ReturnView> adminReturns(@PathVariable UUID orderId) {
         if (jdbc.query("SELECT 1 FROM orders WHERE id=?", (rs, row) -> rs.getInt(1), orderId).isEmpty())
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
         return findReturns(orderId);
     }
 
-    @PostMapping("/api/admin/orders/{orderId}/returns/{returnId}/review")
+    @PostMapping("/api/v1/admin/orders/{orderId}/returns/{returnId}/review")
     @Transactional
     public ReturnView review(@PathVariable UUID orderId, @PathVariable UUID returnId, @RequestBody ReviewRequest request,
             JwtAuthenticationToken auth) {
@@ -120,7 +120,7 @@ public class OrderReturnController {
         return current.with(next, request.note(), Instant.now(), null, loadLines(returnId));
     }
 
-    @PostMapping("/api/admin/orders/{orderId}/returns/{returnId}/receive")
+    @PostMapping("/api/v1/admin/orders/{orderId}/returns/{returnId}/receive")
     @Transactional
     public ReturnView receive(@PathVariable UUID orderId, @PathVariable UUID returnId, @RequestBody ReceiveRequest request,
             JwtAuthenticationToken auth) {

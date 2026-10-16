@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** SUPERADMIN view of installation-specific optional plugin readiness. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/system/distribution/plugins")
+@RequestMapping("/api/v1/admin/system/distribution/plugins")
 public class DistributionPluginProvisioningController {
     private final DistributionPluginProvisioningService provisioning;
 

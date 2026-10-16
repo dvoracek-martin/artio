@@ -16,7 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Bounded, filterable PostgreSQL-backed catalog query for Backoffice. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/catalog/products")
+@RequestMapping("/api/v1/admin/catalog/products")
 public class AdminCatalogProductQueryController {
     private final JdbcTemplate jdbc;
     public AdminCatalogProductQueryController(JdbcTemplate jdbc) { this.jdbc = jdbc; }

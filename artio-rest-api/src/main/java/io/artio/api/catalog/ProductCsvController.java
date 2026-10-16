@@ -25,7 +25,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/catalog/products")
+@RequestMapping("/api/v1/admin/catalog/products")
 public class ProductCsvController {
     private static final int MAX_UPLOAD_BYTES=5*1024*1024;
     private static final int MAX_EXPORT_ROWS=50_000;

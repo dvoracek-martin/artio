@@ -16,14 +16,14 @@ public class OrderTimelineController {
     private final JdbcTemplate jdbc;
     public OrderTimelineController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
-    @GetMapping("/api/admin/orders/{orderId}/timeline")
+    @GetMapping("/api/v1/admin/orders/{orderId}/timeline")
     public List<TimelineEvent> adminTimeline(@PathVariable UUID orderId) {
         requireOrder(orderId);
         return jdbc.query("SELECT id,event_type,message,actor_id,customer_visible,occurred_at FROM order_timeline_events WHERE order_id=? ORDER BY occurred_at,id",
                 (rs,row)->new TimelineEvent(rs.getObject("id",UUID.class),rs.getString("event_type"),rs.getString("message"),rs.getObject("actor_id",UUID.class),rs.getBoolean("customer_visible"),rs.getTimestamp("occurred_at").toInstant()),orderId);
     }
 
-    @GetMapping("/api/orders/{orderId}/timeline")
+    @GetMapping("/api/v1/orders/{orderId}/timeline")
     public List<TimelineEvent> customerTimeline(@PathVariable UUID orderId, JwtAuthenticationToken auth) {
         UUID customerId=userId(auth);
         if(jdbc.query("SELECT 1 FROM orders WHERE id=? AND user_id=?",(rs,row)->rs.getInt(1),orderId,customerId).isEmpty())
@@ -32,7 +32,7 @@ public class OrderTimelineController {
                 (rs,row)->new TimelineEvent(rs.getObject("id",UUID.class),rs.getString("event_type"),rs.getString("message"),rs.getObject("actor_id",UUID.class),true,rs.getTimestamp("occurred_at").toInstant()),orderId);
     }
 
-    @PostMapping("/api/admin/orders/{orderId}/notes")
+    @PostMapping("/api/v1/admin/orders/{orderId}/notes")
     public TimelineEvent addStaffNote(@PathVariable UUID orderId,@RequestBody NoteRequest request,JwtAuthenticationToken auth) {
         if(request==null||request.message()==null||request.message().isBlank()||request.message().length()>2000)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A note of 1–2000 characters is required");

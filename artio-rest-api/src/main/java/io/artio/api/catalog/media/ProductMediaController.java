@@ -23,7 +23,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/products/{productId}/media")
+@RequestMapping("/api/v1/products/{productId}/media")
 public class ProductMediaController {
     private final ProductMediaService media;
 

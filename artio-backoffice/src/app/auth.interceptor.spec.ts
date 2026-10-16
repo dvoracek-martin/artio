@@ -31,9 +31,9 @@ describe('authInterceptor', () => {
 
   it('continues to send the stored token to authenticated routes', () => {
     const client = TestBed.inject(HttpClient);
-    client.get('/api/users/me').subscribe();
+    client.get('/api/v1/users/me').subscribe();
 
-    const request = http.expectOne('/api/users/me');
+    const request = http.expectOne('/api/v1/users/me');
     expect(request.request.headers.get('Authorization')).toBe('Bearer stale-browser-token');
     request.flush({ email: 'owner@example.test' });
   });

@@ -20,7 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Read-only broker-backed consumer lag diagnostics. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/operations/kafka/consumer-lag")
+@RequestMapping("/api/v1/admin/operations/kafka/consumer-lag")
 public class KafkaConsumerLagController {
     private static final long REQUEST_TIMEOUT_SECONDS = 5;
     private final KafkaProperties kafkaProperties;

@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/notifications")
+@RequestMapping("/api/v1/notifications")
 public class NotificationController {
     private final JdbcTemplate jdbc;
     public NotificationController(JdbcTemplate jdbc){this.jdbc=jdbc;}

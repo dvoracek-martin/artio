@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** Administrative maintenance operations for the derived catalog search index. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/catalog/search-index")
+@RequestMapping("/api/v1/admin/catalog/search-index")
 public class CatalogSearchAdminController {
     private final CatalogSearchReindexService reindex;
 

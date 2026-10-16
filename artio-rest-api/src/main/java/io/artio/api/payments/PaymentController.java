@@ -39,7 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/payments")
+@RequestMapping("/api/v1/payments")
 public class PaymentController {
     private static final ObjectMapper OWNER_MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, String>> OWNER_SCOPE = new TypeReference<>() { };

@@ -28,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api/v1/auth")
 public class AuthController {
     private final JdbcTemplate jdbc;
     private final JwtEncoder jwtEncoder;

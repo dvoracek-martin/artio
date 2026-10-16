@@ -89,27 +89,27 @@ class ObservabilityPluginIntegrationTests {
 
     private static void assertGrafana(DockerExtensionRuntime runtime, String expectedStatus) throws Exception {
         String userId = "fbf38b6f-431a-4f5d-aae7-85ad63f9a0e1";
-        var response = runtime.proxyObservability("observability.artio", "GET", "/api/user", null,
+        var response = runtime.proxyObservability("observability.artio", "GET", "/api/v1/user", null,
                 userId, "admin@example.invalid");
         assertThat(response.statusCode()).isEqualTo(Integer.parseInt(expectedStatus));
         var user = new ObjectMapper().readTree(response.body());
         assertThat(user.path("login").asText()).isEqualTo("artio-" + userId);
         assertThat(user.path("email").asText()).isEqualTo("admin@example.invalid");
         assertThat(user.path("isGrafanaAdmin").asBoolean()).isFalse();
-        var organizations = runtime.proxyObservability("observability.artio", "GET", "/api/user/orgs", null,
+        var organizations = runtime.proxyObservability("observability.artio", "GET", "/api/v1/user/orgs", null,
                 userId, "admin@example.invalid");
         assertThat(new ObjectMapper().readTree(organizations.body()).get(0).path("role").asText()).isEqualTo("Viewer");
 
         String secondUserId = "52b079de-ef9c-4b4b-af78-193e082c5124";
-        var secondUser = runtime.proxyObservability("observability.artio", "GET", "/api/user", null,
+        var secondUser = runtime.proxyObservability("observability.artio", "GET", "/api/v1/user", null,
                 secondUserId, "operator@example.invalid");
         assertThat(new ObjectMapper().readTree(secondUser.body()).path("login").asText())
                 .isEqualTo("artio-" + secondUserId);
-        var secondOrganizations = runtime.proxyObservability("observability.artio", "GET", "/api/user/orgs", null,
+        var secondOrganizations = runtime.proxyObservability("observability.artio", "GET", "/api/v1/user/orgs", null,
                 secondUserId, "operator@example.invalid");
         assertThat(new ObjectMapper().readTree(secondOrganizations.body()).get(0).path("role").asText()).isEqualTo("Viewer");
 
-        var anonymous = runtime.proxyObservability("observability.artio", "GET", "/api/user", null);
+        var anonymous = runtime.proxyObservability("observability.artio", "GET", "/api/v1/user", null);
         assertThat(anonymous.statusCode()).isEqualTo(401);
     }
 
@@ -143,7 +143,7 @@ class ObservabilityPluginIntegrationTests {
                         List.of("collector"), List.of("/prometheus")),
                 new PluginManifest.BundleService("jaeger", images.get("jaeger"), 16686, "/", Map.of(),
                         List.of("main"), List.of(), List.of(4317, 4318)),
-                new PluginManifest.BundleService("grafana", images.get("grafana"), 3000, "/api/health",
+                new PluginManifest.BundleService("grafana", images.get("grafana"), 3000, "/api/v1/health",
                         Map.of("GF_SECURITY_ADMIN_USER", "grafanaAdminUser", "GF_SECURITY_ADMIN_PASSWORD", "grafanaAdminPassword"),
                         List.of("prometheus", "jaeger"), List.of("/var/lib/grafana")));
         return new PluginManifest("1", "observability.artio", "Artio Observability", "Artio", "1.0.0",

@@ -17,7 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Payload-free administrative view and replay control for Kafka consumer dead letters. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/operations/kafka/dead-letters")
+@RequestMapping("/api/v1/admin/operations/kafka/dead-letters")
 public class KafkaDeadLetterOperationsController {
     private final JdbcTemplate jdbc;
 

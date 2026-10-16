@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** Public, read-only discovery for the regional defaults shipped with Artio Core. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/public/distributions")
+@RequestMapping("/api/v1/public/distributions")
 public class RegionalDistributionController {
     private final RegionalDistributionCatalog catalog;
 

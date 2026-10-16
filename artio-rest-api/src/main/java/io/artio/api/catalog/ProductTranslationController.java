@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/products/{productId}")
+@RequestMapping("/api/v1/products/{productId}")
 public class ProductTranslationController {
     private final ProductTranslationApplicationService translations;
 

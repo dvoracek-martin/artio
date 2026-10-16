@@ -30,7 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/setup")
+@RequestMapping("/api/v1/setup")
 public class FirstRunSetupController {
     private static final BCryptPasswordEncoder PASSWORDS = new BCryptPasswordEncoder();
     private static final TypeReference<Map<String, String>> DRAFT_TYPE = new TypeReference<>() { };

@@ -25,7 +25,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Installation-level settings; every operation is restricted to the system owner role. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/system/settings")
+@RequestMapping("/api/v1/admin/system/settings")
 @Transactional
 public class SystemSettingsController {
     private static final TypeReference<List<String>> LANGUAGES = new TypeReference<>() { };

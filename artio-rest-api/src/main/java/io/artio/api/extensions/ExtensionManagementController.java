@@ -41,7 +41,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Admin-only manifest registry and schema-backed configuration. It deliberately does not run images. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/admin/extensions")
+@RequestMapping("/api/v1/admin/extensions")
 @Transactional
 public class ExtensionManagementController {
     private static final TypeReference<Map<String, Object>> OBJECT_MAP = new TypeReference<>() { };

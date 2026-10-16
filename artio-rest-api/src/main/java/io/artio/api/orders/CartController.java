@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.*;
 
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestController
-@RequestMapping("/api/cart")
+@RequestMapping("/api/v1/cart")
 public class CartController {
     private final JdbcTemplate jdbc;
     private final PricingApplicationService pricing;

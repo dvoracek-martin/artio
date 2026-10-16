@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** Safe edition information for staff workflows; installation and issuer identifiers stay owner-only. */
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@RequestMapping("/api/admin/license")
+@RequestMapping("/api/v1/admin/license")
 public final class FeatureAvailabilityController {
     private final LicensingService licensing;
 

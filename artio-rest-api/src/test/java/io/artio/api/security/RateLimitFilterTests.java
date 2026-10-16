@@ -59,7 +59,7 @@ class RateLimitFilterTests {
     }
 
     private MockHttpServletResponse request(RateLimitFilter filter, String ip, String apiKey) throws Exception {
-        var request = new MockHttpServletRequest("GET", "/api/products");
+        var request = new MockHttpServletRequest("GET", "/api/v1/products");
         request.setRemoteAddr(ip);
         request.setAttribute(ApiVersioningFilter.ORIGINAL_REQUEST_PATH_ATTRIBUTE, "/api/v1/products");
         if (apiKey != null) request.addHeader("X-API-Key", apiKey);
