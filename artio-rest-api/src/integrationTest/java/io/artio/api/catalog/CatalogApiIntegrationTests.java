@@ -2850,7 +2850,8 @@ class CatalogApiIntegrationTests {
         assertThat(contract.at("/paths/~1api~1v1~1products/get").isMissingNode()).isFalse();
         assertThat(contract.at("/paths/~1api~1v1~1payments~1orders~1{orderId}~1checkout-session/post/responses/422").isMissingNode()).isFalse();
         assertThat(contract.at("/paths/~1api~1v1~1payments~1orders~1{orderId}~1checkout-session/post/responses/502").isMissingNode()).isFalse();
-        assertThat(http.getForEntity("/api/products", String.class).getStatusCode()).isNotEqualTo(HttpStatus.OK);
+        var publicProducts = http.getForEntity("/api/v1/products", String.class);
+        assertThat(publicProducts.getHeaders().getFirst("API-Version")).isEqualTo("1");
     }
 
     private record LoginResponse(String accessToken, String tokenType, long expiresIn, UUID userId, String email, String role,boolean mfaEnrollmentRequired) { }
