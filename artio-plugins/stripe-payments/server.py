@@ -212,7 +212,7 @@ def operation(configuration, name, payload, envelope):
         event_type = event.get("type", "")
         obj = event.get("data", {}).get("object", {})
         state = "PENDING"
-        if event_type == "checkout.session.completed" and obj.get("payment_status") == "paid":
+        if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded") and obj.get("payment_status") == "paid":
             state = "CAPTURED"
         elif event_type == "checkout.session.expired":
             state = "EXPIRED"

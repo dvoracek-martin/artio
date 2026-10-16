@@ -39,14 +39,11 @@ class PayPalTests(unittest.TestCase):
         with self.assertRaisesRegex(server.ProviderError, "not enabled"):
             server.operation(self.config, "createCheckout", {"paymentMethodId": "card"}, self.envelope)
 
-    def test_reconciliation_returns_exact_provider_amount_and_currency(self):
-        response = {"status": "COMPLETED", "purchase_units": [{"payments": {"captures": [
-            {"amount": {"value": "12.34", "currency_code": "USD"}}
-        ]}}]}
-        with patch.object(server, "paypal_request", return_value=response):
+    def test_reconciliation_does_not_claim_unfinished_order_as_captured(self):
+        with patch.object(server, "paypal_request", return_value={"status": "APPROVED", "purchase_units": []}):
             result = server.operation(self.config, "reconcile", {"providerReference": "ORDER-12345678"}, self.envelope)
-        self.assertEqual("12.34", result["result"]["amount"])
-        self.assertEqual("USD", result["result"]["currency"])
+
+        self.assertIsNone(result["result"])
 
     def test_reconciliation_returns_exact_provider_amount_and_currency(self):
         response = {"status": "COMPLETED", "purchase_units": [{"payments": {"captures": [

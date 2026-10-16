@@ -57,14 +57,21 @@ class StripeExtensionTests(unittest.TestCase):
         with self.assertRaises(server.ProviderError):
             server.minor_units("12.501", "CHF")
 
-    def test_reconciliation_returns_exact_major_units(self):
-        session = {"id": "cs_123", "status": "complete", "payment_status": "paid",
-                   "amount_total": 1234, "currency": "usd"}
-        with patch.object(server, "stripe_request", return_value=session):
-            result = server.operation({"stripeSecretKey": "sk_test_secret"}, "reconcile",
-                                      {"providerReference": "cs_123"}, {})
-        self.assertEqual("12.34", result["result"]["amount"])
-        self.assertEqual("USD", result["result"]["currency"])
+    def test_async_payment_success_webhook_is_a_capture(self):
+        secret = "whsec_test"
+        timestamp = str(int(time.time()))
+        body = json.dumps({"id": "evt_async", "type": "checkout.session.async_payment_succeeded", "data": {
+            "object": {"id": "cs_async", "payment_status": "paid", "amount_total": 850, "currency": "chf"}}}).encode()
+        digest = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+
+        result = server.operation({"webhookSecret": secret}, "verifyWebhook", {
+            "headers": {"stripe-signature": f"t={timestamp},v1={digest}"},
+            "rawBodyBase64": base64.b64encode(body).decode(),
+        }, {})
+
+        self.assertEqual("CAPTURED", result["state"])
+        self.assertEqual("8.50", result["amount"])
+        self.assertEqual("cs_async", result["providerReference"])
 
     def test_reconciliation_returns_exact_major_units(self):
         session = {"id": "cs_123", "status": "complete", "payment_status": "paid",
