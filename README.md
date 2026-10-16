@@ -130,6 +130,8 @@ The default Compose stack starts PostgreSQL, Apache Kafka, the REST API, event-w
 
 The Storefront exposes `/sitemap.xml` and `/robots.txt` through Nginx. Core builds those documents using `ARTIO_STOREFRONT_URL`; set it to the public Storefront origin in a deployed environment. The local Compose default is `http://localhost:4200`. The sitemap lists only the public home, shop and bundles routes; private customer and checkout routes are excluded.
 
+The Storefront SEO behavior and its client-rendering limits are documented in [the search rendering strategy](docs/storefront-seo.md).
+
 ## API examples
 
 The REST surface is generated as OpenAPI at `http://localhost:8080/v3/api-docs` (also served through the frontend reverse proxy). Every REST controller uses the versioned `/api/v1` path. Unversioned `/api` routes are not part of the API contract. API errors use a stable JSON envelope with `timestamp`, `status`, `error`, `code`, `message`, and `path`. The `code` is a locale-independent client key (`BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVICE_UNAVAILABLE`, `SERVER_ERROR`, or `REQUEST_FAILED`); `message` is safe diagnostic text and may be English. Clients should branch on `code`, not parse `message` or `error`.
