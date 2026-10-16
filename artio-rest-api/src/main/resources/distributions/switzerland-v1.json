@@ -18,6 +18,14 @@
       "optional": true
     },
     {
+      "pluginId": "payments.postfinance-checkout",
+      "name": "PostFinance Checkout payments",
+      "description": "Hosted payment checkout, signed payment events and refunds through PostFinance Checkout.",
+      "extensionPoints": ["payment.provider.v1"],
+      "reason": "Required for the target Swiss release. Add a published, digest-pinned provider manifest before enabling.",
+      "optional": true
+    },
+    {
       "pluginId": "payments.twint",
       "name": "TWINT payments",
       "description": "TWINT checkout through a merchant-authorized Stripe account.",

@@ -18,7 +18,7 @@ class RegionalDistributionCatalogTests {
         assertThat(switzerland.availableLanguages()).containsExactly("de", "fr", "it", "en");
         assertThat(switzerland.timezone()).isEqualTo("Europe/Zurich");
         assertThat(switzerland.pluginRecommendations()).extracting(RegionalDistribution.PluginRecommendation::pluginId)
-                .containsExactly("payments.stripe", "payments.twint", "shipping.swiss-post", "catalog.opensearch");
+                .containsExactly("payments.stripe", "payments.postfinance-checkout", "payments.twint", "shipping.swiss-post", "catalog.opensearch");
         assertThat(switzerland.pluginRecommendations()).allMatch(RegionalDistribution.PluginRecommendation::optional);
         assertThat(switzerland.pluginRecommendations()).allSatisfy(recommendation -> {
             assertThat(recommendation.name()).isNotBlank();
@@ -27,6 +27,9 @@ class RegionalDistributionCatalogTests {
         });
         assertThat(switzerland.pluginRecommendations().getFirst().extensionPoints())
                 .containsExactly("payment.provider.v1");
+        var postFinance = switzerland.pluginRecommendations().get(1);
+        assertThat(postFinance.extensionPoints()).containsExactly("payment.provider.v1");
+        assertThat(postFinance.reason()).contains("Required for the target Swiss release", "published", "digest-pinned");
         assertThat(catalog.findAll()).containsExactly(switzerland);
     }
 
