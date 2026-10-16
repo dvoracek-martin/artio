@@ -108,6 +108,21 @@ public class CartController {
         return view(cartId);
     }
 
+    @PutMapping("/items/{variantId}") @Transactional
+    public CartView setItemQuantity(@PathVariable UUID variantId, @RequestBody SetItemQuantityRequest request,
+            JwtAuthenticationToken auth) {
+        UUID userId = userId(auth);
+        UUID cartId = ensureCart(userId);
+        if (request == null) throw new IllegalArgumentException("Cart item quantity is required");
+        validateQuantity(request.quantity());
+        var quote = pricing.quote(new PricingApplicationService.QuoteRequest(variantId, request.market(),
+                request.channel(), request.jurisdiction(), request.quantity(), null));
+        int changed = jdbc.update("UPDATE cart_items SET quantity=?,unit_price=?,currency=? WHERE cart_id=? AND variant_id=? AND bundle_ref IS NULL",
+                request.quantity(), quote.unitListPrice().amount(), quote.unitListPrice().currency().getCurrencyCode(), cartId, variantId);
+        if (changed == 0) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Cart item not found");
+        return view(cartId);
+    }
+
     @PostMapping("/bundles") @Transactional
     public CartView addBundle(@RequestBody AddBundleRequest request,JwtAuthenticationToken auth){
         UUID cartId=ensureCart(userId(auth));validateQuantity(request.bundleQuantity());
@@ -137,6 +152,18 @@ public class CartController {
         jdbc.update("DELETE FROM cart_items WHERE bundle_ref IN (SELECT i.bundle_ref FROM cart_items i JOIN carts c ON c.id=i.cart_id WHERE c.user_id=? AND i.variant_id=? AND i.bundle_ref IS NOT NULL)",user,variantId);
         jdbc.update("DELETE FROM cart_bundle_lines b USING carts c WHERE b.cart_id=c.id AND c.user_id=? AND NOT EXISTS (SELECT 1 FROM cart_items i WHERE i.bundle_ref=b.bundle_ref)",user);
         jdbc.update("DELETE FROM cart_items i USING carts c WHERE i.cart_id=c.id AND c.user_id=? AND i.variant_id=? AND i.bundle_ref IS NULL", user, variantId);
+    }
+
+    @DeleteMapping("/items/lines/{itemId}") @Transactional @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeLine(@PathVariable UUID itemId, JwtAuthenticationToken auth) {
+        UUID user = userId(auth);
+        CartLineRef line = jdbc.query("SELECT i.cart_id,i.bundle_ref FROM cart_items i JOIN carts c ON c.id=i.cart_id WHERE i.id=? AND c.user_id=?",
+                (rs,n) -> new CartLineRef(rs.getObject("cart_id",UUID.class),rs.getObject("bundle_ref",UUID.class)), itemId, user)
+                .stream().findFirst().orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND,"Cart item not found"));
+        if(line.bundleRef()!=null){
+            jdbc.update("DELETE FROM cart_items WHERE cart_id=? AND bundle_ref=?",line.cartId(),line.bundleRef());
+            jdbc.update("DELETE FROM cart_bundle_lines WHERE cart_id=? AND bundle_ref=?",line.cartId(),line.bundleRef());
+        }else jdbc.update("DELETE FROM cart_items WHERE cart_id=? AND id=?",line.cartId(),itemId);
     }
 
     @PostMapping("/checkout") @Transactional
@@ -256,12 +283,13 @@ public class CartController {
         return id;
     }
     private CartView view(UUID cartId) {
-        var items = jdbc.query("SELECT variant_id,quantity,unit_price,currency,bundle_id FROM cart_items WHERE cart_id=?", (rs,n) -> new ItemView(UUID.fromString(rs.getString(1)), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getString(4).trim(),rs.getObject("bundle_id",UUID.class)), cartId);
+        var items = jdbc.query("SELECT id,variant_id,quantity,unit_price,currency,bundle_ref,bundle_id FROM cart_items WHERE cart_id=? ORDER BY id", (rs,n) -> new ItemView(rs.getObject("id",UUID.class),rs.getObject("variant_id",UUID.class),rs.getBigDecimal("quantity"),rs.getBigDecimal("unit_price"),rs.getString("currency").trim(),rs.getObject("bundle_ref",UUID.class),rs.getObject("bundle_id",UUID.class)), cartId);
         return new CartView(cartId, items);
     }
     private static UUID userId(JwtAuthenticationToken auth) { return UUID.fromString(auth.getToken().getSubject()); }
 
     public record AddItemRequest(UUID variantId, BigDecimal quantity, String market, String channel, String jurisdiction) { }
+    public record SetItemQuantityRequest(BigDecimal quantity, String market, String channel, String jurisdiction) { }
     public record AddBundleRequest(UUID bundleId,Map<String,Set<UUID>> selectedOptions,BigDecimal bundleQuantity,String market,String channel,String jurisdiction){}
     public record CheckoutRequest(String shippingAddress, String billingAddress, String shippingCountry, String locale,
                                   String shippingMethodId, ShippingAddressDetails shippingDetails, BigDecimal parcelWeightKg,String giftCardCode) {
@@ -282,7 +310,8 @@ public class CartController {
     public record ShippingMethodsView(List<ShippingMethodView> methods, List<ShippingProvider.ProviderFailure> failures,
             boolean partialFailure) { public ShippingMethodsView { methods = List.copyOf(methods); failures = List.copyOf(failures); } }
     public record ShippingQuoteView(String methodId,BigDecimal amount,String currency,String estimatedDelivery) { }
-    public record ItemView(UUID variantId, BigDecimal quantity, BigDecimal unitPrice, String currency,UUID bundleId) { }
+    private record CartLineRef(UUID cartId,UUID bundleRef) { }
+    public record ItemView(UUID itemId,UUID variantId, BigDecimal quantity, BigDecimal unitPrice, String currency,UUID bundleRef,UUID bundleId) { }
     public record CartView(UUID cartId, List<ItemView> items) { }
     public record OrderView(UUID orderId, String status, BigDecimal subtotal, BigDecimal tax, BigDecimal shipping, BigDecimal total, String currency,String trackingNumber,String shippingCountry,String market,String taxJurisdiction,Map<String,Object> taxSnapshot) { }
     private record LineTaxSnapshot(UUID sellableId,BigDecimal quantity,String currency,BigDecimal unitListPrice,BigDecimal lineListPrice,BigDecimal discount,BigDecimal taxableAmount,boolean pricesIncludeTax,String taxCategory,BigDecimal taxRatePercent,BigDecimal tax,java.time.Instant taxRuleValidFrom,java.time.Instant taxRuleValidUntil,java.time.Instant pricedAt,UUID bundleId,BigDecimal bundleAdjustmentFactor){static LineTaxSnapshot from(UUID id,BigDecimal quantity,io.artio.pricing.PricingQuote quote,UUID bundleId,BigDecimal factor){return new LineTaxSnapshot(id,quantity,quote.unitListPrice().currency().getCurrencyCode(),quote.unitListPrice().amount(),quote.lineListPrice().amount(),quote.discounts().amount(),quote.taxableAmount().amount(),quote.pricesIncludeTax(),quote.taxCategory().name(),quote.taxRatePercent(),quote.tax().amount(),quote.taxRuleValidFrom(),quote.taxRuleValidUntil(),quote.pricedAt(),bundleId,factor);}}

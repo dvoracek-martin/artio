@@ -1,0 +1,128 @@
+<div class="storefront-shell">
+  <div class="announcement"><span>ARTIO</span><span>Thoughtful commerce, made personal</span><a href="/shop">{{ t('explore') }} <span aria-hidden="true">↗</span></a></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="/" aria-label="Artio home">artio<span>®</span></a>
+    <nav class="desktop-nav" aria-label="Main navigation">
+      <a [class.active]="page === 'shop' || page === 'home'" href="/shop">{{ t('shop') }}</a>
+      <a [class.active]="page === 'bundles'" href="/bundles">{{ t('bundles') }}</a>
+      <a href="/shop#collection">{{ t('collection') }}</a>
+    </nav>
+    <div class="header-actions">
+      <label class="locale-control"><span class="sr-only">{{ t('language') }}</span><select [(ngModel)]="locale" (change)="changeLocale()"><option value="en">EN</option><option value="de">DE</option><option value="fr">FR</option><option value="it">IT</option></select></label>
+      @if (!token) { <a class="account-link" href="/login" (click)="rememberReturn(location.pathname + location.search)" aria-label="{{ t('signIn') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.8 20c.5-3.5 3.3-5.5 7.2-5.5s6.7 2 7.2 5.5"/></svg></a> }
+      @if (token) { <a class="account-link" href="/account" aria-label="{{ t('account') }}" title="{{ t('account') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.8 20c.5-3.5 3.3-5.5 7.2-5.5s6.7 2 7.2 5.5"/></svg></a> }
+      <a class="bag-link" href="/cart" aria-label="{{ t('bag') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1.1 12H6.1L5 8Z"/><path d="M9 9V6a3 3 0 0 1 6 0v3"/></svg><span>{{ cartCount }}</span></a>
+    </div>
+  </header>
+
+  <main>
+    @if (page === 'home') {
+      <section class="hero">
+        <div class="hero-copy"><p class="eyebrow">THE ARTIO EDIT</p><h1>Make room<br>for <em>meaningful.</em></h1><p>Everyday pieces, chosen with care. Find the things that feel like they belong.</p><a class="button button-dark" href="/shop">{{ t('explore') }} <span aria-hidden="true">↗</span></a><div class="hero-index"><span>01</span><span class="index-line"></span><span>THE COLLECTION</span></div></div>
+        <div class="hero-visual" aria-label="Artio collection">
+          @if (products[0]?.media?.[0]; as image) { <img class="hero-photo" [src]="image.contentUrl" [alt]="image.altText || products[0].name"> }
+          @if (!products[0]?.media?.[0]) { <div class="still-life" aria-hidden="true"><div class="still-disc"></div><span class="still-mark">A</span><span class="still-caption">ARTIO · THOUGHTFUL COMMERCE</span></div> }
+          @if (products[0]; as featured) { <a class="feature-note" [href]="productHref(featured)"><span>IN THE EDIT</span><strong>{{ featured.name }}</strong><span aria-hidden="true">↗</span></a> }
+          @if (!products.length) { <div class="feature-note feature-note-static"><span>ARTIO</span><strong>A store shaped by your edit.</strong></div> }
+          <span class="visual-number">A—01</span>
+        </div>
+      </section>
+      <section class="promise-row"><span>CONSIDERED IN EVERY DETAIL</span><span class="promise-mark">✳</span><span>MADE FOR REAL LIFE</span><span class="promise-mark">✳</span><span>YOUR NEXT EVERYDAY FAVOURITE</span></section>
+    }
+
+    @if (page === 'shop' || page === 'home') {
+      <section class="collection-section" id="collection">
+        <div class="collection-heading"><div><p class="eyebrow">{{ page === 'home' ? 'A FEW GOOD THINGS' : 'THE ARTIO EDIT' }}</p><h2>{{ page === 'home' ? 'Find your everyday.' : t('shopHeading') }}</h2><p class="collection-intro">{{ page === 'home' ? 'A considered collection, selected by you.' : t('collection') }}</p></div>
+          <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"/><path d="m16 16 4.2 4.2"/></svg><input [(ngModel)]="query" (ngModelChange)="setQuery($event)" placeholder="{{ t('search') }}" [attr.aria-label]="t('search')"></label></div>
+        @if (error) { <p class="notice" role="status">{{ error }}</p> }
+        <div class="catalog-controls">
+          <div class="category-pills" role="group" aria-label="Categories">
+            <button [class.selected]="categoryFilter==='all'" [attr.aria-pressed]="categoryFilter==='all'" (click)="setCategory('all')">{{ t('allCategories') }} <span>{{ catalogProducts.length }}</span></button>
+            @for (category of categories; track category.id) { <button [class.selected]="categoryFilter===category.id" [attr.aria-pressed]="categoryFilter===category.id" (click)="setCategory(category.id)">{{ category.name }} <span>{{ categoryCount(category.id) }}</span></button> }
+          </div>
+          <div class="catalog-toolbar">
+            <span class="result-count">{{ catalogStart }}–{{ catalogEnd }} / {{ filteredProducts.length }}</span>
+            <div class="toolbar-selects">
+              @if (brands.length) { <label><span>{{ t('brand') }}</span><select [ngModel]="brandFilter" (ngModelChange)="setBrand($event)"><option value="all">{{ t('allBrands') }}</option>@for (brand of brands; track brand.id) { <option [value]="brand.id">{{ brand.name }}</option> }</select></label> }
+              <label><span>{{ t('sort') }}</span><select [ngModel]="sortBy" (ngModelChange)="setSort($event)"><option value="featured">{{ t('sortFeatured') }}</option><option value="name-asc">{{ t('sortNameAsc') }}</option><option value="name-desc">{{ t('sortNameDesc') }}</option><option value="price-asc">{{ t('sortPriceAsc') }}</option><option value="price-desc">{{ t('sortPriceDesc') }}</option></select></label>
+            </div>
+          </div>
+        </div>
+        <div class="product-grid">
+          @for (product of visibleProducts; track product.id; let i = $index) {
+            <article class="product-card" [id]="'product-' + product.id">
+              <a class="product-visual" [class.product-visual-tall]="i === 0" [href]="productHref(product)" [attr.aria-label]="product.name">
+                @if (product.media?.[0]; as image) { <img [src]="image.contentUrl" [alt]="image.altText || product.name" loading="lazy"> }
+                @if (!product.media?.length) { <div class="image-placeholder"><span>{{ initials(product.name) }}</span><i aria-hidden="true"></i></div> }
+
+                <span class="quick-view">VIEW PIECE <b aria-hidden="true">↗</b></span>
+              </a>
+              <div class="product-info"><div><a class="product-name" [href]="productHref(product)">{{ product.name }}</a><p class="product-description">{{ product.description }}</p></div>
+                @if (product.price; as price) { <span class="product-price">{{ price.total.amount }} {{ moneyCurrency(price.total.currency) }}</span> }
+              </div>
+              @if (product.variants?.length) { <label class="variant-select"><span>{{ t('chooseOption') }}</span><select [(ngModel)]="selectedVariants[product.id]" [ngModelOptions]="{standalone:true}" (ngModelChange)="loadProductCardPrice(product,$event)" [attr.aria-label]="t('chooseOption')">@for (variant of product.variants; track variant.id) { <option [value]="variant.id">{{ variant.name }}</option> }</select></label> }
+              <button class="add-button" (click)="add(product)"><span>{{ t('add') }}</span><span aria-hidden="true">＋</span></button>
+            </article>
+          }
+          @if (!visibleProducts.length && !error) { <div class="empty-collection"><span class="empty-spark">✳</span><h3>{{ catalogProducts.length ? t('noProductsMatch') : t('collectionEmpty') }}</h3><p>{{ catalogProducts.length ? t('adjustFilters') : t('catalogEmptyHint') }}</p>@if (catalogProducts.length) { <button class="text-link" (click)="query='';setCategory('all');setBrand('all')">{{ t('clearFilters') }}</button> }</div> }
+        </div>
+        @if (pageCount > 1) { <nav class="pagination" aria-label="Catalog pages"><button class="page-arrow" [disabled]="catalogPage===1" (click)="setPage(catalogPage-1)">← <span>{{ t('previous') }}</span></button><div class="page-numbers">@for (pageNumber of pageNumbers; track pageNumber) { <button [class.current]="pageNumber===catalogPage" [attr.aria-current]="pageNumber===catalogPage?'page':null" (click)="setPage(pageNumber)">{{ pageNumber }}</button> }</div><button class="page-arrow" [disabled]="catalogPage===pageCount" (click)="setPage(catalogPage+1)"><span>{{ t('next') }}</span> →</button></nav> }
+      </section>
+      <section class="closing-note"><span class="eyebrow">A NOTE FROM ARTIO</span><p>Good design makes the ordinary<br><em>feel a little extraordinary.</em></p><a href="/bundles">{{ t('bundles') }} <span aria-hidden="true">↗</span></a></section>
+    }
+
+    @if (page === 'products') {
+      <section class="product-detail-section" aria-live="polite" [attr.aria-busy]="productLoading">
+        @if (productLoading) { <p class="empty">{{ t('productLoading') }}</p> }
+        @if (!productLoading && !focusedProduct) { <div class="empty-collection"><h2>{{ t('productUnavailable') }}</h2><a class="button button-dark" href="/shop">{{ t('backToShop') }}</a></div> }
+        @if (focusedProduct; as product) {
+          <a class="back-link" href="/shop">← {{ t('backToShop') }}</a>
+          <div class="product-detail-grid"><div class="detail-gallery">
+            @if (product.media?.length) { @for (image of product.media; track image.id) { <figure><img [src]="image.contentUrl" [alt]="image.altText || product.name"></figure> } }
+            @if (!product.media?.length) { <div class="image-placeholder detail-placeholder"><span>{{ initials(product.name) }}</span><i aria-hidden="true"></i></div> }
+          </div><div class="detail-copy"><p class="eyebrow">{{ t('sku') }} · {{ product.sku }}</p><h1>{{ product.seoTitle || product.name }}</h1><p class="detail-description">{{ product.seoDescription || product.description }}</p>
+            @if (product.variants?.length) { <label class="variant-select detail-option"><span>{{ t('chooseOption') }}</span><select [ngModel]="selectedVariants[product.id]" [ngModelOptions]="{standalone:true}" (ngModelChange)="selectProductVariant($event)">@for (variant of product.variants; track variant.id) { <option [value]="variant.id">{{ variant.name }}</option> }</select></label> }
+            @if (productQuote; as quote) { <p class="detail-price">{{ quote.total.amount }} {{ moneyCurrency(quote.total.currency) }}</p> }
+            <button class="button button-dark detail-buy" (click)="add(product)">{{ t('add') }} <span aria-hidden="true">＋</span></button><p class="detail-footnote">Prices and availability are confirmed at checkout.</p>
+          </div></div>
+        }
+      </section>
+    }
+
+    @if (page === 'bundles') {
+      <section class="subpage"><div class="subpage-heading"><p class="eyebrow">THE ARTIO EDIT · {{ t('madePersonal') }}</p><h1>{{ focusedBundle?.name ?? t('bundles') }}</h1>@if (!focusedBundle) { <p>{{ t('bundleIntro') }}</p> }</div>
+        @if (focusedBundle) { <div class="bundle-builder">@for (group of focusedBundle.optionGroups; track group.code) { <div class="bundle-choice-group"><h3>{{ group.name }}</h3><p>{{ t('chooseRange') }} {{ group.minimumSelections }}–{{ group.maximumSelections }} {{ t('options') }}</p>@for (choice of group.choices; track choice.sellableId) { <label><input type="checkbox" [checked]="isSelected(group.code, choice.sellableId)" (change)="toggleChoice(group.code, choice.sellableId)"><span class="bundle-choice-copy">@if (sellableImage(choice.sellableId)) { <img [src]="sellableImage(choice.sellableId)" [alt]=""> }<span>{{ sellableName(choice.sellableId) }}</span><small>{{ choice.quantity }}×</small></span></label> }</div> }<button class="button button-dark" (click)="quoteBundle()">{{ t('getPrice') }} ↗</button>@if (bundleQuote) { <p class="detail-price">{{ bundleQuote.totalPrice.amount }} {{ bundleQuote.totalPrice.currency }}</p><button class="button button-outline" (click)="addBundleToCart()">{{ t('addConfigured') }} ＋</button> }@if (error) { <p class="notice">{{ error }}</p> }</div> }
+        @if (!focusedBundle) { <div class="bundle-grid">@for (bundle of bundles; track bundle.id) { <article class="bundle-card"><span class="bundle-symbol">✳</span><p class="eyebrow">{{ bundle.type }}</p><h2>{{ bundle.name }}</h2><p>{{ t('bundleCardCopy') }}</p>@if (bundle.components?.length) { <div class="bundle-includes">@for (component of bundle.components; track component.sellableId) { <span>{{ sellableName(component.sellableId) }}</span> }</div> }<button class="text-link" (click)="configure(bundle)">{{ t('chooseOptions') }} ↗</button></article> }@if (!bundles.length) { <div class="empty-collection"><h2>{{ t('bundlesEmpty') }}</h2></div> }</div> }
+      </section>
+    }
+
+    @if (page === 'cart') {
+      <section class="subpage narrow"><p class="eyebrow">{{ t('selection') }}</p><h1>{{ t('bagTitle') }}</h1>@if (cartLoading) { <p class="empty">{{ t('loadingCart') }}</p> }@if (!token) { <p>{{ t('signInToContinue') }}</p><a href="/login" (click)="rememberReturn('/cart')" class="button button-dark">{{ t('signIn') }} ↗</a> }
+        @for (item of cartItems; track item.itemId) { <article class="cart-product"><a class="cart-thumb" [href]="cartLinks[item.variantId] || '/shop'">@if (cartImages[item.variantId]) { <img [src]="cartImages[item.variantId]" [alt]="cartNames[item.variantId] || ''"> }@else { <span>{{ initials(cartNames[item.variantId] || 'A') }}</span> }</a><div class="cart-product-copy"><a [href]="cartLinks[item.variantId] || '/shop'">{{ cartNames[item.variantId] || item.variantId }}</a>@if (item.bundleId) { <small>{{ t('partOfBundle') }} {{ bundleName(item.bundleId) }}</small> }<small>{{ item.currency }} {{ item.unitPrice }} {{ t('each') }}</small></div><div class="quantity-stepper" [class.quantity-static]="!!item.bundleId" [attr.aria-label]="t('quantity')">@if (!item.bundleId) { <button (click)="setCartQuantity(item,item.quantity-1)" [attr.aria-label]="t('decreaseQuantity')">−</button> }<span>{{ item.quantity }}</span>@if (!item.bundleId) { <button (click)="setCartQuantity(item,item.quantity+1)" [attr.aria-label]="t('increaseQuantity')">＋</button> }</div><strong class="cart-line-total">{{ lineTotal(item) }}</strong><button class="remove-button" (click)="remove(item.itemId)" [attr.aria-label]="t('remove')">×</button></article> }
+        @if (cartItems.length) { <div class="cart-bottom"><p><span>{{ t('subtotal') }}</span><strong>{{ cartSubtotalSummary }}</strong></p><small>{{ t('priceCheck') }}</small><a class="button button-dark checkout-link" href="/checkout">{{ t('continueCheckout') }} <span aria-hidden="true">↗</span></a></div> }@if (token && !cartLoading && !cartItems.length) { <div class="empty-collection"><span class="empty-spark">✳</span><h2>{{ t('emptyBag') }}</h2><a class="text-link" href="/shop">{{ t('explore') }} ↗</a></div> }
+      @if (error) { <p class="notice" role="alert">{{ error }}</p> }</section>
+    }
+
+    @if (page === 'login' || page === 'register') {
+      <section class="subpage narrow auth-page"><p class="eyebrow">{{ t('welcome') }}</p><h1>{{ page === 'login' ? t('goodToSee') : t('createAccount') }}</h1><form (ngSubmit)="submitAuth()">@if (page === 'register') { <input [(ngModel)]="firstName" name="firstName" placeholder="{{ t('firstName') }}" autocomplete="given-name" required><input [(ngModel)]="lastName" name="lastName" placeholder="{{ t('lastName') }}" autocomplete="family-name" required> }<input [(ngModel)]="email" name="email" type="email" placeholder="{{ t('email') }}" autocomplete="email" required><input [(ngModel)]="password" name="password" type="password" placeholder="{{ t('password') }}" minlength="8" [attr.autocomplete]="page === 'login' ? 'current-password' : 'new-password'" required>@if (page === 'login') { <input [(ngModel)]="mfaCode" name="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="{{ t('mfa') }}"> }<button class="button button-dark" type="submit">{{ page === 'login' ? t('signIn') : t('createAccount') }} ↗</button></form>@if (page === 'login' && googleOidcEnabled) { <a class="button button-outline google-button" href="/oauth2/authorization/google">{{ t('continueGoogle') }}</a> }@if (error) { <p class="notice">{{ error }}</p> }@if(page==='login'){<a class="text-link auth-switch" href="/forgot-password">{{ t('forgotPassword') }}</a>}<a class="text-link auth-switch" [href]="page === 'login' ? '/register' : '/login'">{{ page === 'login' ? t('newHere') : t('existingAccount') }}</a></section>
+    }
+
+
+
+    @if (page === 'orders') {
+      <section class="subpage narrow"><p class="eyebrow">{{ t('account') }}</p><h1>{{ t('orderHistory') }}</h1>@if (!token) { <p>{{ t('signInToContinue') }}</p><a class="button button-dark" href="/login" (click)="rememberReturn('/orders')">{{ t('signIn') }} ↗</a> }@else { <button class="text-link" (click)="logout()">{{ t('signOut') }} ↗</button>@if (ordersLoading) { <p class="empty">{{ t('loadingOrders') }}</p> }@for (order of orders; track order.orderId) { <div class="cart-line order-line"><div><strong>{{ t('order') }} · {{ order.orderId }}</strong><small>{{ statusLabel(order.status) }}@if (order.trackingNumber) { · {{ t('tracking') }} {{ order.trackingNumber }} }</small></div><span>{{ order.total }} {{ order.currency }}</span>@if (order.status==='PENDING') { <button class="text-link" (click)="payOrder(order)">{{ t('payNow') }} ↗</button><button class="text-link" (click)="cancelOrder(order)">{{ t('cancelOrder') }}</button> }@if (order.status==='PARTIALLY_SHIPPED' || order.status==='SHIPPED' || order.status==='DELIVERED' || order.status==='RETURNED') { <button class="text-link" (click)="viewOrderHistory(order)">{{ t('returnsHistory') }}</button> }</div> }
+        @if (customerHistoryOrder) { <div class="panel"><h2>{{ t('returnsHistory') }}</h2>@for (event of customerTimeline; track event) { <p><strong>{{ timelineLabel(event.eventType) }}</strong>@if (timelineDetail(event)) { · {{ timelineDetail(event) }} } · {{ event.occurredAt | date:'medium' }}</p> }@for (item of customerReturns; track item) { <div class="cart-line"><strong>{{ statusLabel(item.status) }}</strong><span>{{ item.reason }}</span></div> }@if (customerHistoryOrder.status==='PARTIALLY_SHIPPED' || customerHistoryOrder.status==='SHIPPED' || customerHistoryOrder.status==='DELIVERED' || customerHistoryOrder.status==='RETURNED') { <button class="text-link" (click)="requestReturn(customerHistoryOrder)">{{ t('requestReturn') }}</button> }</div> }@if (!ordersLoading && !orders.length) { <div class="empty-collection"><h2>{{ t('ordersEmpty') }}</h2></div> }@if (error) { <p class="notice">{{ error }}</p> }
+              @if (returnOrder) { <div class="modal-backdrop"><section class="return-dialog" role="dialog" aria-modal="true" aria-labelledby="return-title"><button class="return-close" type="button" (click)="closeReturn()" [disabled]="returnSubmitting" [attr.aria-label]="t('close')">×</button><p class="eyebrow">{{ t('returnsHistory') }}</p><h2 id="return-title">{{ t('returnFormTitle') }}</h2><form (ngSubmit)="submitReturn()"><label>{{ t('returnPickItem') }}<select [(ngModel)]="returnItemId" name="returnItemId" (ngModelChange)="returnQuantity=1" required>@for (item of returnableItems; track item.orderItemId) { <option [value]="item.orderItemId">{{ sellableName(item.variantId) }}@if (item.bundleId) { · {{ t('returnBundleComponent') }} } — {{ t('maximum') }} {{ item.returnableQuantity }}</option> }</select></label><label>{{ t('returnQuantity') }}<input [(ngModel)]="returnQuantity" name="returnQuantity" type="number" min="1" [max]="returnableItems.find(item=>item.orderItemId===returnItemId)?.returnableQuantity || 1" step="1" required></label><label>{{ t('returnReason') }}<textarea [(ngModel)]="returnReason" name="returnReason" rows="4" maxlength="1000" required></textarea></label><button class="button button-dark" type="submit" [disabled]="returnSubmitting">{{ returnSubmitting ? t('processing') : t('submitReturn') }} ↗</button></form>@if (error) { <p class="notice">{{ error }}</p> }</section></div> }}</section>
+    }
+
+    @defer (when page === 'account' || page === 'forgot-password' || page === 'reset-password') { <artio-account [page]="page" [locale]="locale" (signedOut)="logout()"></artio-account> } @placeholder { <section class="subpage narrow auth-page"><p class="empty">{{ t('loadingOrders') }}</p></section> }
+    @if (page === 'checkout' && !location.search.includes('success')) {
+      <section class="subpage narrow auth-page"><p class="eyebrow">{{ t('checkoutEyebrow') }}</p><h1>{{ t('checkoutTitle') }}</h1>@if (!token) { <p>{{ t('signInToContinue') }}</p><a href="/login" (click)="rememberReturn('/checkout')" class="button button-dark">{{ t('signIn') }} ↗</a> }@else if (cartLoading) { <p class="empty">{{ t('loadingCart') }}</p> }@else if (!cartItems.length) { <div class="empty-collection"><h2>{{ t('emptyBag') }}</h2><a class="button button-dark" href="/shop">{{ t('continueShopping') }} ↗</a></div> }@else { <div class="checkout-summary"><div class="checkout-summary-heading"><h2>{{ t('checkoutYourOrder') }}</h2><a href="/cart">{{ t('editBag') }} ↗</a></div>@for (item of cartItems; track item.itemId) { <div class="checkout-summary-line"><span>{{ cartNames[item.variantId] || item.variantId }} <small>× {{ item.quantity }}</small></span><strong>{{ lineTotal(item) }}</strong></div> }<div class="checkout-summary-total"><span>{{ t('subtotal') }}</span><strong>{{ cartSubtotalSummary }}</strong></div>@if (shippingQuote) { <div class="checkout-summary-line"><span>{{ t('delivery') }}</span><strong>{{ shippingQuote.amount }} {{ shippingQuote.currency }}</strong></div> }<p>{{ t('priceCheck') }}</p></div><form (ngSubmit)="checkout()"><label>{{ t('recipient') }}<input [(ngModel)]="recipientName" name="recipientName" autocomplete="name" placeholder="{{ t('recipient') }}" (ngModelChange)="loadShippingMethods()" required></label><label>{{ t('street') }}<input [(ngModel)]="shippingAddress" name="shippingAddress" autocomplete="shipping address-line1" placeholder="{{ t('street') }}" (ngModelChange)="loadShippingMethods()" required></label><label>{{ t('addressLine2') }}<input [(ngModel)]="shippingAddressLine2" name="shippingAddressLine2" autocomplete="shipping address-line2" placeholder="{{ t('addressLine2') }}" (ngModelChange)="loadShippingMethods()"></label><div class="form-grid"><label>{{ t('postal') }}<input [(ngModel)]="postalCode" name="postalCode" autocomplete="shipping postal-code" placeholder="{{ t('postal') }}" (ngModelChange)="loadShippingMethods()" required></label><label>{{ t('city') }}<input [(ngModel)]="locality" name="locality" autocomplete="shipping address-level2" placeholder="{{ t('city') }}" (ngModelChange)="loadShippingMethods()" required></label></div><label>{{ t('billing') }}<input [(ngModel)]="billingAddress" name="billingAddress" autocomplete="billing street-address" placeholder="{{ t('billing') }}"></label><label>{{ t('country') }}<select [(ngModel)]="shippingCountry" name="shippingCountry" autocomplete="shipping country" (ngModelChange)="shippingCountryChanged()">@for (country of supportedCountries(); track country) { <option [value]="country">{{ countryLabel(country) }}</option> }</select></label><label>{{ t('parcelWeight') }}<input [(ngModel)]="parcelWeightKg" name="parcelWeightKg" type="number" min="0.001" max="1000" step="0.001" (ngModelChange)="quoteShipping()" required></label><label>{{ t('deliveryMethod') }}<select [(ngModel)]="shippingMethodId" name="shippingMethodId" (ngModelChange)="quoteShipping()" required>@for (method of shippingMethods; track method.methodId) { <option [value]="method.methodId">{{ method.name }}{{ method.estimatedDelivery ? ' · ' + method.estimatedDelivery : '' }}</option> }</select></label>@if (paymentMethods.length) { <label>{{ t('paymentMethod') }}<select [(ngModel)]="paymentMethodId" name="paymentMethodId" required>@for (method of paymentMethods; track method.reference) { <option [value]="method.reference">{{ method.displayName }}</option> }</select></label> }@if (paymentMethodsPartialFailure) { <p class="muted">{{ t('paymentMethodsPartial') }}</p> }@if (shippingMethodsPartialFailure) { <p class="muted">{{ t('shippingMethodsPartial') }}</p> }@if (shippingQuote) { <p class="detail-price">{{ t('delivery') }} · {{ shippingQuote.amount }} {{ shippingQuote.currency }}{{ shippingQuote.estimatedDelivery ? ' · ' + shippingQuote.estimatedDelivery : '' }}</p> }@if (!shippingMethods.length) { <p class="muted">{{ t('shippingPrompt') }}</p> }<label>{{ t('giftCard') }}<input [(ngModel)]="giftCardCode" name="giftCardCode" autocomplete="off" maxlength="128" placeholder="{{ t('giftCardPlaceholder') }}"></label><button class="button button-dark" type="submit" [disabled]="!shippingMethodId || (paymentMethods.length > 1 && !paymentMethodId)">{{ t('continuePayment') }} ↗</button></form>}@if (error) { <p class="notice">{{ error }}</p> }<p class="muted">{{ t('priceCheck') }}</p></section>
+    }
+    @if (page === 'checkout' && location.search.includes('success')) { <section class="subpage narrow success-page"><p class="eyebrow">{{ t('successEyebrow') }}</p><h1>{{ paymentReturnConfirmed ? t('thankYou') : t('paymentVerifyingTitle') }}</h1><p>{{ paymentCaptureMessage }}</p><a class="button button-dark" href="/orders">{{ t('viewOrders') }} ↗</a></section> }
+  </main>
+
+  <artio-cookie-consent></artio-cookie-consent>
+  <footer class="site-footer"><a class="wordmark" href="/">artio<span>®</span></a><div><span>Thoughtfully yours.</span><span>© 2026 Artio Commerce</span></div><a href="/shop">{{ t('shop') }} ↗</a></footer>
+</div>

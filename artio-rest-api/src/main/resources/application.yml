@@ -60,6 +60,7 @@ management:
         enabled: true
 artio:
   backoffice-url: ${ARTIO_BACKOFFICE_URL:http://localhost:4201}
+  storefront-url: ${ARTIO_STOREFRONT_URL:http://localhost:4200}
   runtime:
     role: ${ARTIO_RUNTIME_ROLE:api}
   workers:
