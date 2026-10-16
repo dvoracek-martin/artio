@@ -204,3 +204,24 @@ artio-sellable-select{display:block;min-width:200px}.create-form>artio-sellable-
 .setup-password-toggle.enabled .setup-toggle-track>span{transform:translateX(15px);background:#fff}
 .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(max-width:700px){.setup-topbar-actions{gap:8px}.setup-language-picker select{min-width:92px;padding:6px 22px 6px 8px}}
+
+/* Authentication controls */
+.login-card>.header-actions{position:fixed;top:20px;right:26px;z-index:5;gap:14px;align-items:center}
+.login-card .login-language-control{display:flex;grid-template-columns:none;align-items:center;gap:8px;margin:0;color:#b7c5da;font-size:11px}
+.login-card .login-language-control .language-picker{min-width:116px;padding:8px 30px 8px 11px;border:1px solid #34435c;border-radius:9px;background:#0b1628;color:var(--ink);font:inherit;cursor:pointer}
+.developer-mode-badge{display:inline-flex;align-items:center;min-height:30px;padding:0 11px;border:1px solid #7c5ce7;border-radius:999px;background:#35215d;color:#e0d4ff;font-size:10px;font-weight:700;letter-spacing:.7px;box-shadow:0 0 22px #8b5cf633}
+.login-card .auth-password-field{display:grid;gap:8px}
+.login-card .auth-password-field>label{display:block}
+.login-card .auth-password-control{position:relative;display:flex;align-items:center}
+.login-card .auth-password-control input{padding-right:48px}
+.login-card .password-visibility-toggle{position:absolute;right:7px;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:7px;background:transparent;color:#91a5c3}
+.login-card .password-visibility-toggle:hover{background:#ffffff0d;color:#e3eaff}
+.login-card .password-visibility-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.login-card .remember-switch{position:relative;display:inline-flex;grid-template-columns:none;align-items:center;gap:10px;width:max-content;max-width:100%;margin:0;color:#c2cee1;font-size:11px;cursor:pointer;user-select:none}
+.login-card .remember-switch>input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.remember-switch-track{display:inline-flex;align-items:center;width:38px;height:22px;padding:3px;border:1px solid #40516c;border-radius:999px;background:#17243a;transition:background .18s,border-color .18s;flex:none}
+.remember-switch-track>span{width:14px;height:14px;border-radius:50%;background:#a5b3c9;transition:transform .18s,background .18s}
+.login-card .remember-switch>input:checked+.remember-switch-track{border-color:#5e73ff;background:linear-gradient(110deg,#06b6d4,#6366f1 62%,#a855f7)}
+.login-card .remember-switch>input:checked+.remember-switch-track>span{transform:translateX(16px);background:#fff}
+.login-card .remember-switch>input:focus-visible+.remember-switch-track{outline:2px solid #06b6d4;outline-offset:3px}
+@media(max-width:700px){.login-card>.header-actions{top:12px;right:12px;gap:8px}.login-card .login-language-control>span{display:none}.login-card .login-language-control .language-picker{min-width:100px}.developer-mode-badge{font-size:9px;padding:0 8px}.login-card{padding:48px 26px 30px}}
