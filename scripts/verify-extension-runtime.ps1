@@ -95,11 +95,15 @@ try {
         if (-not $SkipObjectStorageTest) {
             $verificationArguments += @('--tests', 'io.artio.api.extensions.ObjectStorageDockerIntegrationTests')
         }
-        $gradleWrapper = if ($env:OS -eq 'Windows_NT') { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
+        $gradleWrapper = if ($IsWindows) { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
         if (-not (Test-Path -LiteralPath $gradleWrapper -PathType Leaf)) {
             throw "Gradle wrapper was not found at '$gradleWrapper'."
         }
-        & $gradleWrapper @verificationArguments
+        if ($IsWindows) {
+            & $gradleWrapper @verificationArguments
+        } else {
+            bash $gradleWrapper @verificationArguments
+        }
         if ($LASTEXITCODE -ne 0) { throw 'The real Docker extension lifecycle integration test failed.' }
     } finally { Pop-Location }
 } finally {

@@ -62,7 +62,15 @@ try {
     Push-Location $repoRoot
     try {
         $gradleWrapper = if ($IsWindows) { Join-Path $repoRoot 'gradlew.bat' } else { Join-Path $repoRoot 'gradlew' }
-        & $gradleWrapper :artio-rest-api:integrationTest --rerun --tests io.artio.api.extensions.ObservabilityPluginIntegrationTests --no-daemon
+        $verificationArguments = @(
+            ':artio-rest-api:integrationTest', '--rerun', '--tests',
+            'io.artio.api.extensions.ObservabilityPluginIntegrationTests', '--no-daemon'
+        )
+        if ($IsWindows) {
+            & $gradleWrapper @verificationArguments
+        } else {
+            bash $gradleWrapper @verificationArguments
+        }
         if ($LASTEXITCODE -ne 0) { throw 'The live observability plugin bundle integration test failed.' }
     } finally { Pop-Location }
 } finally {
