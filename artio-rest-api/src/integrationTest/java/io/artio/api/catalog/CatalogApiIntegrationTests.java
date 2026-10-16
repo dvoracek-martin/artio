@@ -1656,11 +1656,14 @@ class CatalogApiIntegrationTests {
                         + "VALUES (?,?,'PENDING',1,0,0,1,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
                 orderId, adminUserId, "route-rejection-" + orderId);
         PROVIDER_CHECKOUT_FAILURE.set(new PaymentProvider.CheckoutRejectedException("PROVIDER_REJECTED_422"));
+        var discovered = http.postForEntity("/api/v1/payments/methods", Map.of("country", "CH", "currency", "CHF"), Map.class);
+        List<Map> options = (List<Map>) discovered.getBody().get("methods");
+        String cardReference = (String) findPaymentOption(options, "Card").get("reference");
         var headers = new HttpHeaders();
         headers.setBearerAuth(adminToken);
 
         var response = http.exchange("/api/v1/payments/orders/{orderId}/checkout-session", HttpMethod.POST,
-                new HttpEntity<>(null, headers), ApiError.class, orderId);
+                new HttpEntity<>(Map.of("methodReference", cardReference), headers), ApiError.class, orderId);
 
         assertThat(response.getStatusCode().value()).isEqualTo(422);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED");
@@ -1879,7 +1882,7 @@ class CatalogApiIntegrationTests {
         reservationExpiryScheduler.releaseExpiredReservations();
 
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, unpaidOrderId)).isEqualTo("CANCELLED");
-        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("CAPTURED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
         assertThat(inventory.reservationsByOrder(unpaidOrderId)).singleElement()
                 .extracting(io.artio.api.inventory.InventoryApplicationService.ReservationView::state)
                 .isEqualTo(io.artio.inventory.ReservationState.RELEASED);
