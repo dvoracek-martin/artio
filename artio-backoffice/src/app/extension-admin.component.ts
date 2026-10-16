@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { currentBackofficeLocale } from './backoffice-locale';
 import { extensionAdminText, type ExtensionAdminTextKey } from './extension-admin-locale';
@@ -67,6 +67,7 @@ export class ExtensionAdminComponent {
   newInstanceKey='region-1'; newInstanceConfigurationJson='{}'; @Input() instanceConfigurations:Record<string,string>={};
   newBinding={instanceId:'',capabilityId:'',operationName:'',scopeJson:'{}',priority:0};
   @Output() action=new EventEmitter<ExtensionAdminAction>(); @Output() manifestChange=new EventEmitter<string>();
+  ngOnChanges(changes:SimpleChanges):void{if(changes['selectedExtension']||changes['extensionInvocation']){const points=this.selectedExtension?.manifest?.extensionPoints;if(Array.isArray(points)&&points.length&&!points.includes(this.extensionInvocation.extensionPoint))this.extensionInvocation.extensionPoint=points[0]}}
   t(key:ExtensionAdminTextKey):string{return extensionAdminText(currentBackofficeLocale(),key)}
   isRegistered(pluginId:string):boolean{return this.extensions.some(extension=>extension.id===pluginId&&extension.lifecycleState!=='UNINSTALLED')}
   emit(action:ExtensionAdminAction):void{this.action.emit(action)}

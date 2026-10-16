@@ -125,4 +125,17 @@ describe('ExtensionAdminComponent', () => {
     buttons.find(button => button.textContent?.includes('Obligations'))?.click();
     expect(actions).toEqual(['drainInstance', 'instanceHealth', 'instanceObligations']);
   });
+
+  it('selects a declared extension point for live diagnostics by default', () => {
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const invocation = { extensionPoint: '', operation: 'health', payloadJson: '{}' };
+    fixture.componentRef.setInput('selectedExtension', {
+      lifecycleState: 'ENABLED', manifest: { id: 'marketplace.reference', extensionPoints: ['payment.provider.v1'] }
+    });
+    fixture.componentRef.setInput('extensionInvocation', invocation);
+    fixture.detectChanges();
+    const select = fixture.nativeElement.querySelector('select[name="extensionPoint"]') as HTMLSelectElement;
+    expect(invocation.extensionPoint).toBe('payment.provider.v1');
+    expect(select.value).toBe('payment.provider.v1');
+  });
 });
