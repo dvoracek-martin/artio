@@ -1112,6 +1112,14 @@ CREATE TABLE extension_installation_jobs (
 CREATE INDEX extension_installation_jobs_queue_idx ON extension_installation_jobs(state,created_at)
     WHERE state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
 CREATE INDEX extension_installation_jobs_plugin_idx ON extension_installation_jobs(plugin_id,created_at DESC);
+CREATE TABLE extension_local_installation_archives (
+    job_id UUID PRIMARY KEY REFERENCES extension_installation_jobs(job_id) ON DELETE CASCADE,
+    quarantine_name VARCHAR(64) NOT NULL UNIQUE CHECK (quarantine_name ~ '^[a-f0-9-]{36}\.oci\.tar$'),
+    archive_sha256 CHAR(64) NOT NULL CHECK (archive_sha256 ~ '^sha256:[a-f0-9]{64}$'),
+    archive_bytes BIGINT NOT NULL CHECK (archive_bytes > 0),
+    verified_inventory JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(verified_inventory)='object'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE UNIQUE INDEX extension_installation_jobs_one_active_plugin_idx ON extension_installation_jobs(plugin_id)
     WHERE instance_id IS NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
 CREATE UNIQUE INDEX extension_installation_jobs_one_active_instance_idx ON extension_installation_jobs(plugin_id,instance_id)

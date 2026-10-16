@@ -6,19 +6,60 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import io.artio.extensions.ExtensionRuntimePort;
 
 class RemoteExtensionRuntimeTests {
     private HttpServer server;
+    private Path temporaryArchive;
 
     @AfterEach
     void stopServer() {
         if (server != null) server.stop(0);
+        if (temporaryArchive != null) {
+            try { Files.deleteIfExists(temporaryArchive); }
+            catch (java.io.IOException ignored) { }
+        }
+    }
+
+    @Test
+    void streamsLocalArchiveToTheAuthenticatedControllerWithSeparateImageInventory() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> inventory = new AtomicReference<>();
+        AtomicReference<byte[]> archive = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/extensions/local-archive", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            inventory.set(exchange.getRequestHeaders().getFirst("X-Artio-Image-Inventory"));
+            archive.set(exchange.getRequestBody().readAllBytes());
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        var runtime = new RemoteExtensionRuntime(new ObjectMapper(), "http://127.0.0.1:" + server.getAddress().getPort(),
+                "integration-controller-token-value-at-least-32-characters");
+        temporaryArchive = Files.createTempFile("artio-archive-stream-test", ".tar");
+        Files.write(temporaryArchive, new byte[] {7, 8, 9});
+        String imageReferenceDigest = "sha256:" + "c".repeat(64);
+        String configDigest = "sha256:" + "d".repeat(64);
+
+        runtime.importLocalArchive(temporaryArchive, java.util.Map.of(imageReferenceDigest, List.of(configDigest)));
+
+        assertThat(authorization.get()).isEqualTo("Bearer integration-controller-token-value-at-least-32-characters");
+        assertThat(exchangeInventory(inventory.get())).isEqualTo(java.util.Map.of(imageReferenceDigest, List.of(configDigest)));
+        assertThat(archive.get()).containsExactly(7, 8, 9);
+    }
+
+    private static java.util.Map<String, List<String>> exchangeInventory(String encoded) throws Exception {
+        byte[] json = java.util.Base64.getUrlDecoder().decode(encoded);
+        return new ObjectMapper().readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() { });
     }
 
     @Test

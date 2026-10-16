@@ -15,6 +15,7 @@ import io.artio.extensions.PluginManifest;
 import io.artio.extensions.ExtensionRuntimePort;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -84,8 +85,48 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         }
     }
 
+    @Override
+    public void importLocalArchive(Path archive, Map<String, List<String>> manifestConfigDigests) {
+        ExtensionRuntimePort.super.importLocalArchive(archive, manifestConfigDigests);
+    }
+
+    @Override
+    public void importLocalArchive(InputStream archive, Map<String, List<String>> manifestConfigDigests) {
+        if (manifestConfigDigests == null || manifestConfigDigests.isEmpty()) {
+            throw new IllegalArgumentException("Verified OCI image inventory is required");
+        }
+        for (var image : manifestConfigDigests.entrySet()) {
+            if (image.getKey() == null || !image.getKey().matches("sha256:[a-f0-9]{64}")
+                || image.getValue() == null || image.getValue().isEmpty() || image.getValue().size() > 16
+                || image.getValue().stream().anyMatch(config -> config == null || !config.matches("sha256:[a-f0-9]{64}"))) {
+                throw new IllegalArgumentException("Verified OCI image inventory is invalid");
+            }
+        }
+        try {
+            docker.loadImageCmd(archive).exec();
+            for (var image : manifestConfigDigests.entrySet()) {
+                String digest = image.getKey();
+                boolean tagged = false;
+                for (String configDigest : image.getValue()) {
+                    try {
+                        docker.inspectImageCmd(configDigest).exec();
+                        docker.tagImageCmd(configDigest, "artio-local-cache", localTag(digest)).withForce(true).exec();
+                        tagged = true;
+                        break;
+                    } catch (NotFoundException unavailablePlatform) {
+                        // Docker only loads the image matching its own platform from a multi-platform archive.
+                    }
+                }
+                if (!tagged) throw new IllegalStateException("Verified local OCI image was not loaded by Docker");
+            }
+        } catch (RuntimeException failure) {
+            throw failure;
+        }
+    }
+
     private void pullImage(String image, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         requirePinnedImage(image);
+        if (hasLocalImage(image)) return;
         boolean completed;
         var pull = docker.pullImageCmd(image);
         String registryHost = image.substring(0, image.indexOf('/'));
@@ -195,7 +236,7 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         labels.put("io.artio.extension.ports", service.internalPorts().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
         labels.put("io.artio.managed", "true");
         if (testRunId != null && !testRunId.isBlank()) labels.put("io.artio.test.run", testRunId);
-        var create = docker.createContainerCmd(service.image()).withName(name).withHostConfig(host)
+        var create = docker.createContainerCmd(resolveImage(service.image())).withName(name).withHostConfig(host)
                 .withUser("10001:10001")
                 .withLabels(labels);
         var exposedPorts = new java.util.ArrayList<ExposedPort>();
@@ -205,6 +246,35 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         create.withEnv(environment);
         create.exec();
         docker.startContainerCmd(name).exec();
+    }
+
+    private boolean hasLocalImage(String image) {
+        String alias = localAlias(image);
+        if (alias == null) return false;
+        try {
+            docker.inspectImageCmd(alias).exec();
+            return true;
+        } catch (NotFoundException notImported) {
+            return false;
+        }
+    }
+
+    private String resolveImage(String image) {
+        String alias = localAlias(image);
+        return alias != null && hasLocalImage(image) ? alias : image;
+    }
+
+    private static String localAlias(String image) {
+        if (image == null) return null;
+        int marker = image.lastIndexOf("@sha256:");
+        if (marker < 1) return null;
+        String digest = image.substring(marker + 1);
+        if (!digest.matches("sha256:[a-f0-9]{64}")) return null;
+        return "artio-local-cache:" + localTag(digest);
+    }
+
+    private static String localTag(String digest) {
+        return "ref-sha256-" + digest.substring("sha256:".length());
     }
 
     private java.util.List<String> environment(String runtimeIdentity, PluginManifest manifest, RuntimeService service,

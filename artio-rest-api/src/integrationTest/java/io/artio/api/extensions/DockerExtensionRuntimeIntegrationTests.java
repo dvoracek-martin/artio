@@ -22,6 +22,43 @@ import org.junit.jupiter.api.Test;
 /** Real Docker test, enabled by scripts/verify-extension-runtime.ps1 after building and pushing the local fixture images. */
 class DockerExtensionRuntimeIntegrationTests {
     @Test
+    void inspectsDockerSaveArchiveAndImportsItsVerifiedConfigIntoLocalCache() throws Exception {
+        String archiveFile = System.getenv("ARTIO_LOCAL_ARCHIVE_TEST_FILE");
+        String imageReferenceDigest = System.getenv("ARTIO_LOCAL_ARCHIVE_TEST_REFERENCE_DIGEST");
+        assumeTrue(archiveFile != null && imageReferenceDigest != null,
+                "Run scripts/verify-local-archive-import.ps1 to provide the Docker-save fixture");
+        var manifest = new PluginManifest("1", "archive.acceptance", "Archive Acceptance", "Artio", "1.0.0",
+                "Local archive runtime acceptance", "0.1.0", "9.0.0",
+                "artio-local-archive-acceptance@" + imageReferenceDigest,
+                List.of(), List.of(), Map.of(), List.of(), "/health", "/diagnostics");
+        var archive = java.nio.file.Path.of(archiveFile);
+        var inspection = new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults())
+                .inspect(archive, manifest);
+        assertThat(inspection.sourceFormat()).isEqualTo("DOCKER_SAVE");
+        var inventory = new java.util.LinkedHashMap<String, List<String>>();
+        inspection.images().forEach((digest, image) -> inventory.put(digest, image.configDigests()));
+        String alias = "artio-local-cache:ref-" + imageReferenceDigest.replace(':', '-');
+
+        DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        var transport = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost())
+                .sslConfig(config.getSSLConfig()).maxConnections(4).connectionTimeout(Duration.ofSeconds(5))
+                .responseTimeout(Duration.ofSeconds(120)).build();
+        try (DockerClient docker = DockerClientImpl.getInstance(config, transport)) {
+            var runtime = new DockerExtensionRuntime(docker, "artio-extensions", 8080,
+                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"));
+            try {
+                runtime.importLocalArchive(archive, inventory);
+                runtime.install(manifest);
+                assertThat(docker.inspectImageCmd(alias).exec().getId()).isEqualTo(inspection.images()
+                        .get(imageReferenceDigest).configDigests().getFirst());
+            } finally {
+                try { docker.removeImageCmd(alias).withForce(false).exec(); }
+                catch (com.github.dockerjava.api.exception.NotFoundException ignored) { }
+            }
+        }
+    }
+
+    @Test
     void installsInvokesUpdatesAndRollsBackRealRestrictedContainers() throws Exception {
         verifyLifecycle(false);
     }

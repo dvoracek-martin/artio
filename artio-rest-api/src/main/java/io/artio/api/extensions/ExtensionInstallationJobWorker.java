@@ -5,6 +5,12 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.PluginManifest;
 import java.util.List;
+import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,14 +27,20 @@ public class ExtensionInstallationJobWorker {
     private final ObjectMapper mapper;
     private final ObjectProvider<ExtensionRuntimePort> runtimeProvider;
     private final ExtensionRegistryCredentialService registryCredentials;
+    private final OciArchiveInspector archiveInspector;
+    private final OciArchiveQuarantineStore quarantine;
 
     public ExtensionInstallationJobWorker(JdbcTemplate jdbc, ObjectMapper mapper,
             ObjectProvider<ExtensionRuntimePort> runtimeProvider,
-            ExtensionRegistryCredentialService registryCredentials) {
+            ExtensionRegistryCredentialService registryCredentials,
+            OciArchiveInspector archiveInspector,
+            OciArchiveQuarantineStore quarantine) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.runtimeProvider = runtimeProvider;
         this.registryCredentials = registryCredentials;
+        this.archiveInspector = archiveInspector;
+        this.quarantine = quarantine;
     }
 
     @Scheduled(fixedDelayString = "${artio.extensions.installations.poll-interval-ms:1000}")
@@ -42,10 +54,13 @@ public class ExtensionInstallationJobWorker {
                     WHERE state='REQUESTED' OR (state IN ('POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE') AND lease_until<now())
                     ORDER BY created_at LIMIT 4 FOR UPDATE SKIP LOCKED
                 )
-                RETURNING job_id,plugin_id,instance_id,runtime_identity,manifest_snapshot::text,permission_snapshot::text,image_snapshot::text,lease_token
+                RETURNING job_id,plugin_id,instance_id,runtime_identity,manifest_snapshot::text,permission_snapshot::text,image_snapshot::text,lease_token,source_kind,
+                    (SELECT quarantine_name FROM extension_local_installation_archives a WHERE a.job_id=extension_installation_jobs.job_id) AS quarantine_name,
+                    (SELECT archive_sha256 FROM extension_local_installation_archives a WHERE a.job_id=extension_installation_jobs.job_id) AS archive_sha256
                 """, (rs, row) -> new InstallJob(rs.getObject("job_id", UUID.class), rs.getString("plugin_id"),
                 rs.getObject("instance_id", UUID.class), rs.getString("runtime_identity"), rs.getString("manifest_snapshot"),
-                rs.getString("permission_snapshot"), rs.getString("image_snapshot"), rs.getObject("lease_token", UUID.class)));
+                rs.getString("permission_snapshot"), rs.getString("image_snapshot"), rs.getObject("lease_token", UUID.class),
+                rs.getString("source_kind"), rs.getString("quarantine_name"), rs.getString("archive_sha256")));
         jobs.forEach(this::install);
     }
 
@@ -69,9 +84,27 @@ public class ExtensionInstallationJobWorker {
                 throw new IllegalStateException("Installation image snapshot is invalid or changed");
             }
             if (!transition(job, "DOWNLOADING_OR_IMPORTING")) return;
-            var auth = registryCredentials.credentialsFor(manifest);
-            if (job.instanceId() == null) runtime.install(manifest, auth);
-            else runtime.installInstance(job.runtimeIdentity(), manifest, auth);
+            if ("ARCHIVE".equals(job.sourceKind())) {
+                Path archive = archivePath(job.quarantineName());
+                if (!job.archiveSha256().equals(sha256(archive))) throw new IllegalStateException("Quarantined archive digest changed");
+                OciArchiveInspector.Inspection inspection = archiveInspector.inspect(archive, manifest);
+                Map<String, List<String>> inventory = new java.util.LinkedHashMap<>();
+                inspection.images().forEach((digest, image) -> inventory.put(digest, image.configDigests()));
+                Map<String, Object> provenance = Map.of(
+                        "sourceFormat", inspection.sourceFormat(),
+                        "imageReferenceToConfigDigests", inventory,
+                        "verifiedManifestDigests", inspection.sourceFormat().equals("OCI_LAYOUT")
+                                ? List.copyOf(inspection.images().keySet()) : List.of());
+                jdbc.update("UPDATE extension_local_installation_archives SET verified_inventory=?::jsonb WHERE job_id=?",
+                        mapper.writeValueAsString(provenance), job.jobId());
+                runtime.importLocalArchive(archive, inventory);
+                if (job.instanceId() == null) runtime.install(manifest);
+                else runtime.installInstance(job.runtimeIdentity(), manifest);
+            } else {
+                var auth = registryCredentials.credentialsFor(manifest);
+                if (job.instanceId() == null) runtime.install(manifest, auth);
+                else runtime.installInstance(job.runtimeIdentity(), manifest, auth);
+            }
             if (!transition(job, "VERIFYING_ARTIFACTS") || !transition(job, "REGISTERING_RELEASE")) return;
             if (job.instanceId() == null) {
                 jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", job.pluginId());
@@ -81,9 +114,15 @@ public class ExtensionInstallationJobWorker {
                 jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
                         + "WHERE instance_id=? AND lifecycle_state IN ('CONFIGURED','FAILED')", job.instanceId());
             }
-            jdbc.update("UPDATE extension_installation_jobs SET state='INSTALLED',lease_token=NULL,lease_until=NULL,error_code=NULL,"
+            int completed = jdbc.update("UPDATE extension_installation_jobs SET state='INSTALLED',lease_token=NULL,lease_until=NULL,error_code=NULL,"
                             + "completed_at=now(),updated_at=now() WHERE job_id=? AND lease_token=?",
                     job.jobId(), job.leaseToken());
+            if (completed == 1 && "ARCHIVE".equals(job.sourceKind())) {
+                try { quarantine.delete(archivePath(job.quarantineName())); }
+                catch (java.io.IOException cleanupFailure) {
+                    // Keep the installation complete; a periodic quarantine cleanup can remove stale files safely.
+                }
+            }
         } catch (ExtensionSecurityPolicy.BannedArtifactException blocked) {
             jdbc.update("UPDATE extension_installation_jobs SET state='SECURITY_BLOCKED',lease_token=NULL,lease_until=NULL,error_code='MARKETPLACE_SECURITY_ADVISORY',"
                             + "completed_at=now(),updated_at=now() WHERE job_id=? AND lease_token=?",
@@ -110,7 +149,30 @@ public class ExtensionInstallationJobWorker {
                 state, job.jobId(), job.leaseToken()) == 1;
     }
 
+    private Path archivePath(String quarantineName) {
+        Path archive = quarantine.pathFor(quarantineName);
+        if (!Files.isRegularFile(archive)) {
+            throw new IllegalStateException("Quarantined local archive is missing");
+        }
+        return archive;
+    }
+
+    private static String sha256(Path archive) throws java.io.IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (var input = Files.newInputStream(archive)) {
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) if (count > 0) digest.update(buffer, 0, count);
+            }
+            return "sha256:" + HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
     private record InstallJob(UUID jobId, String pluginId, UUID instanceId, String runtimeIdentity,
-            String manifestJson, String permissionJson, String imageJson, UUID leaseToken) { }
+            String manifestJson, String permissionJson, String imageJson, UUID leaseToken, String sourceKind,
+            String quarantineName, String archiveSha256) { }
     private record PermissionSnapshot(List<String> permissions) { }
 }

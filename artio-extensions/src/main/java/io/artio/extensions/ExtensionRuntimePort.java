@@ -4,9 +4,25 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
+import java.io.InputStream;
 
 /** Core-owned boundary to an isolated extension process; the Docker adapter is outside this module. */
 public interface ExtensionRuntimePort {
+    /** Imports an already verified OCI layout into the private Docker cache without using registry credentials. */
+    default void importLocalArchive(Path archive, Map<String, java.util.List<String>> manifestConfigDigests) {
+        try (InputStream input = Files.newInputStream(archive)) {
+            importLocalArchive(input, manifestConfigDigests);
+        } catch (IOException failure) {
+            throw new IllegalStateException("Local OCI archive could not be read", failure);
+        }
+    }
+    /** Internal controller boundary; callers must authenticate and validate the archive before invoking it. */
+    default void importLocalArchive(InputStream archive, Map<String, java.util.List<String>> manifestConfigDigests) {
+        throw new ExtensionUnavailableException("Local OCI archive import is unavailable");
+    }
     void install(PluginManifest manifest);
     default void install(PluginManifest manifest, Map<String, RegistryAuth> registryCredentials) {
         install(manifest);

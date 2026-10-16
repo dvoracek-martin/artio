@@ -17,6 +17,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @RestControllerAdvice
 @ConditionalOnProperty(name = "artio.runtime.role", havingValue = "extension-controller")
 final class ExtensionControllerErrorHandler {
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(ExtensionControllerErrorHandler.class);
     @ExceptionHandler(ExtensionRuntimePort.ExtensionCallException.class)
     ResponseEntity<Map<String, String>> providerFailure(ExtensionRuntimePort.ExtensionCallException failure) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
@@ -62,7 +63,8 @@ final class ExtensionControllerErrorHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    ResponseEntity<Map<String, String>> operationFailure() {
+    ResponseEntity<Map<String, String>> operationFailure(Exception failure) {
+        LOGGER.error("Extension controller operation failed", failure);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("code", "CONTROLLER_OPERATION_FAILED"));
     }
 }

@@ -26,15 +26,44 @@ public class ExtensionInstallationJobOperations {
     @Transactional
     public JobView request(String pluginId, UUID instanceId, String runtimeIdentity, long releaseId,
             PluginManifest manifest, UUID actorId, String idempotencyKey) {
+        return request(pluginId, instanceId, runtimeIdentity, releaseId, manifest, actorId, idempotencyKey, "REGISTERED");
+    }
+
+    @Transactional
+    public JobView requestArchive(String pluginId, UUID instanceId, String runtimeIdentity, long releaseId,
+            PluginManifest manifest, UUID actorId, String idempotencyKey, String quarantineName,
+            String archiveSha256, long archiveBytes) {
+        return request(pluginId, instanceId, runtimeIdentity, releaseId, manifest, actorId, idempotencyKey,
+                "ARCHIVE", new ArchiveMetadata(quarantineName, archiveSha256, archiveBytes));
+    }
+
+    private JobView request(String pluginId, UUID instanceId, String runtimeIdentity, long releaseId,
+            PluginManifest manifest, UUID actorId, String idempotencyKey, String sourceKind) {
+        return request(pluginId, instanceId, runtimeIdentity, releaseId, manifest, actorId, idempotencyKey,
+                sourceKind, null);
+    }
+
+    private JobView request(String pluginId, UUID instanceId, String runtimeIdentity, long releaseId,
+            PluginManifest manifest, UUID actorId, String idempotencyKey, String sourceKind,
+            ArchiveMetadata archive) {
         ExtensionSecurityPolicy.requireAllowed(jdbc, manifest);
         jdbc.query("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", rs -> { }, actorId + ":" + idempotencyKey);
-        JobView existing = jdbc.query("SELECT job_id,plugin_id,instance_id FROM extension_installation_jobs WHERE requested_by=? AND idempotency_key=?",
+        JobView existing = jdbc.query("SELECT job_id,plugin_id,instance_id,source_kind FROM extension_installation_jobs WHERE requested_by=? AND idempotency_key=?",
                 rs -> rs.next() ? new JobView(rs.getObject("job_id", UUID.class), rs.getString("plugin_id"),
                         rs.getObject("instance_id", UUID.class), null, null, null, null, null, 0, null, null, null, null) : null,
                 actorId, idempotencyKey);
         if (existing != null) {
-            if (!existing.pluginId().equals(pluginId) || !java.util.Objects.equals(existing.instanceId(), instanceId)) {
+            String existingSourceKind = jdbc.queryForObject("SELECT source_kind FROM extension_installation_jobs WHERE job_id=?", String.class, existing.jobId());
+            if (!existing.pluginId().equals(pluginId) || !java.util.Objects.equals(existing.instanceId(), instanceId)
+                    || !sourceKind.equals(existingSourceKind)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency key was already used for another installation");
+            }
+            if (archive != null) {
+                String existingDigest = jdbc.query("SELECT archive_sha256 FROM extension_local_installation_archives WHERE job_id=?",
+                        rs -> rs.next() ? rs.getString(1) : null, existing.jobId());
+                if (!archive.sha256().equals(existingDigest)) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency key was already used for another archive");
+                }
             }
             return get(existing.jobId());
         }
@@ -55,9 +84,17 @@ public class ExtensionInstallationJobOperations {
         manifest.services().forEach(service -> images.add(Map.of("id", service.id(), "image", service.image())));
         String imageJson = write(images);
         jdbc.update("INSERT INTO extension_installation_jobs(job_id,plugin_id,instance_id,runtime_identity,source_kind,source_release_id,"
-                        + "requested_by,idempotency_key,manifest_snapshot,permission_snapshot,image_snapshot,state) VALUES (?,?,?,?,'REGISTERED',?,?,?,?::jsonb,?::jsonb,?::jsonb,'REQUESTED')",
-                jobId, pluginId, instanceId, runtimeIdentity, releaseId > 0 ? releaseId : null, actorId, idempotencyKey,
+                        + "requested_by,idempotency_key,manifest_snapshot,permission_snapshot,image_snapshot,state) VALUES (?,?,?,?,?,?,?, ?,?::jsonb,?::jsonb,?::jsonb,'REQUESTED')",
+                jobId, pluginId, instanceId, runtimeIdentity, sourceKind, releaseId > 0 ? releaseId : null, actorId, idempotencyKey,
                 manifestJson, permissionJson, imageJson);
+        if (archive != null) {
+            jdbc.update("INSERT INTO extension_local_installation_archives(job_id,quarantine_name,archive_sha256,archive_bytes) "
+                            + "VALUES (?,?,?,?)",
+                    jobId, archive.quarantineName(), archive.sha256(), archive.bytes());
+            jdbc.update("INSERT INTO extension_audit_events(id,plugin_id,actor_user_id,action,details) VALUES (?,?,?,'LOCAL_ARCHIVE_UPLOAD',?::jsonb)",
+                    UUID.randomUUID(), pluginId, actorId,
+                    write(Map.of("jobId", jobId.toString(), "archiveSha256", archive.sha256(), "archiveBytes", archive.bytes())));
+        }
         return get(jobId);
     }
 
@@ -128,4 +165,5 @@ public class ExtensionInstallationJobOperations {
             Long releaseId, String releaseDigest, String state, int attemptCount, String errorCode,
             java.time.Instant createdAt, java.time.Instant updatedAt, java.time.Instant completedAt) { }
     private record Target(String pluginId, UUID instanceId, PluginManifest manifest) { }
+    private record ArchiveMetadata(String quarantineName, String sha256, long bytes) { }
 }

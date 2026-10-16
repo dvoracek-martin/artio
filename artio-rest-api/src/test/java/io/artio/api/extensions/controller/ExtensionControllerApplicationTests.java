@@ -16,6 +16,8 @@ import org.springframework.http.MediaType;
 import io.artio.extensions.ExtensionRuntimePort;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 @SpringBootTest(classes = ExtensionControllerApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -71,6 +73,27 @@ class ExtensionControllerApplicationTests {
         var grafana = http.postForEntity("/internal/v1/observability/grafana",
                 new HttpEntity<>("{\"method\":\"GET\",\"path\":\"/\",\"query\":null}", jsonHeaders()), String.class);
         assertThat(grafana.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void streamsAuthenticatedLocalArchiveAndInventoryToTheRuntimeBoundary() throws Exception {
+        var headers = new HttpHeaders();
+        headers.setBearerAuth("integration-controller-token-value-at-least-32-characters");
+        headers.setContentType(MediaType.parseMediaType("application/x-tar"));
+        headers.setContentLength(3);
+        String reference = "sha256:" + "c".repeat(64);
+        String config = "sha256:" + "d".repeat(64);
+        String inventory = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(java.util.Map.of(reference, java.util.List.of(config))));
+        headers.set("X-Artio-Image-Inventory", inventory);
+
+        var response = http.postForEntity("/internal/v1/extensions/local-archive",
+                new HttpEntity<>(new byte[] {1, 2, 3}, headers), String.class);
+
+        assertThat(response.getStatusCode()).withFailMessage("controller response: " + response.getBody())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+        verify(runtime).importLocalArchive(any(java.io.InputStream.class),
+                eq(java.util.Map.of(reference, java.util.List.of(config))));
     }
 
     @Test

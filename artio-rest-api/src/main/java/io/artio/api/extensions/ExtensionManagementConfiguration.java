@@ -22,4 +22,16 @@ public class ExtensionManagementConfiguration {
     PluginConfigurationValidator pluginConfigurationValidator() {
         return new PluginConfigurationValidator();
     }
+
+    @Bean
+    OciArchiveInspector ociArchiveInspector(
+            @Value("${artio.extensions.archive.maximum-bytes:2147483648}") long maximumArchiveBytes,
+            @Value("${artio.extensions.archive.maximum-expanded-bytes:8589934592}") long maximumExpandedBytes,
+            @Value("${artio.extensions.archive.maximum-expansion-ratio:200}") long maximumExpansionRatio,
+            @Value("${artio.extensions.archive.maximum-entries:100000}") int maximumEntries,
+            @Value("${artio.extensions.archive.maximum-images:16}") int maximumImages,
+            @Value("${artio.extensions.archive.maximum-json-bytes:4194304}") int maximumJsonBytes) {
+        return new OciArchiveInspector(new OciArchiveInspector.Limits(maximumArchiveBytes, maximumExpandedBytes,
+                maximumExpansionRatio, maximumEntries, maximumImages, maximumJsonBytes));
+    }
 }

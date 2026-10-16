@@ -113,7 +113,9 @@ class ExtensionInstallationJobIntegrationTests {
         var registryCredentials = org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class);
         org.mockito.Mockito.when(registryCredentials.credentialsFor(manifest)).thenReturn(Map.of());
         var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
-                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials);
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
+                new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30));
 
         worker.runPending();
 

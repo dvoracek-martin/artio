@@ -99,6 +99,10 @@ services:
       ARTIO_DATABASE_URL: jdbc:postgresql://postgres:5432/artio
       ARTIO_DATABASE_USERNAME: ${ARTIO_DATABASE_USERNAME:-artio}
       ARTIO_CATALOG_MEDIA_STORAGE_PATH: /var/lib/artio/media
+      ARTIO_EXTENSION_ARCHIVE_QUARANTINE_PATH: /var/lib/artio/extensions/quarantine
+      ARTIO_EXTENSION_ARCHIVE_MAX_BYTES: ${ARTIO_EXTENSION_ARCHIVE_MAX_BYTES:-2147483648}
+      ARTIO_MAX_UPLOAD_FILE_SIZE: ${ARTIO_MAX_UPLOAD_FILE_SIZE:-2GB}
+      ARTIO_MAX_UPLOAD_REQUEST_SIZE: ${ARTIO_MAX_UPLOAD_REQUEST_SIZE:-2050MB}
       ARTIO_SEARCH_ENABLED: ${ARTIO_SEARCH_ENABLED:-false}
       ARTIO_SEARCH_PROVIDER: ${ARTIO_SEARCH_PROVIDER:-extension}
       ARTIO_SEARCH_EXTENSION_PLUGIN_ID: ${ARTIO_SEARCH_EXTENSION_PLUGIN_ID:-catalog.opensearch}
@@ -146,6 +150,7 @@ services:
     volumes:
       - artio-installation-secrets:/run/artio-secrets:ro
       - artio-catalog-media:/var/lib/artio/media
+      - artio-extension-quarantine:/var/lib/artio/extensions/quarantine
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,6 +207,7 @@ services:
       ARTIO_EXTENSION_DOCKER_MODE: controller
       ARTIO_EXTENSION_DOCKER_NETWORK: artio-extensions
       ARTIO_EXTENSION_DOCKER_PORT: "8080"
+      ARTIO_EXTENSION_ARCHIVE_MAX_BYTES: ${ARTIO_EXTENSION_ARCHIVE_MAX_BYTES:-2147483648}
       ARTIO_EXTENSIONS_DOCKER_EGRESS_PROXY: http://extension-egress:3128
       PORT: "8090"
       SPRINGDOC_API_DOCS_ENABLED: "false"
@@ -341,6 +347,7 @@ volumes:
   artio-extension-controller-secrets:
   artio-kafka-data:
   artio-catalog-media:
+  artio-extension-quarantine:
 
 networks:
   default: {}

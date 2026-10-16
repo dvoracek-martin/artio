@@ -6,6 +6,7 @@ import { currentBackofficeLocale } from './backoffice-locale';
 import { extensionAdminText, type ExtensionAdminTextKey } from './extension-admin-locale';
 import { ExtensionSecurityComponent } from './extension-security.component';
 import { ExtensionRegistryCredentialsComponent } from './extension-registry-credentials.component';
+import { ExtensionLocalArchiveComponent } from './extension-local-archive.component';
 
 export type ExtensionAdminAction =
   | { type: 'toggleRegistration' | 'register' | 'closeAudit' | 'closeSettings' | 'saveConfiguration' | 'invoke' | 'openDashboards' }
@@ -25,7 +26,7 @@ export type ExtensionAdminAction =
   | { type: 'bindingState'; extension: any; binding: any; state: 'ACTIVE' | 'DISABLED' }
   | { type: 'subscriptionState'; extension: any; subscription: any; state: 'ACTIVE' | 'PAUSED' };
 
-@Component({ selector: 'artio-extension-admin', imports: [CommonModule, FormsModule, ExtensionSecurityComponent, ExtensionRegistryCredentialsComponent], template: `
+@Component({ selector: 'artio-extension-admin', imports: [CommonModule, FormsModule, ExtensionSecurityComponent, ExtensionRegistryCredentialsComponent, ExtensionLocalArchiveComponent], template: `
   <section class="extension-admin"><div class="toolbar"><p>{{t('intro')}}</p><button type="button" class="primary" (click)="emit({type:'toggleRegistration'})">＋ {{t('register')}}</button></div>
     <div class="panel table-panel"><p class="eyebrow">{{t('marketplace')}}</p><h2>{{t('marketplaceTitle')}}</h2><p class="muted">{{t('marketplaceHelp')}}</p>
       <form class="create-form" (ngSubmit)="emit({type:'marketplaceSearch',query:marketplaceQuery,country:marketplaceCountry})"><label>{{t('marketplaceSearchLabel')}}<input [(ngModel)]="marketplaceQuery" name="marketplaceQuery" maxlength="100"></label><label>{{t('marketplaceCountry')}}<input [(ngModel)]="marketplaceCountry" name="marketplaceCountry" maxlength="2" pattern="[A-Z]{2}"></label><button class="primary">{{t('marketplaceSearchButton')}}</button></form>
@@ -36,6 +37,7 @@ export type ExtensionAdminAction =
       @if (marketplaceTotal > 20) { <div class="panel-heading"><button type="button" class="link-button" [disabled]="marketplacePage===0" (click)="emit({type:'marketplacePage',page:marketplacePage-1,query:marketplaceQuery,country:marketplaceCountry})">{{t('marketplacePrevious')}}</button><span class="muted">{{marketplacePage+1}} · {{marketplaceTotal}}</span><button type="button" class="link-button" [disabled]="(marketplacePage+1)*20>=marketplaceTotal" (click)="emit({type:'marketplacePage',page:marketplacePage+1,query:marketplaceQuery,country:marketplaceCountry})">{{t('marketplaceNext')}}</button></div> }
     </div>
     <artio-extension-registry-credentials></artio-extension-registry-credentials>
+    <artio-extension-local-archive [extensions]="extensions"></artio-extension-local-archive>
     <artio-extension-security [status]="securityAdvisories"></artio-extension-security>
     <div class="panel table-panel"><p class="eyebrow">{{t('discovery')}}</p><h2>{{t('regionalCatalog')}}</h2><p class="muted">{{t('discoveryHelp')}}</p>@if(extensionsLoading){<p class="muted loading-indicator" role="status" aria-live="polite">{{t('loading')}}</p>}@else{<table><thead><tr><th scope="col">{{t('plugin')}}</th><th scope="col">{{t('region')}}</th><th scope="col">{{t('capability')}}</th><th scope="col">{{t('status')}}</th></tr></thead><tbody>@for (item of extensionCatalog; track item.pluginId) {
       <tr><td><strong>{{item.name}}</strong><small>{{item.pluginId}} · {{item.description}}</small></td><td>{{item.countryCode}} · {{item.optional?t('optional'):t('recommended')}}</td><td>{{item.extensionPoints.join(', ')}}</td><td>{{statusText(item.status)}}@if (item.version) { <small>v{{item.version}}</small> }@if (item.version && isMarketplaceReleaseBlocked(item.pluginId,item.version)) { <span class="error" role="status">{{t('securityBlocked')}}</span> }@else if (item.releaseRegistered && item.lifecycleState==='UNINSTALLED') { <button type="button" class="link-button" (click)="emit({type:'restoreRegistration',item})">{{t('restoreRegistration')}}</button> }@else if (item.releaseRegistered && item.lifecycleState!=='UNINSTALLED') { <button type="button" class="link-button" (click)="emit({type:'manageRelease',item})">{{t('manageRelease')}}</button> }</td></tr>

@@ -7,8 +7,8 @@ spring:
     enabled: true
   servlet:
     multipart:
-      max-file-size: ${ARTIO_MEDIA_MAX_FILE_SIZE:10MB}
-      max-request-size: ${ARTIO_MEDIA_MAX_REQUEST_SIZE:11MB}
+      max-file-size: ${ARTIO_MAX_UPLOAD_FILE_SIZE:2GB}
+      max-request-size: ${ARTIO_MAX_UPLOAD_REQUEST_SIZE:2050MB}
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -119,6 +119,14 @@ artio:
   extensions:
     core-version: ${ARTIO_CORE_VERSION:0.1.0}
     trusted-registries: ${ARTIO_EXTENSION_TRUSTED_REGISTRIES:}
+    archive:
+      quarantine-path: ${ARTIO_EXTENSION_ARCHIVE_QUARANTINE_PATH:/var/lib/artio/extensions/quarantine}
+      maximum-bytes: ${ARTIO_EXTENSION_ARCHIVE_MAX_BYTES:2147483648}
+      maximum-expanded-bytes: ${ARTIO_EXTENSION_ARCHIVE_MAX_EXPANDED_BYTES:8589934592}
+      maximum-expansion-ratio: ${ARTIO_EXTENSION_ARCHIVE_MAX_EXPANSION_RATIO:200}
+      maximum-entries: ${ARTIO_EXTENSION_ARCHIVE_MAX_ENTRIES:100000}
+      maximum-images: ${ARTIO_EXTENSION_ARCHIVE_MAX_IMAGES:16}
+      maximum-json-bytes: ${ARTIO_EXTENSION_ARCHIVE_MAX_JSON_BYTES:4194304}
     controller:
       url: ${ARTIO_EXTENSION_CONTROLLER_URL:http://extension-controller:8090}
       token: ${ARTIO_EXTENSION_CONTROLLER_TOKEN:}

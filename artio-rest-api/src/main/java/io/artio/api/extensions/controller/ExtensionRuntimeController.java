@@ -10,6 +10,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import java.util.Base64;
+import java.util.List;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,10 +27,48 @@ import org.springframework.web.bind.annotation.RestController;
 final class ExtensionRuntimeController {
     private final ExtensionRuntimePort runtime;
     private final ExtensionControllerSecurity security;
+    private final ObjectMapper mapper;
+    private final long maximumArchiveBytes;
 
-    ExtensionRuntimeController(ExtensionRuntimePort runtime, ExtensionControllerSecurity security) {
+    ExtensionRuntimeController(ExtensionRuntimePort runtime, ExtensionControllerSecurity security,
+            ObjectMapper mapper, @Value("${artio.extensions.archive.maximum-bytes:2147483648}") long maximumArchiveBytes) {
         this.runtime = runtime;
         this.security = security;
+        this.mapper = mapper;
+        this.maximumArchiveBytes = maximumArchiveBytes;
+    }
+
+    @PostMapping(value = "/local-archive", consumes = "application/x-tar")
+    ResponseEntity<Void> importLocalArchive(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "X-Artio-Image-Inventory", required = false) String encodedInventory,
+            @RequestHeader(value = "Content-Length", required = false) Long contentLength,
+            jakarta.servlet.http.HttpServletRequest request) {
+        security.authorize(authorization);
+        if (contentLength == null || contentLength <= 0 || contentLength > maximumArchiveBytes
+                || encodedInventory == null || encodedInventory.length() > 65_536) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Local OCI archive request exceeds its configured limits");
+        }
+        try {
+            Map<String, List<String>> inventory = mapper.readValue(Base64.getUrlDecoder().decode(encodedInventory),
+                    new TypeReference<Map<String, List<String>>>() { });
+            if (inventory.isEmpty() || inventory.size() > 16 || inventory.entrySet().stream().anyMatch(entry ->
+                    entry.getKey() == null || !entry.getKey().matches("sha256:[a-f0-9]{64}")
+                            || entry.getValue() == null || entry.getValue().isEmpty()
+                            || entry.getValue().size() > 16 || entry.getValue().stream().anyMatch(value ->
+                                    value == null || !value.matches("sha256:[a-f0-9]{64}")))) {
+                throw new IllegalArgumentException("Local OCI inventory is invalid");
+            }
+            runtime.importLocalArchive(request.getInputStream(), inventory);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException malformed) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Local OCI inventory is invalid", malformed);
+        } catch (java.io.IOException malformed) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Local OCI inventory is malformed", malformed);
+        }
     }
 
     @PostMapping("/install")

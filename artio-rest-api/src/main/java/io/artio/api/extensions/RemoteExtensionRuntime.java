@@ -8,7 +8,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
@@ -38,6 +42,34 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     @Override public void install(PluginManifest manifest) { install(manifest, Map.of()); }
     @Override public void install(PluginManifest manifest, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         post("internal/v1/extensions/install", new ManifestRequest(manifest, 1, registryCredentials), Duration.ofSeconds(150), Void.class);
+    }
+
+    @Override public void importLocalArchive(Path archive, Map<String, List<String>> manifestConfigDigests) {
+        try {
+            String inventory = Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(mapper.writeValueAsBytes(manifestConfigDigests));
+            if (inventory.length() > 65_536) throw new ExtensionProtocolException("Local OCI inventory exceeded its transport limit");
+            HttpRequest request = HttpRequest.newBuilder(baseUri.resolve("internal/v1/extensions/local-archive"))
+                    .timeout(Duration.ofMinutes(15))
+                    .header("Authorization", "Bearer " + token)
+                    .header("Content-Type", "application/x-tar")
+                    .header("X-Artio-Image-Inventory", inventory)
+                    .POST(HttpRequest.BodyPublishers.ofFile(archive))
+                    .build();
+            HttpResponse<String> response = http.send(request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() < 200 || response.statusCode() >= 300) throw translate(response);
+        } catch (ExtensionRuntimePort.ExtensionUnavailableException | ExtensionRuntimePort.ExtensionTimeoutException
+                | ExtensionRuntimePort.ExtensionCallException | ExtensionRuntimePort.ExtensionProtocolException failure) {
+            throw failure;
+        } catch (java.net.http.HttpTimeoutException timeout) {
+            throw new ExtensionTimeoutException("Extension controller archive import timed out");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new ExtensionUnavailableException("Extension controller archive import was interrupted");
+        } catch (Exception failure) {
+            throw new ExtensionUnavailableException("Extension controller archive import failed");
+        }
     }
     @Override public void installInstance(String runtimeIdentity, PluginManifest manifest) {
         installInstance(runtimeIdentity, manifest, Map.of());

@@ -8,8 +8,12 @@ import org.junit.jupiter.api.Test;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.InspectContainerCmd;
+import com.github.dockerjava.api.command.InspectImageCmd;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.PullImageCmd;
+import com.github.dockerjava.api.command.LoadImageCmd;
+import com.github.dockerjava.api.command.InspectImageCmd;
+import com.github.dockerjava.api.command.TagImageCmd;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.NetworkSettings;
 import com.github.dockerjava.api.model.PullResponseItem;
@@ -22,11 +26,35 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DockerExtensionRuntimeTests {
+    @Test
+    void importsVerifiedConfigIdsAndCreatesDeterministicLocalAliases() throws Exception {
+        String imageReferenceDigest = "sha256:" + "a".repeat(64);
+        String configDigest = "sha256:" + "b".repeat(64);
+        DockerClient docker = mock(DockerClient.class);
+        LoadImageCmd load = mock(LoadImageCmd.class);
+        InspectImageCmd inspect = mock(InspectImageCmd.class);
+        TagImageCmd tag = mock(TagImageCmd.class);
+        when(docker.loadImageCmd(any(java.io.InputStream.class))).thenReturn(load);
+        when(docker.inspectImageCmd(configDigest)).thenReturn(inspect);
+        when(inspect.exec()).thenReturn(mock(com.github.dockerjava.api.command.InspectImageResponse.class));
+        when(docker.tagImageCmd(configDigest, "artio-local-cache", "ref-sha256-" + "a".repeat(64))).thenReturn(tag);
+        when(tag.withForce(true)).thenReturn(tag);
+        var runtime = new DockerExtensionRuntime(docker, "artio-extensions", 8080,
+                new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
+
+        runtime.importLocalArchive(new java.io.ByteArrayInputStream(new byte[] {1}),
+                Map.of(imageReferenceDigest, java.util.List.of(configDigest)));
+
+        verify(docker).loadImageCmd(any(java.io.InputStream.class));
+        verify(tag).exec();
+    }
+
     @Test
     void incompleteImagePullFailsInstallationAndClosesThePullCallback() throws Exception {
         String image = "ghcr.io/artio/payments@sha256:" + "a".repeat(64);
@@ -35,6 +63,9 @@ class DockerExtensionRuntimeTests {
                 java.util.List.of(), java.util.List.of(), Map.of(), java.util.List.of(), "/health", "/diagnostics");
         DockerClient docker = mock(DockerClient.class);
         PullImageCmd pull = mock(PullImageCmd.class);
+        InspectImageCmd localCacheLookup = mock(InspectImageCmd.class);
+        when(docker.inspectImageCmd(anyString())).thenReturn(localCacheLookup);
+        when(localCacheLookup.exec()).thenThrow(new com.github.dockerjava.api.exception.NotFoundException("missing local cache alias"));
         @SuppressWarnings("unchecked")
         ResultCallback.Adapter<PullResponseItem> callback = mock(ResultCallback.Adapter.class);
         when(docker.pullImageCmd(image)).thenReturn(pull);
