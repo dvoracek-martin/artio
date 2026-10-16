@@ -35,7 +35,7 @@ class PersistedPermissionFilterTests {
     @Test void replacesStaleTokenRoleAndAddsOnlyCurrentDatabasePermissions() throws Exception {
         authenticate("SUPERADMIN");
         when(jdbc.queryForList(anyString(), eq(userId))).thenReturn(List.of(
-                Map.of("role", "ADMIN", "permissions", "REPORTS_VIEW", "active", true)));
+                Map.of("role", "ADMIN", "permissions", "REPORTS_VIEW", "active", true, "token_version", 0)));
         var request = new MockHttpServletRequest("GET", "/api/v1/admin/reports");
         var response = new MockHttpServletResponse();
         var continued = new AtomicBoolean();
@@ -55,7 +55,7 @@ class PersistedPermissionFilterTests {
     @Test void inactiveUserCannotContinueWithAnAlreadyIssuedToken() throws Exception {
         authenticate("ADMIN");
         when(jdbc.queryForList(anyString(), eq(userId))).thenReturn(List.of(
-                Map.of("role", "ADMIN", "permissions", "*", "active", false)));
+                Map.of("role", "ADMIN", "permissions", "*", "active", false, "token_version", 0)));
         var request = new MockHttpServletRequest("GET", "/api/v1/admin/reports");
         var response = new MockHttpServletResponse();
         var continued = new AtomicBoolean();
@@ -63,7 +63,7 @@ class PersistedPermissionFilterTests {
         filter.doFilter(request, response, (req, res) -> continued.set(true));
 
         assertThat(response.getStatus()).isEqualTo(401);
-        assertThat(response.getContentAsString()).contains("authenticated user is no longer available");
+        assertThat(response.getContentAsString()).contains("The authenticated user is no longer available");
         assertThat(continued).isFalse();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
@@ -71,7 +71,7 @@ class PersistedPermissionFilterTests {
     @Test void explicitNoPermissionsDoesNotGrantLegacyFullAccess() throws Exception {
         authenticate("ADMIN");
         when(jdbc.queryForList(anyString(), eq(userId))).thenReturn(List.of(
-                Map.of("role", "ADMIN", "permissions", "NONE", "active", true)));
+                Map.of("role", "ADMIN", "permissions", "NONE", "active", true, "token_version", 0)));
         var request = new MockHttpServletRequest("GET", "/api/v1/admin/reports");
         var response = new MockHttpServletResponse();
         var authorities = new AtomicReference<List<String>>();
@@ -86,7 +86,7 @@ class PersistedPermissionFilterTests {
     @Test void resolvesDedicatedExtensionPermissionsFromPersistedAccess() throws Exception {
         authenticate("ADMIN");
         when(jdbc.queryForList(anyString(), eq(userId))).thenReturn(List.of(
-                Map.of("role", "ADMIN", "permissions", "EXTENSION_MANAGE,EXTENSION_ROUTING_VIEW,EXTENSION_OPERATIONS_MANAGE", "active", true)));
+                Map.of("role", "ADMIN", "permissions", "EXTENSION_MANAGE,EXTENSION_ROUTING_VIEW,EXTENSION_OPERATIONS_MANAGE", "active", true, "token_version", 0)));
         var authorities = new AtomicReference<List<String>>();
 
         filter.doFilter(new MockHttpServletRequest("GET", "/api/v1/admin/extensions"), new MockHttpServletResponse(),
@@ -100,7 +100,8 @@ class PersistedPermissionFilterTests {
 
     private void authenticate(String tokenRole) {
         Jwt jwt = Jwt.withTokenValue("test").header("alg", "none").subject(userId.toString())
-                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).claim("role", tokenRole).build();
+                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).claim("role", tokenRole)
+                .claim("tokenVersion", 0L).build();
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt,
                 List.of(new SimpleGrantedAuthority("ROLE_" + tokenRole))));
     }
