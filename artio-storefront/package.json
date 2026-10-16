@@ -5,7 +5,7 @@
   "scripts": {
     "start": "ng serve --host 0.0.0.0",
     "build": "ng build",
-    "test": "ng test --watch=false"
+    "test": "ng test --watch=false && node --test ./scripts/service-worker.test.mjs"
   },
   "dependencies": {
     "@angular/common": "^22.2.3",
