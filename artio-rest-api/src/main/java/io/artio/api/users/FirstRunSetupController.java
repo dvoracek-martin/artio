@@ -106,8 +106,8 @@ public class FirstRunSetupController {
             throw new IllegalStateException("Saved setup progress is invalid", failure);
         }
         if (draft.isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Save setup progress before completing installation");
-        if (completion.password() == null || completion.password().length() < 16 || completion.password().length() > 72) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Administrator password must contain between 16 and 72 characters");
+        if (completion.password() == null || completion.password().length() < 8 || completion.password().length() > 72) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Administrator password must contain between 8 and 72 characters");
         }
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,permissions,created_at) VALUES (?,?,?,?,?,'SUPERADMIN','*',?)",

@@ -233,3 +233,14 @@ artio-sellable-select{display:block;min-width:200px}.create-form>artio-sellable-
 .button-spinner{width:12px;height:12px;margin-right:8px;vertical-align:-2px}
 @keyframes artio-loading-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.loading-indicator::before,.button-spinner{animation-duration:2.4s}}
+
+
+/* Startup feedback keeps the workspace visible but makes incomplete dashboard data obvious. */
+.auth-setup-loading{margin-top:28px}
+.workspace-loading-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:24px;background:#071120b8;backdrop-filter:blur(12px) saturate(75%);animation:artio-workspace-fade-in .22s ease-out}
+.workspace-loading-card{display:grid;justify-items:center;gap:14px;min-width:min(300px,100%);padding:30px 38px;border:1px solid #3a4d6b;border-radius:18px;background:linear-gradient(145deg,#14233aee,#0b1728f2);box-shadow:0 28px 90px #020611a6,0 0 45px #7065ee18;text-align:center}
+.workspace-loading-spinner{width:48px;height:48px;border:3px solid #344964;border-top-color:#24d1e8;border-right-color:#8d70ff;border-radius:50%;box-shadow:0 0 22px #31cde533;animation:artio-loading-spin .85s linear infinite}
+.workspace-loading-card strong{font-size:14px;font-weight:600;color:#f0f5ff}
+.workspace-loading-card small{font-size:11px;color:#9eafc8;line-height:1.6}
+@keyframes artio-workspace-fade-in{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.workspace-loading-overlay{animation:none}.workspace-loading-spinner{animation-duration:2.5s}}

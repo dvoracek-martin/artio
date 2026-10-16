@@ -30,6 +30,7 @@ public class PasswordResetController {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final BCryptPasswordEncoder PASSWORDS = new BCryptPasswordEncoder();
     private static final String GENERIC_MESSAGE = "If an administrator account matches that email, password recovery instructions have been sent.";
+    private static final String DEVELOPMENT_EMAIL_UNAVAILABLE = "Email could not be sent because email delivery is not configured in this developer instance. Use the local reset token below.";
 
     private final JdbcTemplate jdbc;
     private final ObjectProvider<NotificationTransport> notificationTransport;
@@ -47,14 +48,6 @@ public class PasswordResetController {
     @PostMapping("/request")
     @Transactional
     public ResetRequestResponse request(@RequestBody ResetRequest request) {
-        String email;
-        try { email = request == null ? null : new Email(request.email()).value(); }
-        catch (RuntimeException invalid) { return new ResetRequestResponse(GENERIC_MESSAGE, null); }
-
-        var accounts = jdbc.query("SELECT id,email FROM users WHERE email=? AND role IN ('ADMIN','SUPERADMIN') AND active=true",
-                (rs, row) -> new AdminAccount(rs.getObject("id", UUID.class), rs.getString("email")), email);
-        if (accounts.isEmpty()) return new ResetRequestResponse(GENERIC_MESSAGE, null);
-
         NotificationTransport transport = notificationTransport.getIfAvailable();
         boolean developerMode = (environment.acceptsProfiles(org.springframework.core.env.Profiles.of("dev"))
                 || environment.acceptsProfiles(org.springframework.core.env.Profiles.of("development")))
@@ -63,6 +56,17 @@ public class PasswordResetController {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Password recovery email is not configured. Contact your system administrator.");
         }
+        String email;
+        try { email = request == null ? null : new Email(request.email()).value(); }
+        catch (RuntimeException invalid) {
+            return new ResetRequestResponse(transport == null ? DEVELOPMENT_EMAIL_UNAVAILABLE : GENERIC_MESSAGE, null,
+                    transport != null);
+        }
+
+        var accounts = jdbc.query("SELECT id,email FROM users WHERE email=? AND role IN ('ADMIN','SUPERADMIN') AND active=true",
+                (rs, row) -> new AdminAccount(rs.getObject("id", UUID.class), rs.getString("email")), email);
+        if (accounts.isEmpty()) return new ResetRequestResponse(transport == null ? DEVELOPMENT_EMAIL_UNAVAILABLE : GENERIC_MESSAGE,
+                null, transport != null);
 
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
@@ -89,16 +93,17 @@ public class PasswordResetController {
                         "Password recovery email could not be sent. Please try again later.", failure);
             }
         }
-        return new ResetRequestResponse(GENERIC_MESSAGE, developerMode ? token : null);
+        return new ResetRequestResponse(transport == null ? DEVELOPMENT_EMAIL_UNAVAILABLE : GENERIC_MESSAGE,
+                developerMode && transport == null ? token : null, transport != null);
     }
 
     @PostMapping("/complete")
     @Transactional
     public Map<String, String> complete(@RequestBody ResetCompletion request) {
         if (request == null || request.token() == null || request.password() == null
-                || request.password().length() < 16 || request.password().length() > 72) {
+                || request.password().length() < 8 || request.password().length() > 72) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Use a password between 16 and 72 characters and a valid recovery link");
+                    "Use a password between 8 and 72 characters and a valid recovery link");
         }
         var rows = jdbc.query("SELECT t.user_id FROM artio_password_reset_tokens t JOIN users u ON u.id=t.user_id "
                         + "WHERE t.token_sha256=? AND t.used_at IS NULL AND t.expires_at>now() AND u.active=true "
@@ -120,6 +125,6 @@ public class PasswordResetController {
 
     public record ResetRequest(String email) { }
     public record ResetCompletion(String token, String password) { }
-    public record ResetRequestResponse(String message, String developmentToken) { }
+    public record ResetRequestResponse(String message, String developmentToken, boolean emailDeliveryConfigured) { }
     private record AdminAccount(UUID id, String email) { }
 }

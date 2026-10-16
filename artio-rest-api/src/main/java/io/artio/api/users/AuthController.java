@@ -49,7 +49,7 @@ public class AuthController {
         if (!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM users WHERE role IN ('ADMIN','SUPERADMIN'))", Boolean.class))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Customer registration is unavailable until the store administrator completes first-run setup");
         }
-        if (request == null || request.password() == null || request.password().length() < 12 || request.password().length() > 72) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must contain between 12 and 72 characters");
+        if (request == null || request.password() == null || request.password().length() < 8 || request.password().length() > 72) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must contain between 8 and 72 characters");
         try {
             User user = User.registerCustomer(new UserId(UUID.randomUUID()), new Email(request.email()), passwords.encode(request.password()), request.firstName(), request.lastName());
             jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) VALUES (?,?,?,?,?,'CUSTOMER',?)", user.getId().value(), user.email().value(), user.passwordHash(), user.firstName(), user.lastName(), java.sql.Timestamp.from(user.createdAt()));

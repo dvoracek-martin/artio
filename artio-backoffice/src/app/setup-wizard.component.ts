@@ -123,7 +123,7 @@ export class SetupWizardComponent implements OnInit {
     if (step === 3) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.draft.email.trim())) this.error = this.t('errorEmail');
       else if (![this.draft.firstName, this.draft.lastName].every(x => x.trim() && x.trim().length <= 100)) this.error = this.t('errorName');
-      else if (this.password.length < 16 || this.password.length > 72) this.error = this.t('errorPassword');
+      else if (this.password.length < 8 || this.password.length > 72) this.error = this.t('errorPassword');
       else if (this.password !== this.confirmation) this.error = this.t('errorPasswordMatch');
     }
     if (this.error) setTimeout(() => document.getElementById('setup-error')?.focus());
