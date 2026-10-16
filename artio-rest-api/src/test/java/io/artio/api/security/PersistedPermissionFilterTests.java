@@ -83,6 +83,21 @@ class PersistedPermissionFilterTests {
         assertThat(authorities.get()).containsExactly("ROLE_ADMIN");
     }
 
+    @Test void resolvesDedicatedExtensionPermissionsFromPersistedAccess() throws Exception {
+        authenticate("ADMIN");
+        when(jdbc.queryForList(anyString(), eq(userId))).thenReturn(List.of(
+                Map.of("role", "ADMIN", "permissions", "EXTENSION_MANAGE,EXTENSION_ROUTING_VIEW,EXTENSION_OPERATIONS_MANAGE", "active", true)));
+        var authorities = new AtomicReference<List<String>>();
+
+        filter.doFilter(new MockHttpServletRequest("GET", "/api/v1/admin/extensions"), new MockHttpServletResponse(),
+                (req, res) -> authorities.set(SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+                        .map(GrantedAuthority::getAuthority).toList()));
+
+        assertThat(authorities.get()).contains("PERMISSION_EXTENSION_MANAGE", "PERMISSION_EXTENSION_ROUTING_VIEW",
+                "PERMISSION_EXTENSION_OPERATIONS_MANAGE").doesNotContain("PERMISSION_EXTENSION_ROUTING_MANAGE",
+                        "PERMISSION_EXTENSION_OPERATIONS_VIEW");
+    }
+
     private void authenticate(String tokenRole) {
         Jwt jwt = Jwt.withTokenValue("test").header("alg", "none").subject(userId.toString())
                 .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).claim("role", tokenRole).build();

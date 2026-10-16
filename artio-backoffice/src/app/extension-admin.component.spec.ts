@@ -70,4 +70,28 @@ describe('ExtensionAdminComponent', () => {
     expect(page).toContain('Create instance');
     expect(page).toContain('Create binding');
   });
+
+  it('exposes per-instance health, drain and outstanding obligation controls', () => {
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.selectedExtension = {
+      compatibilityModes: 'CAPABILITY_V2', lifecycleState: 'ENABLED', manifest: { id: 'example.storage', name: 'Storage' }
+    };
+    fixture.componentInstance.extensionInstances = [{ instanceId: 'instance-live', instanceKey: 'primary', releaseId: 4,
+      configurationGeneration: 2, lifecycleState: 'ENABLED' }];
+    fixture.componentInstance.instanceHealth = { 'instance-live': { healthy: true, status: 'healthy' } };
+    fixture.componentInstance.instanceObligations = { 'instance-live': { total: 3, pendingPayments: 1, activeShipments: 1,
+      processingRefunds: 0, deliveries: 1, media: 0 } };
+    const actions: string[] = [];
+    fixture.componentInstance.action.subscribe(action => actions.push(action.type));
+    fixture.detectChanges();
+    const page = fixture.nativeElement.textContent as string;
+    expect(page).toContain('healthy');
+    expect(page).toContain('Outstanding');
+    expect(page).toContain('payments');
+    const buttons = [...fixture.nativeElement.querySelectorAll('button')] as HTMLButtonElement[];
+    buttons.find(button => button.textContent?.includes('Drain'))?.click();
+    buttons.find(button => button.textContent?.includes('Health'))?.click();
+    buttons.find(button => button.textContent?.includes('Obligations'))?.click();
+    expect(actions).toEqual(['drainInstance', 'instanceHealth', 'instanceObligations']);
+  });
 });

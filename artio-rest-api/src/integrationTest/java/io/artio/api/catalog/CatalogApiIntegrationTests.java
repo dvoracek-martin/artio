@@ -222,6 +222,42 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void extensionAdministrationSeparatesManagementRoutingAndOperationsPermissions() {
+        jdbc.update("UPDATE users SET permissions='ANALYTICS_VIEW' WHERE id=?", adminUserId);
+        var pluginsDenied = adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, ApiError.class);
+        assertThat(pluginsDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='EXTENSION_MANAGE' WHERE id=?", adminUserId);
+        var pluginsAllowed = adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, Map[].class);
+        var routingDenied = adminExchange("/api/v1/admin/extensions/routing/resolve", HttpMethod.POST,
+                Map.of("capabilityId", "catalog.enrichment.v1", "operationName", "enrich", "scope", Map.of(),
+                        "pinnedInstanceId", "", "newCommitment", true), ApiError.class);
+        var operationsDenied = adminExchange("/api/v1/admin/extensions/events/dead?page=0&size=10", HttpMethod.GET,
+                null, ApiError.class);
+        assertThat(pluginsAllowed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(routingDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(operationsDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='EXTENSION_MANAGE,EXTENSION_ROUTING_VIEW,EXTENSION_OPERATIONS_VIEW' WHERE id=?",
+                adminUserId);
+        var routingAllowed = adminExchange("/api/v1/admin/extensions/routing/resolve", HttpMethod.POST,
+                Map.of("capabilityId", "catalog.enrichment.v1", "operationName", "enrich", "scope", Map.of(),
+                        "newCommitment", true), Map.class);
+        var operationsAllowed = adminExchange("/api/v1/admin/extensions/events/dead?page=0&size=10", HttpMethod.GET,
+                null, Map[].class);
+        var replayDenied = adminExchange("/api/v1/admin/extensions/events/" + UUID.randomUUID() + "/replay",
+                HttpMethod.POST, Map.of(), ApiError.class);
+        assertThat(routingAllowed.getStatusCode()).isNotEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(operationsAllowed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(replayDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_MANAGE' WHERE id=?", adminUserId);
+        var replayAllowedToReachHandler = adminExchange("/api/v1/admin/extensions/events/" + UUID.randomUUID() + "/replay",
+                HttpMethod.POST, Map.of(), String.class);
+        assertThat(replayAllowedToReachHandler.getStatusCode()).isNotEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
     void superadminAssignsRoleAndPermissionsAtomically() {
         UUID targetId=UUID.randomUUID();
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,permissions,created_at) VALUES (?,?,?,'Access','Target','CUSTOMER','NONE',now())",
@@ -811,6 +847,9 @@ class CatalogApiIntegrationTests {
         });
 
         var fakeRuntime = org.mockito.Mockito.mock(io.artio.extensions.ExtensionRuntimePort.class);
+        org.mockito.Mockito.when(fakeRuntime.healthInstance(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(io.artio.extensions.PluginManifest.class)))
+                .thenReturn(new io.artio.extensions.ExtensionRuntimePort.RuntimeHealth(true, "HEALTHY"));
         var storageObjects = new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, byte[]>>();
         var pendingChunks = new java.util.concurrent.ConcurrentHashMap<String, java.io.ByteArrayOutputStream>();
         org.mockito.Mockito.when(fakeRuntime.invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
@@ -1031,6 +1070,26 @@ class CatalogApiIntegrationTests {
                 .isEqualTo("PENDING");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_audit_events WHERE plugin_id=? AND action='REPLAY_EVENT_DELIVERY' "
                 + "AND details->>'deliveryId'=?", Integer.class, pluginId, deadDeliveryId.toString())).isEqualTo(1);
+
+        var instanceHealth = adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}/health", HttpMethod.GET,
+                null, Map.class, pluginId, instanceId);
+        var obligations = adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}/obligations", HttpMethod.GET,
+                null, Map.class, pluginId, instanceId);
+        assertThat(instanceHealth.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(instanceHealth.getBody()).containsEntry("healthy", false);
+        assertThat(((Number) obligations.getBody().get("operations")).longValue()).isGreaterThanOrEqualTo(1);
+        assertThat(((Number) obligations.getBody().get("deliveries")).longValue()).isGreaterThanOrEqualTo(1);
+        assertThat(((Number) obligations.getBody().get("total")).longValue()).isGreaterThanOrEqualTo(2);
+        jdbc.update("UPDATE extension_event_subscriptions SET subscription_state='ACTIVE' WHERE subscription_id=?", subscriptionId);
+        var drained = adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}/drain", HttpMethod.POST,
+                Map.of(), Map.class, pluginId, instanceId);
+        assertThat(drained.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugin_instances WHERE instance_id=?", String.class,
+                instanceId)).isEqualTo("DRAINING");
+        assertThat(jdbc.queryForObject("SELECT eligibility_state FROM extension_capability_bindings WHERE binding_id=?", String.class,
+                UUID.fromString(binding.getBody().get("bindingId").toString()))).isEqualTo("DRAINING");
+        assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class,
+                subscriptionId)).isEqualTo("DRAINING");
     }
 
     @Test

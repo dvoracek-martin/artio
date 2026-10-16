@@ -226,6 +226,65 @@ public class ExtensionManagementController {
                         arraySet(rs.getArray("public_keys")), arraySet(rs.getArray("secret_keys"))), pluginId);
     }
 
+    @GetMapping("/{pluginId}/instances/{instanceId}/health")
+    @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ExtensionRuntimePort.RuntimeHealth instanceHealth(@PathVariable String pluginId, @PathVariable UUID instanceId) {
+        InstanceRow instance = findInstance(pluginId, instanceId);
+        try {
+            return runtime().healthInstance(instance.runtimeIdentity(), instance.manifest());
+        } catch (RuntimeException unavailable) {
+            return new ExtensionRuntimePort.RuntimeHealth(false, "UNAVAILABLE");
+        }
+    }
+
+    @GetMapping("/{pluginId}/instances/{instanceId}/obligations")
+    @Transactional(readOnly = true)
+    public InstanceObligationsView instanceObligations(@PathVariable String pluginId, @PathVariable UUID instanceId) {
+        findInstance(pluginId, instanceId);
+        return jdbc.query("""
+                SELECT
+                  (SELECT count(*) FROM extension_operation_attempts WHERE instance_id=? AND attempt_state IN ('PENDING','IN_PROGRESS','UNKNOWN','RECONCILING')) AS operations,
+                  (SELECT count(*) FROM extension_event_deliveries WHERE instance_id=? AND state<>'DELIVERED') AS deliveries,
+                  (SELECT count(*) FROM catalog_media_storage_objects WHERE object_state IN ('ACTIVE','DELETE_PENDING')
+                    AND (primary_instance_id=? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(replica_instance_ids) r(instance_id) WHERE r.instance_id=?))) AS media,
+                  (SELECT count(*) FROM payments WHERE provider_instance_id=? AND status='PENDING') AS payments,
+                  (SELECT count(*) FROM order_shipments s JOIN orders o ON o.id=s.order_id WHERE s.provider_instance_id=?
+                    AND o.status IN ('CONFIRMED','PAID','PARTIALLY_SHIPPED','SHIPPED')) AS shipments,
+                  (SELECT count(*) FROM payment_refunds r JOIN payments p ON p.id=r.payment_id
+                    WHERE p.provider_instance_id=? AND r.status='PROCESSING') AS refunds
+                """, rs -> {
+            if (!rs.next()) throw new IllegalStateException("Instance obligation counts were not returned");
+            long operations = rs.getLong("operations");
+            long deliveries = rs.getLong("deliveries");
+            long media = rs.getLong("media");
+            long payments = rs.getLong("payments");
+            long shipments = rs.getLong("shipments");
+            long refunds = rs.getLong("refunds");
+            return new InstanceObligationsView(instanceId, operations, deliveries, media, payments, shipments, refunds,
+                    operations + deliveries + media + payments + shipments + refunds);
+        }, instanceId, instanceId, instanceId, instanceId.toString(), instanceId, instanceId, instanceId);
+    }
+
+    @PostMapping("/{pluginId}/instances/{instanceId}/drain")
+    public ResponseEntity<?> drainInstance(@PathVariable String pluginId, @PathVariable UUID instanceId, JwtAuthenticationToken actor) {
+        findInstance(pluginId, instanceId);
+        int updated = jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='DRAINING',updated_at=now() "
+                + "WHERE plugin_id=? AND instance_id=? AND lifecycle_state IN ('ENABLED','UNHEALTHY')", pluginId, instanceId);
+        if (updated == 0) {
+            String state = jdbc.query("SELECT lifecycle_state FROM extension_plugin_instances WHERE plugin_id=? AND instance_id=?",
+                    rs -> rs.next() ? rs.getString(1) : null, pluginId, instanceId);
+            if (!"DRAINING".equals(state)) return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("message", "Only an enabled or unhealthy instance can enter drain mode"));
+        }
+        jdbc.update("UPDATE extension_capability_bindings SET eligibility_state='DRAINING',updated_at=now() "
+                + "WHERE instance_id=? AND eligibility_state='ACTIVE'", instanceId);
+        jdbc.update("UPDATE extension_event_subscriptions SET subscription_state='DRAINING',updated_at=now() "
+                + "WHERE instance_id=? AND subscription_state='ACTIVE'", instanceId);
+        audit(pluginId, actor, "INSTANCE_DRAIN", Map.of("instanceId", instanceId.toString()));
+        return ResponseEntity.ok(Map.of("instanceId", instanceId, "lifecycleState", "DRAINING",
+                "message", "New routes and event subscriptions are stopped; existing obligations can still be reconciled"));
+    }
+
     @PostMapping("/{pluginId}/instances")
     public ResponseEntity<?> createInstance(@PathVariable String pluginId, @RequestBody InstanceCreateRequest request,
             JwtAuthenticationToken actor) {
@@ -374,10 +433,14 @@ public class ExtensionManagementController {
                 + "SELECT 1 FROM extension_operation_attempts WHERE instance_id=? AND attempt_state IN ('PENDING','IN_PROGRESS','UNKNOWN','RECONCILING') "
                 + "UNION ALL SELECT 1 FROM extension_event_deliveries WHERE instance_id=? AND state<>'DELIVERED' "
                 + "UNION ALL SELECT 1 FROM catalog_media_storage_objects WHERE object_state IN ('ACTIVE','DELETE_PENDING') "
-                + "AND (primary_instance_id=? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(replica_instance_ids) r(instance_id) WHERE r.instance_id=?)))", Boolean.class,
-                instanceId, instanceId, instanceId, instanceId.toString()));
+                + "AND (primary_instance_id=? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(replica_instance_ids) r(instance_id) WHERE r.instance_id=?)) "
+                + "UNION ALL SELECT 1 FROM payments WHERE provider_instance_id=? AND status='PENDING' "
+                + "UNION ALL SELECT 1 FROM payment_refunds r JOIN payments p ON p.id=r.payment_id WHERE p.provider_instance_id=? AND r.status='PROCESSING' "
+                + "UNION ALL SELECT 1 FROM order_shipments s JOIN orders o ON o.id=s.order_id WHERE s.provider_instance_id=? "
+                + "AND o.status IN ('CONFIRMED','PAID','PARTIALLY_SHIPPED','SHIPPED'))", Boolean.class,
+                instanceId, instanceId, instanceId, instanceId.toString(), instanceId, instanceId, instanceId));
         if (hasObligations) return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(Map.of("message", "Resolve pending operations and event deliveries before uninstalling this instance"));
+                .body(Map.of("message", "Resolve outstanding operations, deliveries, media, payments, refunds and shipments before uninstalling this instance"));
         runtime().uninstallInstance(instance.runtimeIdentity(), pluginId);
         jdbc.update("UPDATE extension_capability_bindings SET eligibility_state='DISABLED',updated_at=now() WHERE instance_id=?", instanceId);
         jdbc.update("UPDATE extension_event_subscriptions SET subscription_state='DISABLED',updated_at=now() WHERE instance_id=?", instanceId);
@@ -1503,6 +1566,8 @@ public class ExtensionManagementController {
     public record PluginInstanceView(UUID instanceId, String instanceKey, long releaseId, String compatibilityMode,
             String lifecycleState, int configurationGeneration, String runtimeIdentity,
             Set<String> publicConfigurationKeys, Set<String> configuredSecrets) { }
+    public record InstanceObligationsView(UUID instanceId, long operations, long deliveries, long media,
+            long pendingPayments, long activeShipments, long processingRefunds, long total) { }
     public record SubscriptionStateRequest(String state) { }
     public record RouteRequest(String capabilityId, String operationName, Map<String, String> scope,
                                UUID pinnedInstanceId, boolean newCommitment) { }
