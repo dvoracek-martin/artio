@@ -352,7 +352,7 @@ public class PaymentController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider webhook is unavailable");
         PaymentProvider.WebhookResult event;
         Map<String, String> signedHeaders = new java.util.HashMap<>();
-        for (String name : java.util.List.of("provider-signature", "stripe-signature", "paypal-transmission-id",
+        for (String name : java.util.List.of("provider-signature", "stripe-signature", "x-signature", "paypal-transmission-id",
                 "paypal-transmission-time", "paypal-transmission-sig", "paypal-cert-url", "paypal-auth-algo")) {
             String value = requestHeaders.getFirst(name);
             if (value != null && value.length() <= 4096) signedHeaders.put(name, value);

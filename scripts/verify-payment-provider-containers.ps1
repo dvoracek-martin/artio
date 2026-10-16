@@ -3,6 +3,7 @@ $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $suffix = [Guid]::NewGuid().ToString("N").Substring(0, 12)
 $containers = [System.Collections.Generic.List[string]]::new()
 $images = [System.Collections.Generic.List[string]]::new()
+$temporaryDirectories = [System.Collections.Generic.List[string]]::new()
 
 function Invoke-Docker {
     param([string[]]$Arguments)
@@ -63,6 +64,13 @@ elif provider == 'paypal':
     assert invoke('createCheckout', {'amount': '10.00', 'currency': 'CHF', 'orderId': 'acceptance', 'paymentMethodId': 'paypal'})[0] == 503
     assert invoke('capture', {'providerReference': 'invalid'})[0] == 400
     assert invoke('cancel', {})[0] == 409
+elif provider == 'postfinance':
+    assert capabilities.get('refunds') is True and capabilities.get('cancellation') is True
+    assert capabilities.get('capture') is False and capabilities.get('webhooks') is True
+    assert methods['methods'][0]['methodId'] == 'postfinance_checkout'
+    assert invoke('createCheckout', {'amount': '10.00', 'currency': 'CHF', 'orderId': 'acceptance', 'paymentMethodId': 'postfinance_checkout', 'successUrl': 'https://shop.example.test/paid', 'cancelUrl': 'https://shop.example.test/cancel'})[0] == 503
+    assert invoke('cancel', {'providerReference': 'invalid'})[0] == 400
+    assert invoke('capture', {})[0] == 409
 else:
     raise AssertionError('unexpected provider')
 print(provider + ' container passed health, diagnostics, contract, auth, capability, validation, and no-credentials checks')
@@ -71,15 +79,30 @@ print(provider + ' container passed health, diagnostics, contract, auth, capabil
 try {
     Push-Location $root
     try {
-        foreach ($provider in @("stripe-payments", "paypal-payments")) {
-            $providerId = if ($provider -eq "stripe-payments") { "stripe" } else { "paypal" }
-            python -m unittest discover -s "artio-plugins/$provider" -p "test_*.py" -v
+        foreach ($provider in @("stripe-payments", "paypal-payments", "postfinance-payments")) {
+            $providerId = switch ($provider) {
+                "stripe-payments" { "stripe" }
+                "paypal-payments" { "paypal" }
+                "postfinance-payments" { "postfinance" }
+            }
+            $testPython = "python"
+            if ($providerId -eq "postfinance") {
+                $testEnvironment = Join-Path ([System.IO.Path]::GetTempPath()) "artio-postfinance-tests-$suffix"
+                $temporaryDirectories.Add($testEnvironment)
+                & python -m venv $testEnvironment
+                if ($LASTEXITCODE -ne 0) { throw "Could not create temporary PostFinance test environment" }
+                $testPython = Join-Path $testEnvironment "Scripts/python.exe"
+                & $testPython -m pip install --disable-pip-version-check -r "artio-plugins/$provider/requirements.txt"
+                if ($LASTEXITCODE -ne 0) { throw "Could not install pinned PostFinance test dependencies" }
+            }
+            & $testPython -m unittest discover -s "artio-plugins/$provider" -p "test_*.py" -v
             if ($LASTEXITCODE -ne 0) { throw "Python package tests failed for $provider" }
 
             $image = "artio/$provider`:$suffix"
-            $container = "artio-provider-$($provider.Replace('-', '-'))-$suffix"
-            Invoke-Docker -Arguments @("build", "--file", "artio-plugins/$provider/Dockerfile", "--tag", $image, "artio-plugins/$provider")
             $images.Add($image)
+            $container = "artio-provider-$providerId-$suffix"
+            $containers.Add($container)
+            Invoke-Docker -Arguments @("build", "--file", "artio-plugins/$provider/Dockerfile", "--tag", $image, "artio-plugins/$provider")
             Invoke-Docker -Arguments @("run", "--detach", "--name", $container, "--network", "none", "--read-only",
                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "64", "--memory", "256m", "--cpus", "0.50",
                 "--env", "ARTIO_EXTENSION_TOKEN=local-container-acceptance-token", "--env", "ARTIO_ACCEPTANCE_PROVIDER=$providerId", $image)
@@ -101,7 +124,7 @@ try {
     }
     finally { Pop-Location }
 
-    Write-Host "Payment provider container acceptance passed for Stripe and PayPal. No provider credentials or external network access were used."
+    Write-Host "Payment provider container acceptance passed for Stripe, PayPal, and PostFinance. No provider credentials or external network access were used."
 }
 finally {
     foreach ($container in $containers) {
@@ -111,5 +134,8 @@ finally {
     foreach ($image in $images) {
         & docker image rm $image | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Warning "Could not remove acceptance image $image" }
+    }
+    foreach ($directory in $temporaryDirectories) {
+        if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory -Recurse -Force }
     }
 }

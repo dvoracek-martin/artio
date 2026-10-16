@@ -83,7 +83,8 @@ class ExtensionPaymentProviderTests {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new ObjectMapper().readTree("{\"providerEventId\":\"evt-1\",\"eventType\":\"test\",\"providerReference\":\"ref-1\",\"transactionReference\":\"pi-1\",\"state\":\"CAPTURED\",\"amount\":\"12.50\",\"currency\":\"CHF\",\"verified\":true}"));
 
-        var result = provider.verifyWebhook(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1"), body);
+        var result = provider.verifyWebhook(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1",
+                "x-signature", "algorithm=SHA256withECDSA, keyId=42, signature=provider-signature"), body);
 
         assertThat(result.verified()).isTrue();
         assertThat(result.amount()).isEqualByComparingTo("12.50");
@@ -93,7 +94,8 @@ class ExtensionPaymentProviderTests {
         verify(invoker).invoke(eq("payments.example"), eq("payment.provider.v1"), eq("verifyWebhook"),
                 org.mockito.ArgumentMatchers.anyString(), payload.capture());
         @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) payload.getValue();
-        assertThat(map.get("headers")).isEqualTo(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1"));
+        assertThat(map.get("headers")).isEqualTo(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1",
+                "x-signature", "algorithm=SHA256withECDSA, keyId=42, signature=provider-signature"));
         assertThat(map.get("rawBodyBase64")).isEqualTo(Base64.getEncoder().encodeToString(body));
     }
 

@@ -1,0 +1,24 @@
+{
+  "manifestVersion": "1",
+  "id": "payments.postfinance-checkout",
+  "name": "PostFinance Checkout Payments",
+  "vendor": "PostFinance",
+  "version": "1.0.0",
+  "description": "Hosted PostFinance Checkout transactions, signed webhooks, refunds, cancellation and reconciliation through the official Checkout REST SDK.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/postfinance-payments@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": ["payment.process"],
+  "configuration": {
+    "applicationUserId": {"type": "string", "required": true, "secret": false, "label": "Application user ID", "description": "PostFinance Checkout API application user ID.", "format": "^[0-9]{1,20}$", "options": [], "minimumLength": null, "maximumLength": 20, "minimum": null, "maximum": null},
+    "authenticationKey": {"type": "secret", "required": true, "secret": true, "label": "Authentication key", "description": "PostFinance Checkout API authentication key for the application user.", "format": null, "options": [], "minimumLength": 16, "maximumLength": 512, "minimum": null, "maximum": null},
+    "spaceId": {"type": "string", "required": true, "secret": false, "label": "Space ID", "description": "PostFinance Checkout space ID that owns transactions and webhook signing keys.", "format": "^[0-9]{1,20}$", "options": [], "minimumLength": null, "maximumLength": 20, "minimum": null, "maximum": null},
+    "testMode": {"type": "boolean", "required": false, "secret": false, "label": "Use preview environment", "description": "Defaults to PREVIEW for sandbox testing. Disable only for the configured LIVE environment.", "format": null, "options": [], "minimumLength": null, "maximumLength": null, "minimum": null, "maximum": null},
+    "supportedCurrencies": {"type": "json", "required": false, "secret": false, "label": "Supported currencies", "description": "Optional allowlist for currencies enabled in the PostFinance Checkout space; defaults to CHF.", "format": null, "options": [], "minimumLength": null, "maximumLength": null, "minimum": null, "maximum": null}
+  },
+  "extensionPoints": ["payment.provider.v1"],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {"scope": "REGIONAL", "countries": ["CH"]}
+}

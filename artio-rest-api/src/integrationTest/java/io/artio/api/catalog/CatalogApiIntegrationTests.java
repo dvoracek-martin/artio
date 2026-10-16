@@ -56,6 +56,7 @@ class CatalogApiIntegrationTests {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
     private static final AtomicReference<String> PROVIDER_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\",\"amount\":\"12.50\",\"currency\":\"CHF\"}");
     private static final AtomicReference<RuntimeException> PROVIDER_CHECKOUT_FAILURE = new AtomicReference<>();
+    private static final AtomicReference<Map<String, String>> PROVIDER_WEBHOOK_HEADERS = new AtomicReference<>(Map.of());
 
     @Autowired
     private TestRestTemplate http;
@@ -134,6 +135,7 @@ class CatalogApiIntegrationTests {
         paymentReconciliationWorker = new io.artio.api.payments.PaymentReconciliationWorker(
                 jdbc, inventory, orderUpdates, transactionManager, paymentProviders);
         PROVIDER_CHECKOUT_FAILURE.set(null);
+        PROVIDER_WEBHOOK_HEADERS.set(Map.of());
         UUID userId = UUID.randomUUID();
         adminUserId = userId;
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) "
@@ -1900,6 +1902,8 @@ class CatalogApiIntegrationTests {
 
         var expired = providerWebhook("checkout.session.expired", sessionId, "unpaid");
         assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(PROVIDER_WEBHOOK_HEADERS.get()).containsEntry("x-signature", "postfinance-test-signature")
+                .doesNotContainKey("cookie");
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("PENDING");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, paymentId)).isEqualTo("FAILED");
         var duplicateExpiry = providerWebhook("checkout.session.expired", sessionId, "unpaid");
@@ -2104,6 +2108,7 @@ class CatalogApiIntegrationTests {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
         headers.set("Provider-Signature", "integration-test-signature");
+        headers.set("X-Signature", "postfinance-test-signature");
         return http.exchange("/api/v1/payments/provider/webhook", HttpMethod.POST,
                 new HttpEntity<>(body, headers), String.class);
     }
@@ -2894,6 +2899,7 @@ class CatalogApiIntegrationTests {
                     return verifyWebhook(Map.of("provider-signature", signature == null ? "" : signature), rawBody);
                 }
                 @Override public WebhookResult verifyWebhook(Map<String, String> headers, byte[] rawBody) {
+                    PROVIDER_WEBHOOK_HEADERS.set(Map.copyOf(headers));
                     try {
                         JsonNode event = mapper.readTree(rawBody);
                         String type = event.path("type").asText();
