@@ -189,3 +189,18 @@ artio-sellable-select{display:block;min-width:200px}.create-form>artio-sellable-
   .panel-heading select { max-width: 100%; }
 }
 .permission-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;padding:16px;margin:12px 0 18px;border:1px solid var(--line);border-radius:9px}.permission-list legend{padding:0 7px;color:#9faed0;font-size:10px;letter-spacing:.7px;text-transform:uppercase}.permission-list label{display:flex;align-items:center;gap:8px;color:#cbd7ea;font-size:11px}.permission-list input{accent-color:#8b7cff}
+
+/* Setup wizard controls. */
+.setup-topbar-actions{margin-left:auto;display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.setup-topbar-actions .badge,.setup-topbar-actions .setup-saved{margin-left:0}
+.setup-language-picker{display:flex;align-items:center;gap:7px;color:#aebbd0;letter-spacing:.2px}
+.setup-language-picker select{min-width:104px;border:1px solid #34435c;border-radius:8px;background:#0b1628;color:var(--ink);padding:7px 28px 7px 10px;font:inherit;letter-spacing:0;cursor:pointer}
+.setup-language-picker select:focus-visible{outline:2px solid #06b6d4;outline-offset:3px}
+.setup-password-toggle{display:inline-flex;align-items:center;gap:10px;width:max-content;padding:8px 12px;border:1px solid #34435c;border-radius:999px;background:#0b1628;color:#aebbd0;font-size:11px;transition:border-color .18s ease,background .18s ease,color .18s ease}
+.setup-password-toggle:hover,.setup-password-toggle.enabled{border-color:#7169d8;background:#171d39;color:#edf0ff}
+.setup-toggle-track{display:block;width:34px;height:19px;padding:2px;border:1px solid #4a5b77;border-radius:999px;background:#17243a;transition:background .18s ease,border-color .18s ease}
+.setup-toggle-track>span{display:block;width:13px;height:13px;border-radius:50%;background:#91a2bc;transition:transform .18s ease,background .18s ease}
+.setup-password-toggle.enabled .setup-toggle-track{border-color:#8d83ff;background:#514caa}
+.setup-password-toggle.enabled .setup-toggle-track>span{transform:translateX(15px);background:#fff}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:700px){.setup-topbar-actions{gap:8px}.setup-language-picker select{min-width:92px;padding:6px 22px 6px 8px}}

@@ -8,11 +8,11 @@
     <p class="setup-story-footer">{{t('storyFooter')}}</p>
   </aside>
   <main class="setup-workspace">
-    <header class="setup-topbar"><span>{{t('commerceSetup')}}</span>@if (developerMode) {
+  <header class="setup-topbar"><span>{{t('commerceSetup')}}</span><div class="setup-topbar-actions"><label class="setup-language-picker"><span class="visually-hidden">{{t('language')}}</span><select [ngModel]="currentLocale" [ngModelOptions]="{standalone:true}" (ngModelChange)="selectLocale($event)" [attr.aria-label]="t('language')"><option value="en">English</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="fr">Français</option></select></label>@if (developerMode) {
     <span class="badge">{{t('developerMode')}}</span>
     }@if (saved && step<5) {
     <span class="setup-saved" role="status">{{t('settingsSaved')}} ✓</span>
-  }</header>
+  }</div></header>
   <div class="setup-progress" role="progressbar" [attr.aria-valuenow]="progress" aria-valuemin="0" aria-valuemax="100" [attr.aria-label]="t('progress')"><span [style.width.%]="progress"></span></div>
   @if (step<5) {
     <section class="setup-stage">
@@ -23,7 +23,7 @@
         <div id="setup-error" class="notice error" role="alert" tabindex="-1">{{error}}</div>
       }
       @if (step===0) {
-        <form #welcome="ngForm" (ngSubmit)="welcome.valid && next()" class="wizard-form setup-form">
+        <form #welcome="ngForm" (ngSubmit)="next()" class="wizard-form setup-form">
           <div class="setup-feature-grid"><article><span>01</span><strong>{{t('featureIdentity')}}</strong><p>{{t('featureIdentityHelp')}}</p></article><article><span>02</span><strong>{{t('featureWorkspace')}}</strong><p>{{t('featureWorkspaceHelp')}}</p></article></div>
           <label>{{t('setupToken')}}<input [(ngModel)]="token" (ngModelChange)="saved=false" name="token" type="password" autocomplete="off" required aria-describedby="setup-token-help"><small id="setup-token-help">{{t(developerMode?'localTokenHelp':'tokenHelp')}}</small></label>
           @if (!developerMode) {
@@ -33,7 +33,7 @@
         </form>
       }
       @if (step===1) {
-        <form #store="ngForm" (ngSubmit)="store.valid && next()" class="wizard-form setup-form">
+        <form #store="ngForm" (ngSubmit)="next()" class="wizard-form setup-form">
           <label>{{t('storeName')}} <span>{{t('required')}}</span><input [(ngModel)]="draft.storeName" (ngModelChange)="saved=false" name="storeName" maxlength="100" required [placeholder]="t('storeNamePlaceholder')"><small>{{t('storeNameHelp')}}</small></label>
           <label>{{t('storeUrl')}} <span>{{t('optional')}}</span><input [(ngModel)]="draft.externalBaseUrl" (ngModelChange)="saved=false" name="externalBaseUrl" type="url" placeholder="https://shop.example.com"><small>{{t('storeUrlHelp')}}</small></label>
           <div class="setup-context"><span>✧</span><p>{{t('catalogContext')}}</p></div>
@@ -41,7 +41,7 @@
         </form>
       }
       @if (step===2) {
-        <form #region="ngForm" (ngSubmit)="region.valid && next()" class="wizard-form setup-form">
+        <form #region="ngForm" (ngSubmit)="next()" class="wizard-form setup-form">
           <div class="setup-region-preset"><span>CH</span><div><strong>{{t('regionPreset')}}</strong><small>CHF · de-CH · Europe/Zurich</small></div><span class="pill">{{t('included')}}</span></div>
           <div class="form-grid"><div class="setup-field"><span>{{t('country')}}</span><artio-search-select name="country" [label]="t('country')" [(ngModel)]="draft.countryCode" (ngModelChange)="saved=false" [options]="countryOptions"></artio-search-select></div><div class="setup-field"><span>{{t('currency')}}</span><artio-search-select name="currency" [label]="t('currency')" [(ngModel)]="draft.currencyCode" (ngModelChange)="saved=false" [options]="currencyOptions"></artio-search-select></div></div>
           <div class="form-grid"><div class="setup-field"><span>{{t('defaultLocale')}}</span><artio-search-select name="locale" [label]="t('defaultLocale')" [(ngModel)]="draft.locale" (ngModelChange)="saved=false" [options]="localeOptions"></artio-search-select></div><div class="setup-field"><span>{{t('timezone')}}</span><artio-search-select name="timezone" [label]="t('timezone')" [(ngModel)]="draft.timezone" (ngModelChange)="saved=false" [options]="timezoneOptions"></artio-search-select></div></div>
@@ -51,12 +51,12 @@
         </form>
       }
       @if (step===3) {
-        <form #owner="ngForm" (ngSubmit)="owner.valid && next()" class="wizard-form setup-form">
+        <form #owner="ngForm" (ngSubmit)="next()" class="wizard-form setup-form">
           <label>{{t('email')}}<input [(ngModel)]="draft.email" (ngModelChange)="saved=false" name="email" type="email" autocomplete="username" required placeholder="you@example.com"></label>
           <div class="form-grid"><label>{{t('firstName')}}<input [(ngModel)]="draft.firstName" (ngModelChange)="saved=false" name="firstName" maxlength="100" autocomplete="given-name" required></label><label>{{t('lastName')}}<input [(ngModel)]="draft.lastName" (ngModelChange)="saved=false" name="lastName" maxlength="100" autocomplete="family-name" required></label></div>
           <label>{{t('password')}}<input [(ngModel)]="password" (ngModelChange)="saved=false" name="password" [type]="showPassword?'text':'password'" minlength="16" maxlength="72" autocomplete="new-password" required><small>{{t('passwordHelp')}}</small></label>
           <label>{{t('confirmPassword')}}<input [(ngModel)]="confirmation" (ngModelChange)="saved=false" name="confirmation" [type]="showPassword?'text':'password'" minlength="16" maxlength="72" autocomplete="new-password" required></label>
-          <label class="setup-checkbox"><input type="checkbox" name="showPassword" [(ngModel)]="showPassword" (ngModelChange)="saved=false"> {{t('showPasswords')}}</label>
+          <button type="button" class="setup-password-toggle" [class.enabled]="showPassword" [attr.aria-pressed]="showPassword" (click)="showPassword=!showPassword"><span class="setup-toggle-track" aria-hidden="true"><span></span></span><span>{{t(showPassword?'hidePasswords':'showPasswords')}}</span></button>
           <div class="setup-context"><span>◇</span><p>{{t(developerMode?'demoCredentials':'ownerAccess')}}</p></div>
           <div class="setup-footer"><button type="button" class="secondary" [disabled]="busy" (click)="back()">← {{t('back')}}</button><button class="primary" [disabled]="busy">{{busy?t('savingSettings'):t('reviewSettings')}} →</button></div>
         </form>

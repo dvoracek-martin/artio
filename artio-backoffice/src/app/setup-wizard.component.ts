@@ -4,6 +4,7 @@ import { Component, EventEmitter, Input, OnInit, Output, inject, ChangeDetection
 import { FormsModule } from '@angular/forms';
 import { COUNTRY_OPTIONS, CURRENCY_OPTIONS, LANGUAGE_OPTIONS, LOCALE_OPTIONS, TIMEZONE_OPTIONS } from './commerce-options';
 import { SearchSelectComponent } from './search-select.component';
+import { BackofficeLocale, currentBackofficeLocale, setBackofficeLocale } from './backoffice-locale';
 import { SetupTextKey, setupText } from './setup-wizard-locale';
 import { firstValueFrom } from 'rxjs';
 
@@ -20,6 +21,8 @@ export class SetupWizardComponent implements OnInit {
   get steps():string[]{return [this.t('stepWelcome'),this.t('stepStore'),this.t('stepRegion'),this.t('stepOwner'),this.t('stepReview')]}
   get descriptions():string[]{return [this.t('descWelcome'),this.t('descStore'),this.t('descRegion'),this.t('descOwner'),this.t('descReview')]}
   t(key:SetupTextKey):string{return setupText(key)}
+  get currentLocale():BackofficeLocale{return currentBackofficeLocale()}
+  selectLocale(value:string):void{if(value==='de'||value==='it'||value==='fr'||value==='en')setBackofficeLocale(value)}
   step = 0;
   busy = false;
   error = '';
