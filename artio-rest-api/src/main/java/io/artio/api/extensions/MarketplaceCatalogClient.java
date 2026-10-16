@@ -105,9 +105,12 @@ public final class MarketplaceCatalogClient {
         try {
             HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (InputStream body = response.body()) {
-                if (response.statusCode() < 200 || response.statusCode() >= 300)
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    String resource = path.equals("/api/v1/marketplace/security/advisories")
+                            ? "Marketplace advisory feed" : "Marketplace release descriptor";
                     throw new ResponseStatusException(response.statusCode() == 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_GATEWAY,
-                            "Signed Marketplace release descriptor is unavailable");
+                            resource + " is unavailable (upstream HTTP " + response.statusCode() + ")");
+                }
                 byte[] bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1);
                 if (bytes.length > MAX_RESPONSE_BYTES)
                     throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Marketplace response exceeded the size limit");

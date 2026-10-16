@@ -8,6 +8,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -33,7 +34,20 @@ class MarketplaceAdvisoryAcceptanceIntegrationTests {
         var client = new MarketplaceCatalogClient(mapper, baseUrl, new OfficialReleaseDescriptorVerifier(""));
         var verifier = new SignedMarketplaceAdvisoryVerifier(trustedKeys);
         var store = new MarketplaceAdvisoryStore(jdbc, mapper);
-        var snapshot = verifier.verify(client.signedAdvisories(), java.time.Instant.now());
+        byte[] signedFeed;
+        try {
+            signedFeed = client.signedAdvisories();
+        } catch (ResponseStatusException failure) {
+            throw new AssertionError("Marketplace advisory HTTP fetch failed: " + failure.getStatusCode() + " " + failure.getReason(), failure);
+        }
+        SignedMarketplaceAdvisoryVerifier.VerifiedSnapshot snapshot;
+        try {
+            snapshot = verifier.verify(signedFeed, java.time.Instant.now());
+        } catch (ResponseStatusException failure) {
+            Throwable cause = failure.getCause();
+            String detail = cause == null ? "" : ": " + cause.getClass().getSimpleName() + " " + cause.getMessage();
+            throw new AssertionError("Core rejected the live Marketplace advisory: " + failure.getReason() + detail, failure);
+        }
         store.apply(snapshot);
 
         assertThat(store.status().lastErrorCode()).isNull();
