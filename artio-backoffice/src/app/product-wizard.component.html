@@ -1,5 +1,5 @@
 <section class="product-wizard">
-  <div class="page-intro"><div><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p>{{t('intro')}}</p></div><div class="wizard-page-actions">@if(draftRestored&&!productId){<button type="button" class="secondary" [disabled]="busy" (click)="discardDraft()">Discard draft</button>}<button type="button" class="secondary" [disabled]="busy" (click)="cancel.emit()">{{productId?t('returnProducts'):t('cancel')}}</button></div></div>
+  <div class="page-intro"><div><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p>{{t('intro')}}</p></div><div class="wizard-page-actions">@if(draftRestored&&!productId){<button type="button" class="secondary" [disabled]="busy" (click)="openDiscardConfirmation()">Discard draft</button>}<button type="button" class="secondary" [disabled]="busy" (click)="cancel.emit()">{{productId?t('returnProducts'):t('cancel')}}</button></div></div>
   <ol class="wizard-steps" [attr.aria-label]="t('progress')">@for (label of steps; track label; let index = $index) {
     <li [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{stepDescription(index)}}</small></div></li>
   }</ol>
@@ -90,3 +90,4 @@
 }</div><div class="wizard-tip"><span>✧</span><div><strong>{{t('tipTitle')}}</strong><p>{{t('tipHelp')}}</p></div></div></aside>
 </div>
 </section>
+@if(draftRestored&&!productId){<dialog #discardDialog class="refund-dialog" aria-labelledby="discard-draft-title" (cancel)="cancelDiscardConfirmation($event)"><div class="refund-dialog-content"><button type="button" class="dialog-close-button" (click)="discardDialogRef?.nativeElement.close()" [attr.aria-label]="t('cancel')" [attr.title]="t('cancel')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button><p class="eyebrow">{{t('eyebrow')}}</p><h2 id="discard-draft-title">{{discardConfirmationText('adminDeleteTitle')}}</h2><p class="muted">{{discardConfirmationText('adminDeleteDescription')}}</p><div class="refund-dialog-actions"><button type="button" class="secondary" (click)="discardDialogRef?.nativeElement.close()">{{t('cancel')}}</button><button type="button" class="danger-button" (click)="discardDraft()">{{discardConfirmationText('adminDeleteConfirm')}}</button></div></div></dialog>}
