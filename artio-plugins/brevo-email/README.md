@@ -11,7 +11,7 @@ python -m unittest discover -s artio-plugins/brevo-email -p "test_*.py" -v
 docker build -f artio-plugins/brevo-email/Dockerfile -t artio/brevo-email:1.0.0 .
 ```
 
-The unit tests mock Brevo HTTP and do not claim a provider sandbox or Docker runtime acceptance run.
+The unit tests mock Brevo HTTP and do not claim a provider sandbox. Run `scripts/verify-notification-provider-container.ps1` from the repository root to build and exercise the restricted image without credentials or network access. The acceptance covers health, diagnostics redaction, authentication, contract validation, and fail-closed delivery; it does not send email or prove a provider delivery outcome.
 
 ## References
 

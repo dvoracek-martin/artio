@@ -58,6 +58,9 @@ jobs:
       - name: Verify payment provider plugin containers
         shell: pwsh
         run: ./scripts/verify-payment-provider-containers.ps1
+      - name: Verify notification provider plugin container
+        shell: pwsh
+        run: ./scripts/verify-notification-provider-container.ps1
       - name: Build API container
         run: docker build -f artio-docker/Dockerfile -t artio/api:${GITHUB_SHA} .
       - name: Build storefront container
