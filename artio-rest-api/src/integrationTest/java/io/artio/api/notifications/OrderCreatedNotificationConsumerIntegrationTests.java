@@ -4,12 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.artio.extensions.commerce.NotificationTransport.DeliveryResult;
 import io.artio.extensions.commerce.NotificationTransport.OutboundMessage;
+import io.artio.api.extensions.PluginEventDeliveryWorker;
+import io.artio.api.security.EncryptionService;
+import io.artio.extensions.ExtensionRuntimePort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -57,6 +62,7 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     @Autowired ObjectMapper mapper;
     @Autowired KafkaProperties kafkaProperties;
     @Autowired KafkaListenerEndpointRegistry listenerRegistry;
+    @Autowired EncryptionService encryption;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -105,6 +111,110 @@ class OrderCreatedNotificationConsumerIntegrationTests {
                 eventId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_outbox WHERE event_key=?", Integer.class,
                 "order-email:" + orderId)).isEqualTo(1);
+    }
+
+    @Test
+    void freezesEnabledV2SubscriptionsAndSafePayloadInTheInboxTransaction() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        UUID instanceId = UUID.randomUUID();
+        UUID subscriptionId = UUID.randomUUID();
+        UUID secondInstanceId = UUID.randomUUID();
+        UUID secondSubscriptionId = UUID.randomUUID();
+        String pluginId = "events." + UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,public_configuration) "
+                        + "VALUES (?,?::jsonb,?,'ENABLED',?::jsonb)", pluginId,
+                "{\"id\":\"" + pluginId + "\",\"version\":\"2.0.0\"}",
+                "ghcr.io/example/events@sha256:" + "a".repeat(64), "{\"region\":\"eu\"}");
+        long releaseId = jdbc.queryForObject("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) "
+                        + "VALUES (?, '2.0.0', ?, ?::jsonb) RETURNING release_id", Long.class, pluginId,
+                "ghcr.io/example/events@sha256:" + "a".repeat(64), "{\"id\":\"" + pluginId + "\",\"version\":\"2.0.0\"}");
+        jdbc.update("INSERT INTO extension_plugin_v2_releases(release_id,plugin_id,manifest) VALUES (?, ?, ?::jsonb)",
+                releaseId, pluginId, "{\"packageManifest\":{\"manifestVersion\":\"2\",\"id\":\"" + pluginId
+                        + "\",\"version\":\"2.0.0\"},\"subscriptions\":[{\"eventType\":\"order.created\","
+                        + "\"schemaVersion\":1,\"permissions\":[]}],\"capabilities\":[]}");
+        jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
+                        + "lifecycle_state,runtime_identity,public_configuration,encrypted_secrets) VALUES (?,?,'main',?,'CAPABILITY_V2',"
+                        + "'ENABLED',?,?::jsonb,?::jsonb)", instanceId, pluginId, releaseId, pluginId, "{\"region\":\"eu\"}",
+                "{\"apiKey\":\"" + encryption.encrypt("event-secret") + "\"}");
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
+                        + "VALUES (?,?,'order.created',1)", subscriptionId, instanceId);
+        String secondRuntimeIdentity = "instance-" + secondInstanceId.toString().replace("-", "");
+        jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
+                        + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
+                        + "VALUES (?,?,'eu-copy',?,'CAPABILITY_V2','ENABLED',?,1,'{\"region\":\"na\"}'::jsonb,?::jsonb)",
+                secondInstanceId, pluginId, releaseId, secondRuntimeIdentity,
+                "{\"apiKey\":\"" + encryption.encrypt("second-event-secret") + "\"}");
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
+                        + "VALUES (?,?,'order.created',1)", secondSubscriptionId, secondInstanceId);
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
+                userId, "event-fanout-" + userId + "@example.test", "unused-test-hash", "Event", "Fanout");
+
+        String json = mapper.writeValueAsString(Map.of("schemaVersion", 1, "eventId", eventId,
+                "type", "ORDER_CREATED", "occurredAt", Instant.now(), "orderId", orderId,
+                "userId", userId, "locale", "en", "customerEmail", "should-not-leak@example.test"));
+        send(eventId, orderId, json);
+        awaitInbox(eventId);
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=?", Integer.class, eventId))
+                .isEqualTo(2);
+        var deliveries = jdbc.queryForList("SELECT delivery_id,runtime_identity,payload_snapshot::text AS payload,"
+                + "public_configuration_snapshot->>'region' AS region FROM extension_event_deliveries WHERE inbox_event_id=? ORDER BY runtime_identity", eventId);
+        UUID deliveryId = (UUID) deliveries.get(0).get("delivery_id");
+        assertThat(deliveries).extracting(row -> row.get("runtime_identity"))
+                .containsExactlyInAnyOrder(pluginId, secondRuntimeIdentity);
+        assertThat(deliveries).allSatisfy(row -> {
+            assertThat(row.get("payload").toString()).contains("order.created", orderId.toString())
+                    .doesNotContain("customerEmail", "should-not-leak");
+            assertThat(row.get("region")).isIn("eu", "na");
+        });
+        assertThat(jdbc.queryForObject("SELECT runtime_credential_generation FROM extension_event_deliveries WHERE delivery_id=?",
+                Integer.class, deliveryId)).isEqualTo(1);
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> jdbc.update(
+                "UPDATE extension_event_deliveries SET payload_snapshot='{}'::jsonb WHERE delivery_id=?", deliveryId)))
+                .hasMessageContaining("extension event delivery snapshots are immutable");
+
+        var callsByKey = new java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>();
+        var configurationsByRuntime = new java.util.concurrent.ConcurrentHashMap<String, String>();
+        AtomicInteger calls = new AtomicInteger();
+        ExtensionRuntimePort runtime = new ExtensionRuntimePort() {
+            @Override public void install(io.artio.extensions.PluginManifest manifest) { }
+            @Override public void enable(io.artio.extensions.PluginManifest manifest) { }
+            @Override public void disable(String id) { }
+            @Override public RuntimeHealth health(String id, String path) { return new RuntimeHealth(true, "OK"); }
+            @Override public InvocationResult invoke(String id, String point, String operation, String key,
+                    String configuration, String request, Duration deadline) {
+                configurationsByRuntime.putIfAbsent(id, configuration);
+                int deliveryCalls = callsByKey.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
+                calls.incrementAndGet();
+                if (deliveryCalls == 1) throw new ExtensionUnavailableException("test transient failure");
+                if (deliveryCalls == 2) return new InvocationResult(200, "{}");
+                return new InvocationResult(200, "{\"accepted\":true,\"deliveryId\":\"" + key + "\"}");
+            }
+        };
+        var beanFactory = new org.springframework.beans.factory.support.StaticListableBeanFactory(Map.of("runtime", runtime));
+        var worker = new PluginEventDeliveryWorker(jdbc, mapper, encryption,
+                beanFactory.getBeanProvider(ExtensionRuntimePort.class));
+        worker.deliverPending();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=? AND state='RETRY'",
+                Integer.class, eventId)).isEqualTo(2);
+        jdbc.update("UPDATE extension_event_deliveries SET available_at=now() WHERE inbox_event_id=?", eventId);
+        worker.deliverPending();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=? AND state='RETRY'",
+                Integer.class, eventId)).isEqualTo(2);
+        jdbc.update("UPDATE extension_event_deliveries SET available_at=now() WHERE inbox_event_id=?", eventId);
+        worker.deliverPending();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=? AND state='DELIVERED'",
+                Integer.class, eventId)).isEqualTo(2);
+        assertThat(calls).hasValue(6);
+        assertThat(callsByKey).hasSize(2).allSatisfy((key, value) -> assertThat(value).hasValue(3));
+        assertThat(configurationsByRuntime.get(pluginId)).contains("event-secret");
+        assertThat(configurationsByRuntime.get(secondRuntimeIdentity)).contains("second-event-secret");
+        send(eventId, orderId, json);
+        Thread.sleep(500);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=?", Integer.class, eventId))
+                .isEqualTo(2);
     }
 
     @Test

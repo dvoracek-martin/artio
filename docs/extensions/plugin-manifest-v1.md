@@ -1,5 +1,7 @@
 # Artio Docker Extension Manifest v1
 
+The additive v2 package, capability, operation, instance and event-subscription contract is documented in [plugin manifest v2](plugin-manifest-v2.md). v1 remains supported through its explicit legacy-instance adapter; v1 extension points are not inferred as v2 capability permissions.
+
 ## Current implementation
 
 `artio-extensions` contains the Core-owned manifest model and a fail-closed structural validator. The admin endpoint `POST /api/v1/admin/extensions/validate` runs preflight validation only. It does not pull, start, or trust an image by virtue of validating its metadata. Trusted registry hosts are configured with `ARTIO_EXTENSION_TRUSTED_REGISTRIES`; the default is empty, so no registry is trusted by default. Images must use a sha256 digest.

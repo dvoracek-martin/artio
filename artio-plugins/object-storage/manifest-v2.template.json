@@ -1,0 +1,24 @@
+{
+  "packageManifest": {
+    "manifestVersion": "2",
+    "id": "storage.artio-object",
+    "name": "Artio Object Storage",
+    "vendor": "Artio",
+    "version": "1.0.0",
+    "description": "Private checksummed object storage with durable chunk assembly and tombstones.",
+    "minimumCoreVersion": "0.1.0",
+    "maximumCoreVersion": "9.0.0",
+    "image": "ghcr.io/artio-plugins/object-storage@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+    "extensionPoints": [],
+    "healthPath": "/health",
+    "diagnosticsPath": "/diagnostics",
+    "persistentPaths": ["/data"],
+    "geographicAvailability": {"scope": "GLOBAL", "countries": []}
+  },
+  "capabilities": [{
+    "capabilityId": "storage.object.v1",
+    "operations": ["put", "get", "head", "delete"],
+    "permissions": ["storage.object.write", "storage.object.read", "storage.object.delete"]
+  }],
+  "subscriptions": []
+}

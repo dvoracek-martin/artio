@@ -36,6 +36,14 @@ final class ExtensionRuntimeController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/instances/install")
+    ResponseEntity<Void> installInstance(@RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody InstanceManifestRequest request) {
+        security.authorize(authorization);
+        runtime.installInstance(request.runtimeIdentity(), request.manifest());
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/update")
     ResponseEntity<Void> update(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody ManifestRequest request) {
@@ -52,6 +60,14 @@ final class ExtensionRuntimeController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/instances/enable")
+    ResponseEntity<Void> enableInstance(@RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody InstanceEnableRequest request) {
+        security.authorize(authorization);
+        runtime.enableInstance(request.runtimeIdentity(), request.manifest(), request.credentialGeneration(), request.configuration());
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{pluginId}/disable")
     ResponseEntity<Void> disable(@RequestHeader(value = "Authorization", required = false) String authorization,
             @PathVariable String pluginId) {
@@ -60,11 +76,27 @@ final class ExtensionRuntimeController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/instances/{runtimeIdentity}/disable")
+    ResponseEntity<Void> disableInstance(@RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable String runtimeIdentity, @RequestBody PluginIdentityRequest request) {
+        security.authorize(authorization);
+        runtime.disableInstance(runtimeIdentity, request.pluginId());
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{pluginId}/uninstall")
     ResponseEntity<Void> uninstall(@RequestHeader(value = "Authorization", required = false) String authorization,
             @PathVariable String pluginId) {
         security.authorize(authorization);
         runtime.uninstall(pluginId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/instances/{runtimeIdentity}/uninstall")
+    ResponseEntity<Void> uninstallInstance(@RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable String runtimeIdentity, @RequestBody PluginIdentityRequest request) {
+        security.authorize(authorization);
+        runtime.uninstallInstance(runtimeIdentity, request.pluginId());
         return ResponseEntity.noContent().build();
     }
 
@@ -94,6 +126,17 @@ final class ExtensionRuntimeController {
         return runtime.health(request.manifest());
     }
 
+    @PostMapping("/instances/{runtimeIdentity}/health")
+    ExtensionRuntimePort.RuntimeHealth instanceHealth(@RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable String runtimeIdentity, @RequestBody ManifestHealthRequest request) {
+        security.authorize(authorization);
+        if (request.manifest() == null) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Instance health manifest is required");
+        }
+        return runtime.healthInstance(runtimeIdentity, request.manifest());
+    }
+
     @PostMapping("/invoke")
     ExtensionRuntimePort.InvocationResult invoke(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody InvocationRequest request) {
@@ -103,6 +146,12 @@ final class ExtensionRuntimeController {
     }
 
     record ManifestRequest(PluginManifest manifest, int credentialGeneration) { }
+    record InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration) { }
+    record PluginIdentityRequest(String pluginId) { }
+    record InstanceEnableRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
+            Map<String, String> configuration) {
+        InstanceEnableRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
+    }
     record EnableRequest(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
         EnableRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
     }

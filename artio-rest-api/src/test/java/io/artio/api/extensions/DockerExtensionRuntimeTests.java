@@ -50,6 +50,28 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void samePackageInstancesReceiveSeparateDockerAndCredentialIdentities() {
+        var manifest = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "1.0.0",
+                "Payment adapter", "0.1.0", "1.0.0", "ghcr.io/artio/payments@sha256:" + "a".repeat(64),
+                java.util.List.of(), java.util.List.of(), Map.of(), java.util.List.of(), "/health", "/diagnostics");
+        var credentials = new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes");
+        String firstIdentity = "payments.example.account-a";
+        String secondIdentity = "payments.example.account-b";
+        assertThat(DockerExtensionRuntime.containerName(firstIdentity)).isNotEqualTo(DockerExtensionRuntime.containerName(secondIdentity));
+        assertThat(DockerExtensionRuntime.serviceName(firstIdentity, "main"))
+                .isNotEqualTo(DockerExtensionRuntime.serviceName(secondIdentity, "main"));
+        assertThat(DockerExtensionRuntime.volumeName(firstIdentity, "main", "/data"))
+                .isNotEqualTo(DockerExtensionRuntime.volumeName(secondIdentity, "main", "/data"));
+        var firstEnvironment = DockerExtensionRuntime.resolvedEnvironment(firstIdentity, manifest, true, Map.of(), 1,
+                Map.of(), credentials, null);
+        var secondEnvironment = DockerExtensionRuntime.resolvedEnvironment(secondIdentity, manifest, true, Map.of(), 1,
+                Map.of(), credentials, null);
+        assertThat(firstEnvironment).contains("ARTIO_EXTENSION_TOKEN=" + credentials.derive(firstIdentity, 1));
+        assertThat(secondEnvironment).contains("ARTIO_EXTENSION_TOKEN=" + credentials.derive(secondIdentity, 1));
+        assertThat(firstEnvironment).doesNotContain("ARTIO_EXTENSION_TOKEN=" + credentials.derive(secondIdentity, 1));
+    }
+
+    @Test
     void observabilityProxyRejectsOtherPluginsMethodsAndTraversalBeforeDockerAccess() {
         var runtime = new DockerExtensionRuntime(null, "artio-extensions", 8080,
                 new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));

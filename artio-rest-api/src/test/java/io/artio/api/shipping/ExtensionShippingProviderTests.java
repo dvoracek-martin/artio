@@ -8,12 +8,15 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.extensions.ManagedExtensionInvoker;
+import io.artio.api.extensions.CommerceCapabilityInvoker;
+import io.artio.extensions.commerce.ShippingProvider;
 import io.artio.extensions.commerce.ShippingProvider.Address;
 import io.artio.extensions.commerce.ShippingProvider.ShipmentRequest;
 import io.artio.extensions.commerce.ShippingProvider.ShippingRequest;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ExtensionShippingProviderTests {
@@ -73,5 +76,59 @@ class ExtensionShippingProviderTests {
                         "track-2","x".repeat(81),null,null)));
         org.assertj.core.api.Assertions.assertThatThrownBy(()->provider.track("track-2"))
                 .isInstanceOf(io.artio.extensions.ExtensionRuntimePort.ExtensionProtocolException.class);
+    }
+
+    @Test
+    void createsShipmentWithDurableInstanceOwnership() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("destinationCountry", "CH", "currency", "CHF");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 81L, 2, "c".repeat(64), scope);
+        var request = new ShipmentRequest("order-9", "priority", new Address("CH", "8000", "Zürich", "Main 1", null, "Ada"),
+                BigDecimal.ONE, BigDecimal.TEN, "CHF", "ship-order-9");
+        when(routed.invoke(eq("shipping.provider.v1"), eq("createShipment"), eq(scope), eq(null), eq(true),
+                org.mockito.ArgumentMatchers.anyString(), eq(request))).thenReturn(new CommerceCapabilityInvoker.Invocation(
+                new ObjectMapper().readTree("{\"shipmentReference\":\"shipment-9\",\"trackingReference\":\"track-9\"}"), owner));
+        var adapter = new ExtensionShippingProvider(invoker, new ObjectMapper(), routed, "shipping.compat", "static");
+
+        var result = adapter.createShipmentOwned(request);
+
+        assertThat(result.result().trackingReference()).isEqualTo("track-9");
+        assertThat(result.owner().instanceId()).isEqualTo(instanceId);
+        assertThat(result.owner().releaseId()).isEqualTo(81L);
+        assertThat(result.owner().scope()).isEqualTo(scope);
+    }
+
+    @Test
+    void trackingUsesThePersistedCarrierInstanceAndScope() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("destinationCountry", "CH", "currency", "CHF");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 81L, 2, "d".repeat(64), scope);
+        when(routed.invoke(eq("shipping.provider.v1"), eq("track"), eq(scope), eq(instanceId), eq(false),
+                org.mockito.ArgumentMatchers.anyString(), eq(Map.of("trackingReference", "track-9"))))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(new ObjectMapper().readTree(
+                        "{\"trackingReference\":\"track-9\",\"status\":\"IN_TRANSIT\"}"), owner));
+        var adapter = new ExtensionShippingProvider(invoker, new ObjectMapper(), routed, "shipping.compat", "static");
+
+        var result = adapter.track(new ShippingProvider.ProviderOwner(instanceId, 81L, 2, "d".repeat(64), scope), "track-9");
+
+        assertThat(result.result().status()).isEqualTo("IN_TRANSIT");
+        verify(routed).invoke(eq("shipping.provider.v1"), eq("track"), eq(scope), eq(instanceId), eq(false),
+                org.mockito.ArgumentMatchers.anyString(), eq(Map.of("trackingReference", "track-9")));
+    }
+
+    @Test
+    void v2ShipmentBindingsActivateWithoutLegacyEnvironmentSelection() {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        when(routed.hasEnabledBinding("shipping.provider.v1", "createShipment")).thenReturn(true);
+        when(routed.hasEnabledBinding("shipping.provider.v1", "track")).thenReturn(true);
+        var adapter = new ExtensionShippingProvider(invoker, new ObjectMapper(), routed, "", "static");
+
+        var capabilities = adapter.capabilities();
+
+        assertThat(capabilities.shipmentCreation()).isTrue();
+        assertThat(capabilities.tracking()).isTrue();
+        assertThat(capabilities.quotes()).isFalse();
     }
 }

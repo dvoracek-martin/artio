@@ -45,6 +45,40 @@ class RemoteExtensionRuntimeTests {
     }
 
     @Test
+    void sendsInstanceLifecycleRequestsWithTheIsolatedRuntimeIdentity() throws Exception {
+        var requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/extensions/instances", exchange -> {
+            requests.add(exchange.getRequestURI().getPath() + " " + new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = exchange.getRequestURI().getPath().endsWith("/health")
+                    ? "{\"healthy\":true,\"status\":\"HEALTHY\"}".getBytes(StandardCharsets.UTF_8) : new byte[0];
+            if (response.length > 0) exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(response.length == 0 ? 204 : 200, response.length == 0 ? -1 : response.length);
+            if (response.length > 0) exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        var runtime = new RemoteExtensionRuntime(new ObjectMapper(), "http://127.0.0.1:" + server.getAddress().getPort(),
+                "integration-controller-token-value-at-least-32-characters");
+        var manifest = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "1.0.0",
+                "Provider", "0.1.0", "9.0.0", "ghcr.io/artio/payments@sha256:" + "a".repeat(64),
+                java.util.List.of(), java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
+
+        runtime.installInstance("instance-123", manifest);
+        runtime.enableInstance("instance-123", manifest, 2, java.util.Map.of("account", "eu"));
+        runtime.healthInstance("instance-123", manifest);
+        runtime.disableInstance("instance-123", manifest.id());
+        runtime.uninstallInstance("instance-123", manifest.id());
+
+        assertThat(requests).hasSize(5);
+        assertThat(requests.get(0)).contains("/instances/install", "instance-123");
+        assertThat(requests.get(1)).contains("/instances/enable", "instance-123", "\"account\":\"eu\"");
+        assertThat(requests.get(2)).contains("/instances/instance-123/health");
+        assertThat(requests.get(3)).contains("/instances/instance-123/disable", "payments.example");
+        assertThat(requests.get(4)).contains("/instances/instance-123/uninstall", "payments.example");
+    }
+
+    @Test
     void mapsControllerProviderFailuresBackToTheExtensionContract() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/internal/v1/extensions/invoke", exchange -> {

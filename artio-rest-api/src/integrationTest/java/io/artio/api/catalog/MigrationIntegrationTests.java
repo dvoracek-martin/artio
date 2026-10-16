@@ -48,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(11);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("36");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(1);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("1");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT valid_until FROM pricing_tax_rule WHERE id='00000000-0000-0000-0000-000000000038'")) {
             assertThat(result.next()).isTrue();
@@ -149,6 +149,15 @@ class MigrationIntegrationTests {
             assertThat(result.getString(1)).isEqualTo("event_inbox");
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT to_regclass('extension_plugin_instances'), to_regclass('extension_capability_bindings'), to_regclass('extension_operation_attempts'), to_regclass('extension_event_subscriptions'), to_regclass('extension_event_deliveries')")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("extension_plugin_instances");
+            assertThat(result.getString(2)).isEqualTo("extension_capability_bindings");
+            assertThat(result.getString(3)).isEqualTo("extension_operation_attempts");
+            assertThat(result.getString(4)).isEqualTo("extension_event_subscriptions");
+            assertThat(result.getString(5)).isEqualTo("extension_event_deliveries");
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='pricing_price' AND column_name='prices_include_tax'")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getInt(1)).isEqualTo(1);
@@ -180,36 +189,4 @@ class MigrationIntegrationTests {
                 .locations("classpath:db/migration");
     }
 
-    @Test
-    void upgradesV30ToPersistentLicenseIdentityWithoutChangingExistingCatalogData() {
-        try (var database = new PostgreSQLContainer<>("postgres:16-alpine")) {
-            database.start();
-            Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword())
-                    .locations("classpath:db/migration").target("30").load().migrate();
-            var jdbc = new JdbcTemplate(new DriverManagerDataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword()));
-            var product = java.util.UUID.randomUUID();
-            jdbc.update("INSERT INTO catalog_product(id,name,sku,active,created_at,updated_at) VALUES (?,'Upgrade fixture','UPGRADE-FIXTURE',true,now(),now())", product);
-            var user = java.util.UUID.randomUUID();
-            var existingOrder = java.util.UUID.randomUUID();
-            jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,'upgrade@example.test','fixture-hash','Upgrade','Fixture',now())", user);
-            String insertOrder = "INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) VALUES (?,?,'PAID',100,0,0,100,'CHF','Fixture','Fixture',now(),'CH','CH','CH','{}',?)";
-            jdbc.update(insertOrder, existingOrder, user, existingOrder.toString());
-            var upgrade = Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword())
-                    .locations("classpath:db/migration").load();
-            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(6);
-            var identity = jdbc.queryForObject("SELECT installation_id FROM artio_license_state", java.util.UUID.class);
-            assertThat(identity).isNotNull();
-            assertThat(jdbc.queryForObject("SELECT name FROM catalog_product WHERE id=?", String.class, product)).isEqualTo("Upgrade fixture");
-            assertThat(jdbc.queryForObject("SELECT loyalty_eligible FROM orders WHERE id=?", Boolean.class, existingOrder)).isTrue();
-            var newOrder = java.util.UUID.randomUUID();
-            jdbc.update(insertOrder, newOrder, user, newOrder.toString());
-            assertThat(jdbc.queryForObject("SELECT loyalty_eligible FROM orders WHERE id=?", Boolean.class, newOrder)).isFalse();
-            io.artio.api.enterprise.LoyaltyAccounting.earnForOrder(jdbc, user, existingOrder, new java.math.BigDecimal("100"));
-            io.artio.api.enterprise.LoyaltyAccounting.earnForOrder(jdbc, user, newOrder, new java.math.BigDecimal("100"));
-            assertThat(jdbc.queryForObject("SELECT points FROM loyalty_accounts WHERE user_id=?", Long.class, user)).isEqualTo(100L);
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM loyalty_transactions WHERE user_id=? AND kind='EARN'", Integer.class, user)).isEqualTo(1);
-            assertThat(upgrade.migrate().migrationsExecuted).isZero();
-            assertThat(jdbc.queryForObject("SELECT installation_id FROM artio_license_state", java.util.UUID.class)).isEqualTo(identity);
-        }
-    }
 }

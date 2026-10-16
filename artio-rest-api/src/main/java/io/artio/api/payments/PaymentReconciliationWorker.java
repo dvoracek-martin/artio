@@ -12,6 +12,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +35,8 @@ public class PaymentReconciliationWorker {
     private static final int BATCH_SIZE = 50;
     private static final int SESSION_LIFETIME_MINUTES = 32;
     private static final Duration CLAIM_LEASE = Duration.ofMinutes(5);
+    private static final ObjectMapper OWNER_MAPPER = new ObjectMapper();
+    private static final TypeReference<Map<String, String>> OWNER_SCOPE = new TypeReference<>() { };
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;
     private final OrderUpdatePublisher orderUpdates;
@@ -61,11 +67,12 @@ public class PaymentReconciliationWorker {
                     ORDER BY reconciliation_available_at, created_at
                     LIMIT ? FOR UPDATE SKIP LOCKED
                 )
-                RETURNING id, order_id, provider_reference, reconciliation_attempts, method, amount, currency
+                RETURNING id, order_id, provider_reference, reconciliation_attempts, method, amount, currency,
+                          provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text
                 """;
         List<PaymentSession> claimed = transactions.execute(status -> jdbc.query(claimSql, (rs, row) -> new PaymentSession(rs.getObject("id", UUID.class),
                 rs.getObject("order_id", UUID.class), rs.getString("provider_reference"),
-                rs.getInt("reconciliation_attempts"), rs.getString("method"), rs.getBigDecimal("amount"), rs.getString("currency").trim()), SESSION_LIFETIME_MINUTES,
+                rs.getInt("reconciliation_attempts"), rs.getString("method"), rs.getBigDecimal("amount"), rs.getString("currency").trim(), providerOwner(rs,8)), SESSION_LIFETIME_MINUTES,
                 CLAIM_LEASE.toSeconds(), BATCH_SIZE));
         if (claimed == null) return;
         for (PaymentSession payment : claimed) reconcile(payment);
@@ -75,11 +82,12 @@ public class PaymentReconciliationWorker {
         PaymentProvider provider = paymentProvider.getIfAvailable();
         if (provider == null) { retry(payment, "PAYMENT_PROVIDER_UNAVAILABLE"); return; }
         try {
-            var result = provider.reconcile(payment.sessionId(), "artio-reconcile-" + payment.id());
-            if (result.isEmpty()) { retry(payment, "PROVIDER_PENDING"); return; }
-            switch (result.get().state()) {
+            var owned = provider.reconcile(payment.owner(), payment.sessionId(), "artio-reconcile-" + payment.id());
+            if (owned.isEmpty()) { retry(payment, "PROVIDER_PENDING"); return; }
+            var result = owned.get().result();
+            switch (result.state()) {
                 case CAPTURED -> {
-                    var settlement = result.get();
+                    var settlement = result;
                     if (!payment.sessionId().equals(settlement.providerReference()) || settlement.amount() == null
                             || payment.amount().compareTo(settlement.amount()) != 0 || settlement.currency() == null
                             || !payment.currency().equalsIgnoreCase(settlement.currency())) {
@@ -87,7 +95,7 @@ public class PaymentReconciliationWorker {
                     } else applyPaid(payment);
                 }
                 case EXPIRED, FAILED, CANCELLED -> applyExpired(payment);
-                default -> retry(payment, "PROVIDER_" + result.get().state().name());
+                default -> retry(payment, "PROVIDER_" + result.state().name());
             }
         } catch (Exception failure) {
             log.warn("Payment provider reconciliation failed for payment {}; retry scheduled ({})",
@@ -151,6 +159,15 @@ public class PaymentReconciliationWorker {
         jdbc.update("UPDATE payments SET reconciliation_claimed_at=NULL WHERE id=?", paymentId);
     }
 
+    private static PaymentProvider.ProviderOwner providerOwner(ResultSet rs, int column) throws SQLException {
+        UUID instanceId = rs.getObject(column, UUID.class);
+        if (instanceId == null) return null;
+        Number releaseValue = (Number) rs.getObject(column + 1);
+        try {
+            return new PaymentProvider.ProviderOwner(instanceId, releaseValue == null ? null : releaseValue.longValue(),
+                    rs.getInt(column + 2), rs.getString(column + 3) == null ? null : rs.getString(column + 3).trim(), OWNER_MAPPER.readValue(rs.getString(column + 4), OWNER_SCOPE));
+        } catch (Exception invalid) { throw new SQLException("Persisted provider scope is invalid", invalid); }
+    }
     private record PaymentSession(UUID id, UUID orderId, String sessionId, int attempts, String method,
-                                  java.math.BigDecimal amount, String currency) { }
+                                  java.math.BigDecimal amount, String currency, PaymentProvider.ProviderOwner owner) { }
 }

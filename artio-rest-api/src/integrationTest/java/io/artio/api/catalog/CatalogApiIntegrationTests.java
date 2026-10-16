@@ -84,6 +84,9 @@ class CatalogApiIntegrationTests {
     private io.artio.api.security.EncryptionService encryption;
 
     @Autowired
+    private io.artio.api.extensions.CommerceCapabilityInvoker commerceCapabilityInvoker;
+
+    @Autowired
     private io.artio.api.payments.CheckoutFailureCompensation checkoutFailureCompensation;
 
     private io.artio.api.payments.PaymentReconciliationWorker paymentReconciliationWorker;
@@ -497,6 +500,10 @@ class CatalogApiIntegrationTests {
         assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(registered.getBody()).isNotNull();
         assertThat(registered.getBody().lifecycleState()).isEqualTo("VALIDATED");
+        var instance = jdbc.queryForMap("SELECT instance_key,compatibility_mode,runtime_identity,configuration_generation FROM extension_plugin_instances WHERE plugin_id=?", manifest.id());
+        assertThat(instance.get("instance_key")).isEqualTo("legacy-default");
+        assertThat(instance.get("compatibility_mode")).isEqualTo("LEGACY_V1");
+        assertThat(instance.get("runtime_identity")).isEqualTo(manifest.id());
 
         String secret = "sk_test_write_only_integration_secret";
         var configured = adminExchange("/api/v1/admin/extensions/{id}/configuration", HttpMethod.PUT,
@@ -516,6 +523,9 @@ class CatalogApiIntegrationTests {
         assertThat(updated.getBody()).isNotNull();
         assertThat(updated.getBody().configurationVersion()).isEqualTo(2);
         assertThat(updated.getBody().configuredSecrets()).contains("apiKey");
+        assertThat(jdbc.queryForObject("SELECT configuration_generation FROM extension_plugin_instances WHERE plugin_id=?", Integer.class, manifest.id())).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT encrypted_secrets->>'apiKey' FROM extension_plugin_instances WHERE plugin_id=?", String.class, manifest.id()))
+                .isEqualTo(ciphertext);
         var audit = adminExchange("/api/v1/admin/extensions/{id}/audit", HttpMethod.GET, null,
                 io.artio.api.extensions.ExtensionManagementController.AuditView[].class, manifest.id());
         assertThat(audit.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -534,6 +544,10 @@ class CatalogApiIntegrationTests {
                 .isEqualTo("{}");
         assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, manifest.id()))
                 .isEqualTo("UNINSTALLED");
+        assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugin_instances WHERE plugin_id=?", String.class, manifest.id()))
+                .isEqualTo("UNINSTALLED");
+        assertThat(jdbc.queryForObject("SELECT encrypted_secrets::text FROM extension_plugin_instances WHERE plugin_id=?", String.class, manifest.id()))
+                .isEqualTo("{}");
         assertThat(adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, Map[].class).getBody())
                 .noneMatch(plugin -> manifest.id().equals(plugin.get("id")));
 
@@ -543,6 +557,8 @@ class CatalogApiIntegrationTests {
         assertThat(restored.getBody()).isNotNull();
         assertThat(restored.getBody().lifecycleState()).isEqualTo("VALIDATED");
         assertThat(restored.getBody().configuredSecrets()).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugin_instances WHERE plugin_id=?", String.class, manifest.id()))
+                .isEqualTo("CONFIGURED");
         assertThat(adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, Map[].class).getBody())
                 .anyMatch(plugin -> manifest.id().equals(plugin.get("id")));
     }
@@ -583,6 +599,376 @@ class CatalogApiIntegrationTests {
         var invalid = adminExchange("/api/v1/admin/extensions?country=XX", HttpMethod.GET, null, ApiError.class);
         assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(invalid.getBody().code()).isEqualTo("BAD_REQUEST");
+    }
+
+    @Test
+    void registersV2ReleasePersistsExplicitBindingAndRoutesOnlyEnabledDeclaredInstances() {
+        String pluginId = "test.v2-payment-" + UUID.randomUUID().toString().substring(0, 8);
+        var packageManifest = new io.artio.extensions.PluginManifest("2", pluginId, "V2 Payment", "Artio",
+                "1.0.0", "Capability-based payment test plugin", "0.1.0", "9.0.0",
+                "ghcr.io/artio/test-payment@sha256:" + "a".repeat(64), List.of(), List.of(),
+                Map.of("account", new io.artio.extensions.PluginManifest.ConfigField("text", false, false,
+                                "Account", "Merchant account label", null, List.of(), null, 120, null, null),
+                        "apiKey", new io.artio.extensions.PluginManifest.ConfigField("secret", false, true,
+                                "API key", "Merchant credential", null, List.of(), null, 200, null, null)), List.of(),
+                "/health", "/diagnostics", io.artio.extensions.PluginManifest.GeographicAvailability.global(),
+                List.of(), List.of(), Map.of("ARTIO_MERCHANT_ACCOUNT", "account", "ARTIO_API_KEY", "apiKey"));
+        var v2 = new io.artio.extensions.PluginManifestV2(packageManifest, List.of(
+                new io.artio.extensions.PluginManifestV2.CapabilityDeclaration("payment.provider.v1",
+                        List.of("listMethods", "createCheckout", "capture", "verifyWebhook"),
+                        List.of("payments.methods.read", "payment.process"), Map.of()),
+                new io.artio.extensions.PluginManifestV2.CapabilityDeclaration("catalog.enrichment.v1",
+                        List.of("enrich"), List.of("catalog.read"), Map.of()),
+                new io.artio.extensions.PluginManifestV2.CapabilityDeclaration("storage.object.v1",
+                        List.of("put", "get", "delete"), List.of("storage.object.write", "storage.object.read", "storage.object.delete"), Map.of())),
+                List.of(new io.artio.extensions.PluginManifestV2.EventSubscription("order.paid", 1, List.of())));
+
+        assertThat(http.postForEntity("/api/v1/admin/extensions/register-v2", v2, Map.class).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        var registered = adminExchange("/api/v1/admin/extensions/register-v2", HttpMethod.POST, v2, Map.class);
+        assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID instanceId = jdbc.queryForObject("SELECT instance_id FROM extension_plugin_instances WHERE plugin_id=?", UUID.class, pluginId);
+        Long v2ReleaseId = jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances WHERE instance_id=?", Long.class, instanceId);
+        assertThat(jdbc.queryForObject("SELECT compatibility_mode FROM extension_plugin_instances WHERE instance_id=?", String.class, instanceId))
+                .isEqualTo("CAPABILITY_V2");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_plugin_v2_releases v JOIN extension_plugin_instances i USING(release_id) WHERE i.instance_id=?",
+                Integer.class, instanceId)).isEqualTo(1);
+        var configuredDefault = adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}/configuration", HttpMethod.PUT,
+                Map.of("account", "CH", "apiKey", "default-private-key"), Map.class, pluginId, instanceId);
+        assertThat(configuredDefault.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var secondInstance = adminExchange("/api/v1/admin/extensions/{id}/instances", HttpMethod.POST,
+                Map.of("instanceKey", "account-de", "configuration", Map.of("account", "DE", "apiKey", "second-private-key")),
+                Map.class, pluginId);
+        assertThat(secondInstance.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID secondInstanceId = UUID.fromString(secondInstance.getBody().get("instanceId").toString());
+        assertThat(secondInstanceId).isNotEqualTo(instanceId);
+        assertThat(jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances WHERE instance_id=?", Long.class, secondInstanceId))
+                .isEqualTo(v2ReleaseId);
+        assertThat(jdbc.queryForObject("SELECT runtime_identity FROM extension_plugin_instances WHERE instance_id=?", String.class, secondInstanceId))
+                .isNotEqualTo(jdbc.queryForObject("SELECT runtime_identity FROM extension_plugin_instances WHERE instance_id=?", String.class, instanceId));
+        String defaultSecret = jdbc.queryForObject("SELECT encrypted_secrets->>'apiKey' FROM extension_plugin_instances WHERE instance_id=?",
+                String.class, instanceId);
+        String secondSecret = jdbc.queryForObject("SELECT encrypted_secrets->>'apiKey' FROM extension_plugin_instances WHERE instance_id=?",
+                String.class, secondInstanceId);
+        assertThat(defaultSecret).isNotEqualTo(secondSecret);
+        assertThat(encryption.decrypt(defaultSecret)).isEqualTo("default-private-key");
+        assertThat(encryption.decrypt(secondSecret)).isEqualTo("second-private-key");
+        var instances = adminExchange("/api/v1/admin/extensions/{id}/instances", HttpMethod.GET, null, Map[].class, pluginId);
+        assertThat(instances.getBody()).hasSize(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_event_subscriptions WHERE instance_id=? AND event_type='order.paid'",
+                Integer.class, secondInstanceId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_event_subscriptions WHERE instance_id=? AND event_type='order.paid' AND permissions_snapshot='[]'::jsonb",
+                Integer.class, instanceId)).isEqualTo(1);
+        UUID subscriptionId = jdbc.queryForObject("SELECT subscription_id FROM extension_event_subscriptions WHERE instance_id=?", UUID.class, instanceId);
+        var paused = adminExchange("/api/v1/admin/extensions/{id}/subscriptions/{subscriptionId}/state", HttpMethod.PUT,
+                Map.of("state", "PAUSED"), Map.class, pluginId, subscriptionId);
+        assertThat(paused.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class, subscriptionId))
+                .isEqualTo("PAUSED");
+        var subscriptions = adminExchange("/api/v1/admin/extensions/{id}/subscriptions", HttpMethod.GET, null, Map[].class, pluginId);
+        assertThat(subscriptions.getBody()).hasSize(2);
+        assertThat(java.util.Arrays.stream(subscriptions.getBody())
+                .filter(subscription -> subscriptionId.toString().equals(subscription.get("subscriptionId")))
+                .findFirst().orElseThrow()).containsEntry("subscriptionState", "PAUSED");
+
+        var binding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                        "scope", Map.of("country", "CH"), "priority", 20), Map.class, pluginId);
+        assertThat(binding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_capability_bindings WHERE instance_id=?", Integer.class, instanceId)).isEqualTo(1);
+        UUID bindingId = UUID.fromString(binding.getBody().get("bindingId").toString());
+        assertThat(adminExchange("/api/v1/admin/extensions/{id}/bindings/{bindingId}/state", HttpMethod.PUT,
+                Map.of("state", "DISABLED"), Map.class, pluginId, bindingId).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT eligibility_state FROM extension_capability_bindings WHERE binding_id=?", String.class, bindingId))
+                .isEqualTo("DISABLED");
+        assertThat(adminExchange("/api/v1/admin/extensions/{id}/bindings/{bindingId}/state", HttpMethod.PUT,
+                Map.of("state", "ACTIVE"), Map.class, pluginId, bindingId).getStatusCode()).isEqualTo(HttpStatus.OK);
+        var bindings = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.GET, null, Map[].class, pluginId);
+        assertThat(bindings.getBody()).hasSize(1);
+        var undeclared = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "refund", "scope", Map.of(), "priority", 0),
+                Map.class, pluginId);
+        assertThat(undeclared.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        var secondBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                        "scope", Map.of("country", "DE"), "priority", 20, "instanceId", secondInstanceId), Map.class, pluginId);
+        assertThat(secondBinding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        for (UUID paymentInstance : List.of(instanceId, secondInstanceId)) {
+            assertThat(adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                    Map.of("capabilityId", "payment.provider.v1", "operationName", "listMethods",
+                            "scope", Map.of(), "priority", 0, "instanceId", paymentInstance), Map.class, pluginId).getStatusCode())
+                    .isEqualTo(HttpStatus.CREATED);
+        }
+        var aggregateRuntime = org.mockito.Mockito.mock(io.artio.extensions.ExtensionRuntimePort.class);
+        var aggregateCalls = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        java.util.concurrent.atomic.AtomicBoolean providerUnavailable = new java.util.concurrent.atomic.AtomicBoolean();
+        var aggregateArrivals = new java.util.concurrent.CountDownLatch(2);
+        var aggregateInFlight = new java.util.concurrent.atomic.AtomicInteger();
+        var aggregatePeakConcurrency = new java.util.concurrent.atomic.AtomicInteger();
+        org.mockito.Mockito.when(aggregateRuntime.invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq("payment.provider.v1"), org.mockito.ArgumentMatchers.eq("listMethods"),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Duration.class))).thenAnswer(call -> {
+            String runtimeIdentity = call.getArgument(0);
+            aggregateCalls.add(runtimeIdentity);
+            int inFlight = aggregateInFlight.incrementAndGet();
+            aggregatePeakConcurrency.accumulateAndGet(inFlight, Math::max);
+            try {
+                aggregateArrivals.countDown();
+                aggregateArrivals.await(1, TimeUnit.SECONDS);
+                return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(
+                        providerUnavailable.get() && runtimeIdentity.endsWith(secondInstanceId.toString().replace("-", "")) ? 503 : 200,
+                        "{\"methods\":[{\"id\":\"card\",\"label\":\"Card\"}]}");
+            } finally { aggregateInFlight.decrementAndGet(); }
+        });
+        var aggregateBeans = new org.springframework.beans.factory.support.StaticListableBeanFactory(Map.of("aggregateRuntime", aggregateRuntime));
+        var aggregateInvoker = new io.artio.api.extensions.CommerceCapabilityInvoker(jdbc,
+                new com.fasterxml.jackson.databind.ObjectMapper(), encryption,
+                aggregateBeans.getBeanProvider(io.artio.extensions.ExtensionRuntimePort.class));
+        var exclusiveBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                Map.of("capabilityId", "catalog.enrichment.v1", "operationName", "enrich",
+                        "scope", Map.of("country", "CH"), "priority", 20), Map.class, pluginId);
+        assertThat(exclusiveBinding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var overlappingBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                Map.of("capabilityId", "catalog.enrichment.v1", "operationName", "enrich",
+                        "scope", Map.of("currency", "CHF"), "priority", 20, "instanceId", secondInstanceId), Map.class, pluginId);
+        assertThat(overlappingBinding.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_capability_bindings WHERE capability_id='catalog.enrichment.v1' AND operation_name='enrich'",
+                Integer.class)).isEqualTo(1);
+        var webhookBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "verifyWebhook",
+                        "scope", Map.of("country", "CH"), "priority", 20), Map.class, pluginId);
+        assertThat(webhookBinding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        for (UUID storageInstance : List.of(instanceId, secondInstanceId)) {
+            var storageBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                    Map.of("capabilityId", "storage.object.v1", "operationName", "put", "scope", Map.of(),
+                            "priority", 5, "instanceId", storageInstance), Map.class, pluginId);
+            assertThat(storageBinding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        }
+        String protectedMediaKey = UUID.randomUUID() + ".png";
+        jdbc.update("INSERT INTO catalog_media_storage_objects(storage_key,content_checksum,byte_length,primary_instance_id,"
+                        + "primary_release_id,primary_configuration_generation,replica_instance_ids,provider_versions) "
+                        + "VALUES (?, ?, 1, ?, ?, 1, ?::jsonb, '{}'::jsonb)", protectedMediaKey, "a".repeat(64), instanceId,
+                v2ReleaseId, "[\"" + secondInstanceId + "\"]");
+        assertThat(adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}", HttpMethod.DELETE, null, Map.class,
+                pluginId, instanceId).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        jdbc.update("DELETE FROM catalog_media_storage_objects WHERE storage_key=?", protectedMediaKey);
+
+        var unavailable = adminExchange("/api/v1/admin/extensions/routing/resolve", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                        "scope", Map.of("country", "CH"), "newCommitment", true), ApiError.class);
+        assertThat(unavailable.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+
+        jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='ENABLED' WHERE instance_id=?", instanceId);
+        var plan = adminExchange("/api/v1/admin/extensions/routing/resolve", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                        "scope", Map.of("country", "CH"), "newCommitment", true), io.artio.extensions.CapabilityRouter.RoutePlan.class);
+        assertThat(plan.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(plan.getBody()).isNotNull();
+        assertThat(plan.getBody().instanceIds()).containsExactly(instanceId);
+        assertThat(plan.getBody().policy()).isEqualTo(io.artio.extensions.CapabilityRegistry.Policy.SELECT_ONE);
+        jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='ENABLED' WHERE instance_id=?", secondInstanceId);
+        var secondPlan = adminExchange("/api/v1/admin/extensions/routing/resolve", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                        "scope", Map.of("country", "DE"), "newCommitment", true), io.artio.extensions.CapabilityRouter.RoutePlan.class);
+        assertThat(secondPlan.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(secondPlan.getBody().instanceIds()).containsExactly(secondInstanceId);
+        jdbc.update("UPDATE extension_plugins SET lifecycle_state='ENABLED' WHERE plugin_id=?", pluginId);
+
+        var aggregate = aggregateInvoker.aggregateRead("payment.provider.v1", "listMethods", Map.of("country", "CH"), Map.of("country", "CH", "currency", "CHF"));
+        assertThat(aggregate.results()).hasSize(2);
+        assertThat(aggregate.failures()).isEmpty();
+        assertThat(aggregate.results()).extracting(io.artio.api.extensions.CommerceCapabilityInvoker.AggregateProviderResult::instanceId)
+                .containsExactlyInAnyOrder(instanceId, secondInstanceId);
+        assertThat(aggregateCalls).containsExactlyInAnyOrder(jdbc.queryForObject("SELECT runtime_identity FROM extension_plugin_instances WHERE instance_id=?", String.class, instanceId),
+                jdbc.queryForObject("SELECT runtime_identity FROM extension_plugin_instances WHERE instance_id=?", String.class, secondInstanceId));
+        assertThat(aggregatePeakConcurrency.get()).isEqualTo(2);
+        providerUnavailable.set(true);
+        var partial = aggregateInvoker.aggregateRead("payment.provider.v1", "listMethods", Map.of("country", "CH"), Map.of("country", "CH", "currency", "CHF"));
+        assertThat(partial.results()).hasSize(1);
+        assertThat(partial.failures()).singleElement().satisfies(failure -> {
+            assertThat(failure.instanceId()).isEqualTo(secondInstanceId);
+            assertThat(failure.errorCode()).isEqualTo("HTTP_503");
+        });
+
+        var fakeRuntime = org.mockito.Mockito.mock(io.artio.extensions.ExtensionRuntimePort.class);
+        var storageObjects = new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, byte[]>>();
+        var pendingChunks = new java.util.concurrent.ConcurrentHashMap<String, java.io.ByteArrayOutputStream>();
+        org.mockito.Mockito.when(fakeRuntime.invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq("storage.object.v1"), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Duration.class))).thenAnswer(call -> {
+            String runtimeIdentity = call.getArgument(0);
+            String operation = call.getArgument(3);
+            var request = new com.fasterxml.jackson.databind.ObjectMapper().readTree((String) call.getArgument(6));
+            String objectKey = request.path("key").asText();
+            if ("put".equals(operation)) {
+                String uploadId = request.path("uploadId").asText();
+                String chunkKey = runtimeIdentity + ":" + uploadId;
+                var stream = pendingChunks.computeIfAbsent(chunkKey, ignored -> new java.io.ByteArrayOutputStream());
+                stream.writeBytes(java.util.Base64.getDecoder().decode(request.path("chunkBase64").asText()));
+                byte[] content = stream.toByteArray();
+                if (request.path("complete").asBoolean()) {
+                    String checksum = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(content));
+                    if (!checksum.equals(request.path("sha256").asText())) return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(422, "{}");
+                    storageObjects.computeIfAbsent(runtimeIdentity, ignored -> new java.util.concurrent.ConcurrentHashMap<>()).put(objectKey, content);
+                    pendingChunks.remove(chunkKey);
+                }
+                return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(200,
+                        "{\"sha256\":\"" + request.path("sha256").asText() + "\",\"versionId\":\"v1\"}");
+            }
+            if ("get".equals(operation)) {
+                byte[] content = storageObjects.getOrDefault(runtimeIdentity, new java.util.concurrent.ConcurrentHashMap<>()).get(objectKey);
+                if (content == null) return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(404, "{}");
+                String checksum = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(content));
+                int index = request.path("chunkIndex").asInt();
+                int from = index * 512 * 1024;
+                byte[] chunk = java.util.Arrays.copyOfRange(content, from, Math.min(content.length, from + 512 * 1024));
+                return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(200,
+                        "{\"chunkBase64\":\"" + java.util.Base64.getEncoder().encodeToString(chunk) + "\",\"chunkIndex\":" + index
+                                + ",\"totalChunks\":" + Math.max(1, (content.length + 512 * 1024 - 1) / (512 * 1024))
+                                + ",\"sha256\":\"" + checksum + "\",\"versionId\":\"v1\"}");
+            }
+            if ("delete".equals(operation)) {
+                storageObjects.computeIfAbsent(runtimeIdentity, ignored -> new java.util.concurrent.ConcurrentHashMap<>()).remove(objectKey);
+                return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(200,
+                        "{\"deleted\":true,\"tombstoneId\":\"" + request.path("tombstoneId").asText() + "\"}");
+            }
+            return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(400, "{}");
+        });
+        org.springframework.beans.factory.ObjectProvider<io.artio.extensions.ExtensionRuntimePort> fakeRuntimeProvider =
+                org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        org.mockito.Mockito.when(fakeRuntimeProvider.getIfAvailable()).thenReturn(fakeRuntime);
+        var storageInvoker = new io.artio.api.extensions.CommerceCapabilityInvoker(jdbc,
+                new com.fasterxml.jackson.databind.ObjectMapper(), encryption, fakeRuntimeProvider);
+        var pluginMediaStorage = new io.artio.api.catalog.media.PluginMediaStorage(storageInvoker, jdbc,
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        String testMediaKey = UUID.randomUUID() + ".png";
+        byte[] testMediaBytes = "v2 replicated media".getBytes(StandardCharsets.UTF_8);
+        pluginMediaStorage.store(testMediaKey, testMediaBytes);
+        UUID expectedReplicaId = List.of(instanceId, secondInstanceId).stream().sorted(java.util.Comparator.comparing(UUID::toString))
+                .toList().getLast();
+        assertThat(jdbc.queryForObject("SELECT replica_instance_ids::text FROM catalog_media_storage_objects WHERE storage_key=?", String.class,
+                testMediaKey)).contains(expectedReplicaId.toString());
+        assertThat(pluginMediaStorage.read(testMediaKey)).isEqualTo(testMediaBytes);
+        String readIdempotencyKey = UUID.nameUUIDFromBytes(("artio-media:get:0:" + testMediaKey).getBytes(StandardCharsets.UTF_8)).toString();
+        String encryptedReadResult = jdbc.queryForObject("SELECT result_snapshot::text FROM extension_operation_attempts WHERE idempotency_key=?",
+                String.class, readIdempotencyKey);
+        assertThat(encryptedReadResult).contains("encryptedReadResult").doesNotContain(java.util.Base64.getEncoder().encodeToString(testMediaBytes));
+        pluginMediaStorage.delete(testMediaKey);
+        assertThat(jdbc.queryForObject("SELECT object_state FROM catalog_media_storage_objects WHERE storage_key=?", String.class, testMediaKey))
+                .isEqualTo("TOMBSTONED");
+
+        String objectPutKey = UUID.randomUUID().toString();
+        assertThatThrownBy(() -> commerceCapabilityInvoker.invoke("storage.object.v1", "put", Map.of(), null, true,
+                objectPutKey, Map.of("key", "media-object", "contentBase64", "aGVsbG8=", "sha256", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")))
+                .isInstanceOf(io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException.class);
+        assertThat(jdbc.queryForObject("SELECT jsonb_array_length(plan_snapshot->'targets') FROM extension_operation_attempts WHERE idempotency_key=?",
+                Integer.class, objectPutKey)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT plan_snapshot->>'policy' FROM extension_operation_attempts WHERE idempotency_key=?",
+                String.class, objectPutKey)).isEqualTo("PRIMARY_REPLICAS");
+
+        String commerceKey = UUID.randomUUID().toString();
+        var commercePayload = Map.of("orderId", UUID.randomUUID().toString(), "currency", "CHF", "amount", "12.50");
+        assertThatThrownBy(() -> commerceCapabilityInvoker.invoke("payment.provider.v1", "createCheckout",
+                Map.of("country", "CH", "currency", "CHF"), null, true, commerceKey, commercePayload))
+                .isInstanceOf(io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException.class)
+                .satisfies(failure -> assertThat(((io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException) failure)
+                        .owner().instanceId()).isEqualTo(instanceId));
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE idempotency_key=?", String.class, commerceKey))
+                .isEqualTo("UNKNOWN");
+        assertThat(jdbc.queryForObject("SELECT plan_snapshot->'targets'->0->>'configurationGeneration' FROM extension_operation_attempts WHERE idempotency_key=?", String.class, commerceKey))
+                .isEqualTo("1");
+        jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='DISABLED' WHERE instance_id=?", instanceId);
+        assertThatThrownBy(() -> commerceCapabilityInvoker.invoke("payment.provider.v1", "createCheckout",
+                Map.of("country", "CH", "currency", "CHF"), null, true, commerceKey, commercePayload))
+                .isInstanceOf(io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException.class)
+                .satisfies(failure -> assertThat(((io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException) failure)
+                        .owner().instanceId()).isEqualTo(instanceId));
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM extension_operation_attempts WHERE idempotency_key=?", Integer.class, commerceKey))
+                .isEqualTo(1);
+        String webhookKey = UUID.randomUUID().toString();
+        assertThatThrownBy(() -> commerceCapabilityInvoker.invoke("payment.provider.v1", "verifyWebhook",
+                Map.of("country", "CH"), instanceId, false, webhookKey, Map.of("rawBodyBase64", "e30=")))
+                .isInstanceOf(io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException.class)
+                .satisfies(failure -> assertThat(((io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException) failure)
+                        .owner().instanceId()).isEqualTo(instanceId));
+        assertThat(jdbc.queryForObject("SELECT instance_id FROM extension_operation_attempts WHERE idempotency_key=?", UUID.class, webhookKey))
+                .isEqualTo(instanceId);
+        UUID commerceAttemptId = jdbc.queryForObject("SELECT attempt_id FROM extension_operation_attempts WHERE idempotency_key=?", UUID.class, commerceKey);
+        var commerceReconciliation = adminExchange("/api/v1/admin/extensions/routing/attempts/{attemptId}/reconcile", HttpMethod.POST,
+                Map.of(), Map.class, commerceAttemptId);
+        assertThat(commerceReconciliation.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE attempt_id=?", String.class, commerceAttemptId))
+                .isEqualTo("UNKNOWN");
+        jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='ENABLED' WHERE instance_id=?", instanceId);
+
+        String idempotencyKey = UUID.randomUUID().toString();
+        Map<String, Object> invocation = Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                "scope", Map.of("country", "CH"), "newCommitment", true, "idempotencyKey", idempotencyKey,
+                "payload", Map.of("amount", "12.50", "currency", "CHF"), "deadlineMillis", 1000);
+        var unavailableCall = adminExchange("/api/v1/admin/extensions/routing/invoke", HttpMethod.POST, invocation, Map.class);
+        // The HTTP client retries one 503; the retry sees UNKNOWN and safely receives 202 without another plugin call.
+        assertThat(unavailableCall.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(unavailableCall.getBody()).containsEntry("state", "UNKNOWN");
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE idempotency_key=?", String.class, idempotencyKey))
+                .isEqualTo("UNKNOWN");
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM extension_operation_attempts WHERE idempotency_key=?", Integer.class, idempotencyKey))
+                .isEqualTo(1);
+        var repeatedUnknown = adminExchange("/api/v1/admin/extensions/routing/invoke", HttpMethod.POST, invocation, Map.class);
+        assertThat(repeatedUnknown.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM extension_operation_attempts WHERE idempotency_key=?", Integer.class, idempotencyKey))
+                .isEqualTo(1);
+        String requestCiphertext = jdbc.queryForObject("SELECT request_snapshot FROM extension_operation_attempts WHERE idempotency_key=?", String.class, idempotencyKey);
+        assertThat(requestCiphertext).doesNotContain("12.50");
+        assertThat(encryption.decrypt(requestCiphertext)).contains("12.50");
+        assertThatThrownBy(() -> jdbc.update("UPDATE extension_operation_attempts SET plan_snapshot='{}'::jsonb WHERE idempotency_key=?", idempotencyKey))
+                .hasMessageContaining("routing plans are immutable");
+        Map<String, Object> mismatchedRetry = new java.util.HashMap<>(invocation);
+        mismatchedRetry.put("payload", Map.of("amount", "99.00", "currency", "CHF"));
+        assertThat(adminExchange("/api/v1/admin/extensions/routing/invoke", HttpMethod.POST, mismatchedRetry, Map.class).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        UUID attemptId = jdbc.queryForObject("SELECT attempt_id FROM extension_operation_attempts WHERE idempotency_key=?", UUID.class, idempotencyKey);
+        String frozenPlan = jdbc.queryForObject("SELECT plan_snapshot::text FROM extension_operation_attempts WHERE attempt_id=?", String.class, attemptId);
+        var reconciliation = adminExchange("/api/v1/admin/extensions/routing/attempts/{attemptId}/reconcile", HttpMethod.POST,
+                Map.of(), Map.class, attemptId);
+        assertThat(reconciliation.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE attempt_id=?", String.class, attemptId))
+                .isEqualTo("UNKNOWN");
+        assertThat(jdbc.queryForObject("SELECT plan_snapshot::text FROM extension_operation_attempts WHERE attempt_id=?", String.class, attemptId))
+                .isEqualTo(frozenPlan);
+
+        var summary = adminExchange("/api/v1/admin/extensions", HttpMethod.GET, null, Map[].class);
+        Map<?, ?> pluginSummary = java.util.Arrays.stream(summary.getBody()).filter(plugin -> pluginId.equals(plugin.get("id")))
+                .findFirst().orElseThrow();
+        assertThat(pluginSummary.get("compatibilityModes")).isEqualTo("CAPABILITY_V2");
+        assertThat(pluginSummary.get("instanceCount")).isEqualTo(2);
+        assertThat(pluginSummary.get("bindingCount")).isEqualTo(8);
+        assertThat(pluginSummary.get("subscriptionCount")).isEqualTo(2);
+
+        UUID deadDeliveryId = UUID.randomUUID();
+        UUID deadEventId = UUID.randomUUID();
+        Long pluginReleaseId = v2ReleaseId;
+        jdbc.update("INSERT INTO event_inbox(consumer_name,event_id,event_type,schema_version,aggregate_id) "
+                + "VALUES ('order-notification-v1',?,'ORDER_PAID',1,?)", deadEventId, UUID.randomUUID().toString());
+        jdbc.update("INSERT INTO extension_event_deliveries(delivery_id,inbox_consumer_name,inbox_event_id,subscription_id,"
+                        + "instance_id,plugin_id,runtime_identity,release_id,configuration_generation,runtime_credential_generation,"
+                        + "event_type,schema_version,payload_snapshot,state,attempt_count,last_error_code) "
+                        + "VALUES (?,'order-notification-v1',?,?,?,?,?,?,0,1,'order.paid',1,'{\"eventType\":\"order.paid\"}'::jsonb,"
+                        + "'DEAD_LETTER',12,'ExtensionUnavailableException')",
+                deadDeliveryId, deadEventId, subscriptionId, instanceId, pluginId, pluginId, pluginReleaseId);
+        var deadDeliveries = adminExchange("/api/v1/admin/extensions/events/dead?page=0&size=10", HttpMethod.GET,
+                null, Map[].class);
+        assertThat(java.util.Arrays.stream(deadDeliveries.getBody()).map(row -> row.get("deliveryId")))
+                .contains(deadDeliveryId.toString());
+        var replay = adminExchange("/api/v1/admin/extensions/events/{deliveryId}/replay", HttpMethod.POST,
+                Map.of(), Map.class, deadDeliveryId);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(jdbc.queryForObject("SELECT state FROM extension_event_deliveries WHERE delivery_id=?", String.class, deadDeliveryId))
+                .isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_audit_events WHERE plugin_id=? AND action='REPLAY_EVENT_DELIVERY' "
+                + "AND details->>'deliveryId'=?", Integer.class, pluginId, deadDeliveryId.toString())).isEqualTo(1);
     }
 
     @Test
@@ -701,6 +1087,7 @@ class CatalogApiIntegrationTests {
             assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE path=? AND action='UPDATE'", Integer.class, path)).isEqualTo(2);
         } finally {
             jdbc.update("DELETE FROM kafka_consumer_dead_letters WHERE source_topic='rotation-test'");
+            jdbc.update("DELETE FROM extension_plugin_instances WHERE plugin_id='test.key-rotation'");
             jdbc.update("DELETE FROM extension_plugins WHERE plugin_id='test.key-rotation'");
         }
     }
@@ -1810,10 +2197,10 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
-    void appliesCurrentApiMigrationsToAnEmptyPostgresDatabaseWithoutTenantSchema() {
+    void installsSingleCurrentApiSchemaWithoutTenantSchema() {
         var appliedVersions = jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
-        assertThat(appliedVersions).containsExactly("1", "2", "28", "29", "30", "31", "32", "33", "34", "35", "36");
+        assertThat(appliedVersions).containsExactly("1");
 
         var enterpriseTables = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "

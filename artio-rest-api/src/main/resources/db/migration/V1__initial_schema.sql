@@ -1,6 +1,5 @@
--- Artio Core v1 clean-install baseline. Consolidates the pre-release V1-V27 schema.
--- The project owner confirmed that no external database data requires upgrade compatibility.
--- Source migration names are retained as section comments to preserve schema history.
+-- Artio current development schema snapshot. It consolidates the complete latest pre-production schema.
+-- Development maintains one snapshot; versioned database upgrades begin with production releases.
 
 -- ===== Legacy V1__catalog_schema =====
 CREATE TABLE catalog_product (
@@ -237,8 +236,15 @@ CREATE TABLE order_shipments (
     order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
     tracking_number VARCHAR(255) NOT NULL,
     shipment_reference VARCHAR(255),
+    provider_instance_id UUID,
+    provider_release_id BIGINT,
+    provider_configuration_generation INTEGER CHECK (provider_configuration_generation >= 0),
+    provider_account_fingerprint CHAR(64) CHECK (provider_account_fingerprint IS NULL OR provider_account_fingerprint ~ '^[a-f0-9]{64}$'),
+    provider_scope JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(provider_scope) = 'object'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (order_id, tracking_number)
+    UNIQUE (order_id, tracking_number),
+    CHECK ((provider_instance_id IS NULL AND provider_release_id IS NULL AND provider_configuration_generation IS NULL)
+        OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL AND provider_configuration_generation IS NOT NULL))
 );
 CREATE INDEX order_shipments_order_idx ON order_shipments(order_id, created_at, id);
 CREATE TABLE order_shipment_items (
@@ -315,11 +321,19 @@ CREATE TABLE payments (
   method VARCHAR(32) NOT NULL,
   status VARCHAR(32) NOT NULL,
   provider_reference VARCHAR(255) NOT NULL,
+  provider_instance_id UUID,
+  provider_release_id BIGINT,
+  provider_configuration_generation INTEGER CHECK (provider_configuration_generation >= 0),
+  provider_account_fingerprint CHAR(64) CHECK (provider_account_fingerprint IS NULL OR provider_account_fingerprint ~ '^[a-f0-9]{64}$'),
+  provider_scope JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(provider_scope) = 'object'),
   created_at TIMESTAMPTZ NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL,
+  CHECK ((provider_instance_id IS NULL AND provider_release_id IS NULL AND provider_configuration_generation IS NULL)
+      OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL AND provider_configuration_generation IS NOT NULL))
 );
 CREATE UNIQUE INDEX uq_payments_provider_reference ON payments(provider_reference);
 CREATE INDEX idx_payments_order ON payments(order_id);
+CREATE INDEX idx_payments_provider_owner ON payments(provider_instance_id,created_at DESC) WHERE provider_instance_id IS NOT NULL;
 CREATE TABLE payment_refunds (
   id UUID PRIMARY KEY,
   payment_id UUID NOT NULL REFERENCES payments(id),
@@ -806,3 +820,360 @@ ALTER TABLE artio_installation_settings
     ADD COLUMN available_languages JSONB NOT NULL DEFAULT '["de","fr","it","en"]'::jsonb,
     ADD COLUMN external_base_url TEXT,
     ADD COLUMN distribution_id VARCHAR(80) NOT NULL DEFAULT 'switzerland-v1';
+
+
+-- Consolidated current schema fragment (former V2__kafka_consumer_dlq_operations.sql); no upgrade history is retained in development.
+CREATE TABLE kafka_consumer_dead_letters (
+    id UUID PRIMARY KEY,
+    source_topic VARCHAR(249) NOT NULL,
+    source_partition INTEGER NOT NULL CHECK (source_partition >= 0),
+    source_offset BIGINT NOT NULL CHECK (source_offset >= 0),
+    event_id VARCHAR(128),
+    event_type VARCHAR(128),
+    record_key VARCHAR(512),
+    encrypted_payload TEXT,
+    payload_is_null BOOLEAN NOT NULL DEFAULT FALSE,
+    schema_version VARCHAR(32),
+    error_class VARCHAR(128) NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'DEAD' CHECK (status IN ('DEAD','REPLAY_REQUESTED','REPLAYING','REPLAYED')),
+    replay_attempts INTEGER NOT NULL DEFAULT 0 CHECK (replay_attempts >= 0),
+    available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    locked_at TIMESTAMPTZ,
+    replayed_at TIMESTAMPTZ,
+    last_replay_error VARCHAR(128),
+    dead_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_topic, source_partition, source_offset)
+);
+
+CREATE INDEX kafka_consumer_dead_letters_status_idx
+    ON kafka_consumer_dead_letters(status, available_at, dead_at DESC);
+
+
+
+-- Consolidated current schema fragment (former V28__inventory_low_stock_policies.sql); no upgrade history is retained in development.
+CREATE TABLE inventory_low_stock_policy (
+    id UUID PRIMARY KEY,
+    warehouse_id UUID NOT NULL REFERENCES inventory_warehouse(id),
+    sellable_id UUID NOT NULL,
+    threshold_quantity NUMERIC(15,4) NOT NULL CHECK (threshold_quantity >= 0),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (warehouse_id, sellable_id)
+);
+
+CREATE INDEX inventory_low_stock_policy_active_idx
+    ON inventory_low_stock_policy (warehouse_id, sellable_id)
+    WHERE active = TRUE;
+
+
+
+-- Consolidated current schema fragment (former V29__catalog_product_seo_metadata.sql); no upgrade history is retained in development.
+ALTER TABLE catalog_product
+    ADD COLUMN seo_slug VARCHAR(160),
+    ADD COLUMN seo_title VARCHAR(180),
+    ADD COLUMN seo_description VARCHAR(320);
+
+ALTER TABLE catalog_product
+    ADD CONSTRAINT catalog_product_seo_slug_format CHECK (
+        seo_slug IS NULL OR seo_slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
+    );
+
+CREATE UNIQUE INDEX catalog_product_seo_slug_unique_idx
+    ON catalog_product (seo_slug)
+    WHERE seo_slug IS NOT NULL;
+
+
+
+-- Consolidated current schema fragment (former V30__catalog_product_archive_state.sql); no upgrade history is retained in development.
+ALTER TABLE catalog_product
+    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+
+CREATE INDEX catalog_product_archived_idx
+    ON catalog_product (archived_at, updated_at DESC)
+    WHERE archived_at IS NOT NULL;
+
+
+
+-- Consolidated current schema fragment (former V31__local_signed_entitlements.sql); no upgrade history is retained in development.
+CREATE TABLE artio_license_state (
+    singleton_id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton_id),
+    installation_id UUID NOT NULL DEFAULT gen_random_uuid(),
+    signed_document TEXT,
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    last_refresh_attempt_at TIMESTAMPTZ,
+    last_refresh_success_at TIMESTAMPTZ,
+    refresh_status VARCHAR(32) NOT NULL DEFAULT 'NEVER' CHECK (refresh_status IN
+        ('NEVER','IN_PROGRESS','SUCCESS','UNAVAILABLE','INVALID_RESPONSE','INVALID_CONFIGURATION')),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (signed_document IS NULL OR octet_length(signed_document) <= 65536)
+);
+
+INSERT INTO artio_license_state(singleton_id) VALUES (TRUE);
+
+
+
+-- Consolidated current schema fragment (former V32__persist_order_loyalty_entitlement.sql); no upgrade history is retained in development.
+-- Preserve the points promise made by the pre-entitlement implementation for existing orders.
+-- New Community orders make no such promise; checkout explicitly snapshots the current local grant.
+ALTER TABLE orders ADD COLUMN loyalty_eligible BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE orders SET loyalty_eligible = TRUE;
+
+
+
+-- Consolidated current schema fragment (former V33__restore_legacy_admin_permission_defaults.sql); no upgrade history is retained in development.
+-- Existing administrators without an explicit permission list keep the access they had before permission enforcement.
+UPDATE users
+SET permissions = '*'
+WHERE role = 'ADMIN'
+  AND btrim(permissions) = '';
+
+
+
+-- Consolidated current schema fragment (former V34__prevent_overlapping_active_tax_rules.sql); no upgrade history is retained in development.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+ALTER TABLE pricing_tax_rule
+    ADD CONSTRAINT pricing_tax_rule_active_period_excl
+    EXCLUDE USING gist (
+        jurisdiction WITH =,
+        tax_category WITH =,
+        tstzrange(valid_from, valid_until, '[)') WITH &&
+    ) WHERE (active);
+
+
+
+-- Consolidated current schema fragment (former V35__bound_swiss_accommodation_rate_period.sql); no upgrade history is retained in development.
+UPDATE pricing_tax_rule
+SET valid_until = TIMESTAMPTZ '2028-01-01 00:00:00+00'
+WHERE id = '00000000-0000-0000-0000-000000000038'
+  AND jurisdiction = 'CH'
+  AND tax_category = 'ACCOMMODATION'
+  AND valid_from = TIMESTAMPTZ '2024-01-01 00:00:00+00'
+  AND valid_until IS NULL;
+
+
+
+-- Consolidated current schema fragment (former V36__market_specific_bundle_fixed_prices.sql); no upgrade history is retained in development.
+CREATE TABLE commerce_bundle_market_price (
+    bundle_id UUID NOT NULL REFERENCES commerce_bundle(id) ON DELETE CASCADE,
+    market CHAR(2) NOT NULL CHECK (market = upper(market) AND market ~ '^[A-Z]{2}$'),
+    fixed_amount NUMERIC(19, 4) NOT NULL CHECK (fixed_amount > 0),
+    currency CHAR(3) NOT NULL CHECK (currency = upper(currency) AND currency ~ '^[A-Z]{3}$'),
+    PRIMARY KEY (bundle_id, market)
+);
+
+
+
+-- Consolidated current schema fragment (former V37__plugin_instance_identity_and_composition.sql); no upgrade history is retained in development.
+-- Keep package, immutable release and configured runtime instance identities separate.
+ALTER TABLE extension_plugin_releases
+    ADD CONSTRAINT extension_plugin_releases_id_plugin_uq UNIQUE (release_id, plugin_id);
+
+CREATE TABLE extension_plugin_instances (
+    instance_id UUID PRIMARY KEY,
+    plugin_id VARCHAR(128) NOT NULL REFERENCES extension_plugins(plugin_id),
+    instance_key VARCHAR(128) NOT NULL,
+    release_id BIGINT,
+    compatibility_mode VARCHAR(16) NOT NULL CHECK (compatibility_mode IN ('LEGACY_V1','CAPABILITY_V2')),
+    lifecycle_state VARCHAR(16) NOT NULL CHECK (lifecycle_state IN
+        ('CONFIGURED','INSTALLED','ENABLED','DRAINING','DISABLED','UNHEALTHY','FAILED','UNINSTALLED')),
+    configuration_generation INTEGER NOT NULL DEFAULT 0 CHECK (configuration_generation >= 0),
+    public_configuration JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(public_configuration) = 'object'),
+    encrypted_secrets JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(encrypted_secrets) = 'object'),
+    external_account_fingerprint CHAR(64),
+    runtime_identity VARCHAR(256) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (plugin_id, instance_key),
+    UNIQUE (instance_id, plugin_id),
+    UNIQUE (runtime_identity),
+    FOREIGN KEY (release_id, plugin_id) REFERENCES extension_plugin_releases(release_id, plugin_id),
+    CHECK (instance_key ~ '^[a-z0-9][a-z0-9._-]{0,127}$'),
+    CHECK (external_account_fingerprint IS NULL OR external_account_fingerprint ~ '^[a-f0-9]{64}$')
+);
+CREATE INDEX extension_plugin_instances_runtime_idx ON extension_plugin_instances(runtime_identity);
+CREATE INDEX extension_plugin_instances_lifecycle_idx ON extension_plugin_instances(lifecycle_state, plugin_id);
+
+-- Historical provider ownership deliberately restricts removal of an instance or release while
+-- payments and shipments still refer to it.
+ALTER TABLE payments ADD CONSTRAINT payments_provider_instance_fk
+    FOREIGN KEY (provider_instance_id) REFERENCES extension_plugin_instances(instance_id);
+ALTER TABLE payments ADD CONSTRAINT payments_provider_release_fk
+    FOREIGN KEY (provider_release_id) REFERENCES extension_plugin_releases(release_id);
+ALTER TABLE order_shipments ADD CONSTRAINT order_shipments_provider_instance_fk
+    FOREIGN KEY (provider_instance_id) REFERENCES extension_plugin_instances(instance_id);
+ALTER TABLE order_shipments ADD CONSTRAINT order_shipments_provider_release_fk
+    FOREIGN KEY (provider_release_id) REFERENCES extension_plugin_releases(release_id);
+
+-- v2 declarations are immutable release metadata; the package release row remains the common runtime identity.
+CREATE TABLE extension_plugin_v2_releases (
+    release_id BIGINT PRIMARY KEY,
+    plugin_id VARCHAR(128) NOT NULL,
+    manifest JSONB NOT NULL CHECK (jsonb_typeof(manifest) = 'object'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (release_id, plugin_id) REFERENCES extension_plugin_releases(release_id, plugin_id)
+);
+CREATE FUNCTION artio_plugin_v2_release_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'extension_plugin_v2_releases is immutable'; END $$;
+CREATE TRIGGER extension_plugin_v2_releases_immutable
+    BEFORE UPDATE OR DELETE ON extension_plugin_v2_releases FOR EACH ROW EXECUTE FUNCTION artio_plugin_v2_release_immutable();
+
+CREATE TABLE extension_capability_bindings (
+    binding_id UUID PRIMARY KEY,
+    instance_id UUID NOT NULL REFERENCES extension_plugin_instances(instance_id),
+    capability_id VARCHAR(128) NOT NULL,
+    operation_name VARCHAR(64) NOT NULL,
+    scope JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(scope) = 'object'),
+    priority INTEGER NOT NULL DEFAULT 0 CHECK (priority BETWEEN -10000 AND 10000),
+    eligibility_state VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (eligibility_state IN ('ACTIVE','DRAINING','DISABLED')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (instance_id, capability_id, operation_name, scope)
+);
+CREATE INDEX extension_capability_bindings_lookup_idx
+    ON extension_capability_bindings(capability_id, operation_name, eligibility_state, priority DESC);
+
+-- Durable, frozen routing decisions and mutable attempt progress live together so a retry cannot
+-- silently resolve to a different provider after a release, config, binding, or health change.
+CREATE TABLE extension_operation_attempts (
+    attempt_id UUID PRIMARY KEY,
+    store_id UUID,
+    binding_id UUID REFERENCES extension_capability_bindings(binding_id),
+    instance_id UUID NOT NULL REFERENCES extension_plugin_instances(instance_id),
+    plugin_id VARCHAR(128) NOT NULL,
+    release_id BIGINT,
+    configuration_generation INTEGER NOT NULL CHECK (configuration_generation >= 0),
+    external_account_fingerprint CHAR(64),
+    capability_id VARCHAR(128) NOT NULL,
+    operation_name VARCHAR(64) NOT NULL,
+    scope_snapshot JSONB NOT NULL CHECK (jsonb_typeof(scope_snapshot) = 'object'),
+    permissions_snapshot JSONB NOT NULL CHECK (jsonb_typeof(permissions_snapshot) = 'array'),
+    idempotency_key VARCHAR(200) NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL CHECK (request_fingerprint ~ '^[a-f0-9]{64}$'),
+    request_snapshot TEXT NOT NULL,
+    correlation_id UUID NOT NULL,
+    deadline_at TIMESTAMPTZ NOT NULL,
+    plan_snapshot JSONB NOT NULL CHECK (jsonb_typeof(plan_snapshot) = 'object'),
+    attempt_state VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (attempt_state IN
+        ('PENDING','IN_PROGRESS','SUCCEEDED','FAILED','UNKNOWN','RECONCILING')),
+    lease_token UUID,
+    lease_until TIMESTAMPTZ,
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    result_snapshot JSONB,
+    last_error_code VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (external_account_fingerprint IS NULL OR external_account_fingerprint ~ '^[a-f0-9]{64}$'),
+    UNIQUE (capability_id, operation_name, idempotency_key),
+    FOREIGN KEY (instance_id, plugin_id) REFERENCES extension_plugin_instances(instance_id, plugin_id),
+    FOREIGN KEY (release_id, plugin_id) REFERENCES extension_plugin_releases(release_id, plugin_id)
+);
+CREATE INDEX extension_operation_attempts_reconcile_idx ON extension_operation_attempts(attempt_state, deadline_at)
+    WHERE attempt_state IN ('PENDING','UNKNOWN','RECONCILING');
+CREATE INDEX extension_operation_attempts_instance_idx ON extension_operation_attempts(instance_id, created_at DESC);
+
+CREATE TABLE catalog_media_storage_objects (
+    storage_key VARCHAR(80) PRIMARY KEY,
+    content_checksum CHAR(64) NOT NULL CHECK (content_checksum ~ '^[a-f0-9]{64}$'),
+    byte_length BIGINT NOT NULL CHECK (byte_length BETWEEN 1 AND 10485760),
+    primary_instance_id UUID NOT NULL REFERENCES extension_plugin_instances(instance_id),
+    primary_release_id BIGINT REFERENCES extension_plugin_releases(release_id),
+    primary_configuration_generation INTEGER NOT NULL CHECK (primary_configuration_generation >= 0),
+    primary_account_fingerprint CHAR(64) CHECK (primary_account_fingerprint IS NULL OR primary_account_fingerprint ~ '^[a-f0-9]{64}$'),
+    replica_instance_ids JSONB NOT NULL CHECK (jsonb_typeof(replica_instance_ids) = 'array'),
+    provider_versions JSONB NOT NULL CHECK (jsonb_typeof(provider_versions) = 'object'),
+    object_state VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (object_state IN ('ACTIVE','DELETE_PENDING','TOMBSTONED')),
+    tombstone_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((object_state = 'ACTIVE') = (tombstone_id IS NULL))
+);
+CREATE INDEX catalog_media_storage_objects_cleanup_idx ON catalog_media_storage_objects(object_state, updated_at)
+    WHERE object_state = 'DELETE_PENDING';
+
+-- Durable event delivery has no plugin broker credentials; a Core worker owns claim/ack/retry.
+CREATE TABLE extension_event_subscriptions (
+    subscription_id UUID PRIMARY KEY,
+    instance_id UUID NOT NULL REFERENCES extension_plugin_instances(instance_id),
+    event_type VARCHAR(160) NOT NULL,
+    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+    permissions_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(permissions_snapshot) = 'array'),
+    subscription_state VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (subscription_state IN ('ACTIVE','PAUSED','DRAINING','DISABLED')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (instance_id, event_type, schema_version),
+    UNIQUE (subscription_id, instance_id)
+);
+CREATE TABLE extension_event_deliveries (
+    delivery_id UUID PRIMARY KEY,
+    inbox_consumer_name VARCHAR(120) NOT NULL,
+    inbox_event_id UUID NOT NULL,
+    subscription_id UUID NOT NULL REFERENCES extension_event_subscriptions(subscription_id),
+    instance_id UUID NOT NULL REFERENCES extension_plugin_instances(instance_id),
+    plugin_id VARCHAR(128) NOT NULL REFERENCES extension_plugins(plugin_id),
+    runtime_identity VARCHAR(256) NOT NULL,
+    release_id BIGINT,
+    configuration_generation INTEGER NOT NULL CHECK (configuration_generation >= 0),
+    runtime_credential_generation INTEGER NOT NULL CHECK (runtime_credential_generation > 0),
+    public_configuration_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(public_configuration_snapshot) = 'object'),
+    encrypted_secrets_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(encrypted_secrets_snapshot) = 'object'),
+    event_type VARCHAR(160) NOT NULL,
+    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+    payload_snapshot JSONB NOT NULL CHECK (jsonb_typeof(payload_snapshot) = 'object'),
+    state VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (state IN ('PENDING','IN_PROGRESS','DELIVERED','RETRY','DEAD_LETTER')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token UUID,
+    lease_until TIMESTAMPTZ,
+    last_error_code VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (inbox_consumer_name, inbox_event_id, subscription_id),
+    FOREIGN KEY (inbox_consumer_name, inbox_event_id) REFERENCES event_inbox(consumer_name, event_id),
+    FOREIGN KEY (subscription_id, instance_id) REFERENCES extension_event_subscriptions(subscription_id, instance_id),
+    FOREIGN KEY (instance_id, plugin_id) REFERENCES extension_plugin_instances(instance_id, plugin_id),
+    FOREIGN KEY (release_id, plugin_id) REFERENCES extension_plugin_releases(release_id, plugin_id)
+);
+CREATE INDEX extension_event_deliveries_claim_idx ON extension_event_deliveries(state, available_at, created_at)
+    WHERE state IN ('PENDING','RETRY');
+CREATE INDEX extension_event_deliveries_expired_lease_idx ON extension_event_deliveries(lease_until, created_at)
+    WHERE state='IN_PROGRESS';
+CREATE INDEX extension_event_deliveries_instance_idx ON extension_event_deliveries(instance_id, state, created_at DESC);
+
+COMMENT ON TABLE extension_plugin_instances IS 'v5.1 runtime identity; v1 registrations use an explicit legacy compatibility instance';
+COMMENT ON TABLE extension_capability_bindings IS 'Core-authorized scoped capability-to-instance bindings';
+COMMENT ON TABLE extension_operation_attempts IS 'Frozen plugin routing decisions with idempotency, lease fencing, and reconciliation state';
+COMMENT ON TABLE extension_event_deliveries IS 'Per-instance durable event fan-out deliveries owned and dispatched by Core';
+
+CREATE FUNCTION extension_operation_plan_is_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(OLD.store_id,OLD.binding_id,OLD.instance_id,OLD.plugin_id,OLD.release_id,OLD.configuration_generation,
+           OLD.external_account_fingerprint,OLD.capability_id,OLD.operation_name,OLD.scope_snapshot,OLD.permissions_snapshot,
+           OLD.idempotency_key,OLD.request_fingerprint,OLD.request_snapshot,OLD.correlation_id,OLD.deadline_at,OLD.plan_snapshot)
+       IS DISTINCT FROM
+       ROW(NEW.store_id,NEW.binding_id,NEW.instance_id,NEW.plugin_id,NEW.release_id,NEW.configuration_generation,
+           NEW.external_account_fingerprint,NEW.capability_id,NEW.operation_name,NEW.scope_snapshot,NEW.permissions_snapshot,
+           NEW.idempotency_key,NEW.request_fingerprint,NEW.request_snapshot,NEW.correlation_id,NEW.deadline_at,NEW.plan_snapshot) THEN
+        RAISE EXCEPTION 'extension operation routing plans are immutable';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER extension_operation_plan_immutable BEFORE UPDATE ON extension_operation_attempts
+    FOR EACH ROW EXECUTE FUNCTION extension_operation_plan_is_immutable();
+
+CREATE FUNCTION extension_event_delivery_snapshot_is_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(OLD.inbox_consumer_name,OLD.inbox_event_id,OLD.subscription_id,OLD.instance_id,OLD.plugin_id,OLD.runtime_identity,OLD.release_id,
+           OLD.configuration_generation,OLD.runtime_credential_generation,OLD.public_configuration_snapshot,OLD.encrypted_secrets_snapshot,
+           OLD.event_type,OLD.schema_version,OLD.payload_snapshot)
+       IS DISTINCT FROM
+       ROW(NEW.inbox_consumer_name,NEW.inbox_event_id,NEW.subscription_id,NEW.instance_id,NEW.plugin_id,NEW.runtime_identity,NEW.release_id,
+           NEW.configuration_generation,NEW.runtime_credential_generation,NEW.public_configuration_snapshot,NEW.encrypted_secrets_snapshot,
+           NEW.event_type,NEW.schema_version,NEW.payload_snapshot) THEN
+        RAISE EXCEPTION 'extension event delivery snapshots are immutable';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER extension_event_delivery_snapshot_immutable BEFORE UPDATE ON extension_event_deliveries
+    FOR EACH ROW EXECUTE FUNCTION extension_event_delivery_snapshot_is_immutable();

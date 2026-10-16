@@ -1,7 +1,7 @@
 # Artio target architecture
 
 **Status:** target decisions for implementation; this document does not claim every boundary is implemented.
-**Authority:** product and architecture choices in the 2026-10-14 final master implementation directive v4.0.
+**Authority:** product and architecture choices in the 2026-10-15 integrated master implementation directive v5.1.
 **Current evidence and module-by-module gaps:** [repository audit](REPOSITORY_AUDIT.md).
 
 ## Product topology
@@ -51,6 +51,16 @@ Core validates the manifest and authorization before activation. Lifecycle trans
 Core-to-plugin calls use a versioned, authenticated, bounded request/response contract with payload limits, deadlines, safe retry/idempotency rules and circuit breaking. Plugin callbacks are disabled unless a separately authenticated callback contract is justified. Default container policy is non-root, read-only filesystem where possible, no privileged mode/host mounts, bounded CPU/memory/PIDs, explicit network egress/ingress and scoped secrets. Health failures/timeouts isolate the plugin and return a stable actionable Core error; they must not terminate Core or corrupt unrelated transactions. Docker is one layer, not a complete sandbox; host/kernel/daemon risk remains with the operator.
 
 The initial registry/trust policy must allow only configured trusted registries or explicitly approved local images. Resolve and record a digest; validate image/manifest compatibility before execution. Updates stage a new image/config version, health-check before switching, preserve the prior reference for rollback where the plugin's data contract allows it, and never silently delete plugin-created business data on uninstall.
+
+## v5.1 plugin composition foundation
+
+Core distinguishes package (`pluginId`), immutable release, configured deployment (`instanceId` with its own runtime identity and credentials), and authorization binding (`bindingId`). A v2 release explicitly declares only operations from the closed Core-owned capability registry. v1 registrations remain explicit `LEGACY_V1` instances and keep the original plugin identity and environment-selector compatibility path. Instance configuration and encrypted secrets are isolated; per-instance Docker lifecycle names and credentials do not collide when one release runs for several merchant accounts.
+
+The Core resolver supports `EXCLUSIVE`, `SELECT_ONE`, `AGGREGATE_READ`, `PINNED_ONE`, and reserved storage `PRIMARY_REPLICAS` policies. Equal-specificity exclusive scopes that may overlap at equal priority are rejected under a PostgreSQL transaction advisory lock. Side-effect attempts persist a request fingerprint and immutable route/configuration/credential snapshot before the plugin call. Ambiguous outcomes remain attached to their original provider identity; the generic invocation endpoint rejects storage writes until the object-placement orchestrator owns them. Capability routing is currently exposed through the owner-authorized extension management API; legacy checkout, shipment, and media adapters have not yet all been switched to v2 bindings.
+
+Kafka event subscriptions are Core-owned: approved event facts are minimized, subscriptions and instance configuration/secrets are frozen into independent durable delivery records in the consumer transaction, and a worker retries with leases and stable delivery identities. Plugin containers receive neither database nor Kafka credentials. The Backoffice currently exposes package-level release and aggregate instance/binding/subscription counts; instance-level operator workflows are still part of the v5.1 acceptance work.
+
+Development maintains one current PostgreSQL schema snapshot at `artio-rest-api/src/main/resources/db/migration/V1__initial_schema.sql`; historical schema scripts are consolidated rather than replayed on every development install. Production upgrade history starts with released production baselines. Clean schema installation and current-state integration tests pass. A live Docker test now proves two instances of one release have isolated runtime credentials and independent lifecycle. Full multi-subscriber crash/retry and multi-destination storage acceptance remain open; see [the v5.1 roadmap](ROADMAP.md).
 
 Plugin configuration schema is untrusted metadata, not authorization. Core validates type/constraints and allowed schema features. Backoffice renders forms from the validated schema; secret values are write-only, encrypted using the deployment-owned secret/key-management strategy, never returned in full, logs, diagnostics or normal exports. Secret rotation requires a documented re-encryption/provider update flow.
 

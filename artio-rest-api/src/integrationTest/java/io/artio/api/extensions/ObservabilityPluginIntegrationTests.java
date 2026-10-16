@@ -34,11 +34,14 @@ class ObservabilityPluginIntegrationTests {
                 .sslConfig(config.getSSLConfig()).maxConnections(10).connectionTimeout(Duration.ofSeconds(5))
                 .responseTimeout(Duration.ofSeconds(120)).build();
         try (DockerClient docker = DockerClientImpl.getInstance(config, transport)) {
-            String network = "artio-obs-it-" + UUID.randomUUID().toString().substring(0, 8);
+            String testRunId = testRunId();
+            String network = "artio-obs-it-" + testRunId + "-" + UUID.randomUUID().toString().substring(0, 8);
             String pluginId = "observability.artio";
-            docker.createNetworkCmd().withName(network).withDriver("bridge").exec();
+            docker.createNetworkCmd().withName(network).withDriver("bridge")
+                    .withLabels(Map.of("io.artio.test.run", testRunId)).exec();
             var runtime = new DockerExtensionRuntime(docker, network, 8080,
-                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
+                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true,
+                    "http://extension-egress:3128", testRunId);
             PluginManifest manifest = manifest(images);
             Map<String, String> settings = Map.of("grafanaAdminUser", "artio-admin",
                     "grafanaAdminPassword", "integration-test-grafana-password");
@@ -70,6 +73,11 @@ class ObservabilityPluginIntegrationTests {
                 docker.removeNetworkCmd(network).exec();
             }
         }
+    }
+
+    private static String testRunId() {
+        String runId = System.getenv("ARTIO_TEST_RUN_ID");
+        return runId == null || runId.isBlank() ? "manual" : runId;
     }
 
     private static String image(String variable) {

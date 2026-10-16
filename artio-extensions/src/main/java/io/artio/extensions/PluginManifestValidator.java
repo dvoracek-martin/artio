@@ -114,6 +114,22 @@ public final class PluginManifestValidator {
         return List.copyOf(errors);
     }
 
+    /** Reuses all package/runtime safety checks while keeping v1 declarations out of v2 authorization. */
+    public List<String> validate(PluginManifestV2 manifest, String coreVersion, Set<String> installedPluginIds) {
+        if (manifest == null) return List.of("manifest is required");
+        PluginManifest source = manifest.packageManifest();
+        PluginManifest packageMetadata = new PluginManifest("1", source.id(), source.name(), source.vendor(),
+                source.version(), source.description(), source.minimumCoreVersion(), source.maximumCoreVersion(),
+                source.image(), source.dependencies(), List.of(), source.configuration(), List.of(), source.healthPath(),
+                source.diagnosticsPath(), source.geographicAvailability(), source.services(), source.persistentPaths(),
+                source.configurationBindings());
+        List<String> errors = new ArrayList<>(validate(packageMetadata, coreVersion, installedPluginIds));
+        if (!source.extensionPoints().isEmpty()) errors.add("v2 manifests must declare capabilities instead of legacy extensionPoints");
+        if (!source.permissions().isEmpty()) errors.add("v2 manifests must declare permissions on capability operations");
+        errors.addAll(new PluginManifestV2Validator().validate(manifest));
+        return List.copyOf(errors);
+    }
+
     private static void validatePersistentPaths(List<String> paths, String owner, List<String> errors) {
         if (paths.size() > 4) errors.add(owner + " may declare at most 4 persistent paths");
         Set<String> unique = new HashSet<>();

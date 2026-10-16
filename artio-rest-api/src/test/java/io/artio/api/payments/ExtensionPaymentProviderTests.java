@@ -8,8 +8,10 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.extensions.ManagedExtensionInvoker;
+import io.artio.api.extensions.CommerceCapabilityInvoker;
 import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.commerce.PaymentProvider.CheckoutRequest;
+import io.artio.extensions.commerce.PaymentProvider;
 import java.math.BigDecimal;
 import java.util.Map;
 import java.util.UUID;
@@ -92,5 +94,90 @@ class ExtensionPaymentProviderTests {
         @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) payload.getValue();
         assertThat(map.get("headers")).isEqualTo(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1"));
         assertThat(map.get("rawBodyBase64")).isEqualTo(Base64.getEncoder().encodeToString(body));
+    }
+
+    @Test
+    void capabilityRoutedCheckoutReturnsItsPersistableHistoricalOwner() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("country", "CH", "currency", "CHF");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 42L, 3, "a".repeat(64), scope);
+        when(routed.invoke(eq("payment.provider.v1"), eq("createCheckout"), eq(scope), eq(null), eq(true),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(new ObjectMapper().readTree(
+                        "{\"providerReference\":\"session-v2\",\"checkoutUrl\":\"https://pay.test/session-v2\",\"state\":\"PENDING\"}"), owner));
+        var adapter = new ExtensionPaymentProvider(invoker, new ObjectMapper(), routed, "payments.compat", "none");
+        var request = new CheckoutRequest("order-123", "artio-order-order-123", new BigDecimal("12.50"), "CHF",
+                "https://shop.test/success", "https://shop.test/cancel", Map.of("country", "CH"));
+
+        var result = adapter.createCheckoutOwned(request);
+
+        assertThat(result.result().providerReference()).isEqualTo("session-v2");
+        assertThat(result.owner().instanceId()).isEqualTo(instanceId);
+        assertThat(result.owner().releaseId()).isEqualTo(42L);
+        assertThat(result.owner().configurationGeneration()).isEqualTo(3);
+        assertThat(result.owner().externalAccountFingerprint()).isEqualTo("a".repeat(64));
+        assertThat(result.owner().scope()).isEqualTo(scope);
+    }
+
+    @Test
+    void settlementUsesTheOriginalInstanceAndScope() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("country", "CH");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 42L, 3, "b".repeat(64), scope);
+        when(routed.invoke(eq("payment.provider.v1"), eq("capture"), eq(scope), eq(instanceId), eq(false),
+                eq(UUID.nameUUIDFromBytes("artio:capture:payment-1".getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString()),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(new ObjectMapper().readTree(
+                        "{\"providerReference\":\"session-v2\",\"state\":\"CAPTURED\",\"amount\":\"12.50\",\"currency\":\"CHF\"}"), owner));
+        var adapter = new ExtensionPaymentProvider(invoker, new ObjectMapper(), routed, "payments.compat", "none");
+        var providerOwner = new PaymentProvider.ProviderOwner(instanceId, 42L, 3, "b".repeat(64), scope);
+
+        var result = adapter.capture(providerOwner, "session-v2", "payment-1");
+
+        assertThat(result.result().state()).isEqualTo(PaymentProvider.PaymentState.CAPTURED);
+        assertThat(result.owner().instanceId()).isEqualTo(instanceId);
+        verify(routed).invoke(eq("payment.provider.v1"), eq("capture"), eq(scope), eq(instanceId), eq(false),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void webhookVerificationUsesItsExplicitBindingOwner() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("country", "CH");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 42L, 3, "e".repeat(64), scope);
+        when(routed.invoke(eq("payment.provider.v1"), eq("verifyWebhook"), eq(scope), eq(instanceId), eq(false),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(new ObjectMapper().readTree(
+                        "{\"providerEventId\":\"evt-9\",\"eventType\":\"payment.captured\",\"providerReference\":\"session-9\",\"state\":\"CAPTURED\",\"amount\":\"12.50\",\"currency\":\"CHF\",\"verified\":true}"), owner));
+        var adapter = new ExtensionPaymentProvider(invoker, new ObjectMapper(), routed, "payments.compat", "none");
+        var providerOwner = new PaymentProvider.ProviderOwner(instanceId, 42L, 3, "e".repeat(64), scope);
+        byte[] body = "{\"id\":\"evt-9\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        var result = adapter.verifyWebhook(providerOwner, Map.of("stripe-signature", "signed"), body, "verify-event-9");
+
+        assertThat(result.result().verified()).isTrue();
+        assertThat(result.result().providerReference()).isEqualTo("session-9");
+        assertThat(result.owner().instanceId()).isEqualTo(instanceId);
+        verify(routed).invoke(eq("payment.provider.v1"), eq("verifyWebhook"), eq(scope), eq(instanceId), eq(false),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void v2BindingsEnablePaymentsWithoutTheLegacyEnvironmentSelector() {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        when(routed.hasEnabledBinding("payment.provider.v1", "createCheckout")).thenReturn(true);
+        when(routed.hasEnabledBinding("payment.provider.v1", "capture")).thenReturn(true);
+        when(routed.hasEnabledBinding("payment.provider.v1", "cancel")).thenReturn(true);
+        var adapter = new ExtensionPaymentProvider(invoker, new ObjectMapper(), routed, "", "none");
+
+        var capabilities = adapter.capabilities();
+
+        assertThat(capabilities.hostedCheckout()).isTrue();
+        assertThat(capabilities.capture()).isTrue();
+        assertThat(capabilities.cancellation()).isTrue();
+        assertThat(capabilities.refunds()).isFalse();
     }
 }

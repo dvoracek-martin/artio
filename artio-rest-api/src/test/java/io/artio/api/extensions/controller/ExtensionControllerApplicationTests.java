@@ -74,6 +74,39 @@ class ExtensionControllerApplicationTests {
     }
 
     @Test
+    void routesAuthenticatedLifecycleRequestsToTheRequestedRuntimeInstance() {
+        var manifest = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "1.0.0",
+                "Provider", "0.1.0", "9.0.0", "ghcr.io/artio/payments@sha256:" + "a".repeat(64),
+                java.util.List.of(), java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
+        when(runtime.healthInstance("instance-123", manifest)).thenReturn(new ExtensionRuntimePort.RuntimeHealth(true, "HEALTHY"));
+        var headers = jsonHeaders();
+        headers.setBearerAuth("integration-controller-token-value-at-least-32-characters");
+        String identity = "instance-123";
+
+        assertThat(http.postForEntity("/internal/v1/extensions/instances/install",
+                new HttpEntity<>(new ExtensionRuntimeController.InstanceManifestRequest(identity, manifest, 1), headers), Void.class)
+                .getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(http.postForEntity("/internal/v1/extensions/instances/enable",
+                new HttpEntity<>(new ExtensionRuntimeController.InstanceEnableRequest(identity, manifest, 2,
+                        java.util.Map.of("account", "eu")), headers), Void.class).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(http.postForEntity("/internal/v1/extensions/instances/{identity}/health",
+                new HttpEntity<>(new ExtensionRuntimeController.ManifestHealthRequest(manifest), headers),
+                ExtensionRuntimePort.RuntimeHealth.class, identity).getBody().healthy()).isTrue();
+        assertThat(http.postForEntity("/internal/v1/extensions/instances/{identity}/disable",
+                new HttpEntity<>(new ExtensionRuntimeController.PluginIdentityRequest(manifest.id()), headers), Void.class, identity)
+                .getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(http.postForEntity("/internal/v1/extensions/instances/{identity}/uninstall",
+                new HttpEntity<>(new ExtensionRuntimeController.PluginIdentityRequest(manifest.id()), headers), Void.class, identity)
+                .getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+        verify(runtime).installInstance(identity, manifest);
+        verify(runtime).enableInstance(identity, manifest, 2, java.util.Map.of("account", "eu"));
+        verify(runtime).healthInstance(identity, manifest);
+        verify(runtime).disableInstance(identity, manifest.id());
+        verify(runtime).uninstallInstance(identity, manifest.id());
+    }
+
+    @Test
     void doesNotExposeGraphQlOrOpenApiRoutes() {
         assertThat(http.getForEntity("/graphql", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(http.getForEntity("/v3/api-docs", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);

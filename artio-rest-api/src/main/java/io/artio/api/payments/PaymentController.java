@@ -7,6 +7,7 @@ import io.artio.api.orders.OrderTimelineEvents;
 import io.artio.api.enterprise.LoyaltyAccounting;
 import io.artio.api.enterprise.GiftCardAccounting;
 import io.artio.extensions.commerce.PaymentProvider;
+import io.artio.extensions.ExtensionRuntimePort;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -19,6 +20,10 @@ import java.util.Map;
 import java.util.Currency;
 import java.util.Set;
 import java.util.UUID;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +41,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RestController
 @RequestMapping("/api/payments")
 public class PaymentController {
+    private static final ObjectMapper OWNER_MAPPER = new ObjectMapper();
+    private static final TypeReference<Map<String, String>> OWNER_SCOPE = new TypeReference<>() { };
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;
     private final OrderUpdatePublisher orderUpdates;
@@ -70,8 +77,8 @@ public class PaymentController {
 
     private CheckoutSession extensionCheckout(UUID orderId, JwtAuthenticationToken auth, PaymentProvider extension) {
         UUID userId = UUID.fromString(auth.getToken().getSubject());
-        var rows = jdbc.query("SELECT o.total-COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='CAPTURED'),0),o.currency,o.status FROM orders o WHERE o.id=? AND o.user_id=?",
-                (rs, n) -> new OrderRow(rs.getBigDecimal(1), rs.getString(2).trim(), rs.getString(3)), orderId, userId);
+        var rows = jdbc.query("SELECT o.total-COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='CAPTURED'),0),o.currency,o.status,o.shipping_country FROM orders o WHERE o.id=? AND o.user_id=?",
+                (rs, n) -> new OrderRow(rs.getBigDecimal(1), rs.getString(2).trim(), rs.getString(3), rs.getString(4)), orderId, userId);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
         OrderRow order = rows.getFirst();
         if (!"PENDING".equals(order.status())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Order is not awaiting payment");
@@ -85,10 +92,13 @@ public class PaymentController {
         if (!capabilities.hostedCheckout()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Payment provider does not support hosted checkout");
         String idempotencyKey = "artio-order-" + orderId;
         PaymentProvider.CheckoutResult result;
+        PaymentProvider.OwnedResult<PaymentProvider.CheckoutResult> owned;
         try {
-            result = extension.createCheckout(new PaymentProvider.CheckoutRequest(orderId.toString(), idempotencyKey,
+            owned = extension.createCheckoutOwned(new PaymentProvider.CheckoutRequest(orderId.toString(), idempotencyKey,
                     order.total(), order.currency(), storefrontUrl + "/checkout?success=true&orderId=" + orderId + "&session_id={CHECKOUT_SESSION_ID}",
-                    storefrontUrl + "/orders", Map.of("orderId", orderId.toString(), "expiresAt", expiresAt.toString())));
+                    storefrontUrl + "/orders", Map.of("orderId", orderId.toString(), "expiresAt", expiresAt.toString(),
+                            "country", order.country() == null ? "" : order.country().trim())));
+            result = owned.result();
         } catch (PaymentProvider.CheckoutRejectedException rejected) {
             checkoutFailureCompensation.cancelRejectedCheckout(orderId);
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
@@ -101,8 +111,12 @@ public class PaymentController {
                 || result.checkoutUrl() == null || result.checkoutUrl().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an invalid checkout session");
         }
-        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) VALUES (?,?,?,?,?,'EXTENSION','PENDING',?,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",
-                UUID.randomUUID(), orderId, userId, order.total(), order.currency(), result.providerReference());
+        PaymentProvider.ProviderOwner owner = owned.owner();
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope,created_at,updated_at) VALUES (?,?,?,?,?,'EXTENSION','PENDING',?,?,?,?,?,?::jsonb,now(),now()) ON CONFLICT (provider_reference) DO NOTHING",
+                UUID.randomUUID(), orderId, userId, order.total(), order.currency(), result.providerReference(),
+                owner == null ? null : owner.instanceId(), owner == null ? null : owner.releaseId(),
+                owner == null ? null : owner.configurationGeneration(), owner == null ? null : owner.externalAccountFingerprint(),
+                owner == null ? "{}" : writeJson(owner.scope()));
         return new CheckoutSession(result.providerReference(), result.checkoutUrl());
     }
 
@@ -114,14 +128,14 @@ public class PaymentController {
                 .stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found"));
         if("CANCELLED".equals(status))return Map.of("status","cancelled");
         if(!"PENDING".equals(status))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only orders awaiting payment can be cancelled");
-        var pending=jdbc.query("SELECT id,provider_reference,method FROM payments WHERE order_id=? AND status='PENDING' FOR UPDATE",
-                (rs,n)->new PendingPayment(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3)),orderId);
+        var pending=jdbc.query("SELECT id,provider_reference,method,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM payments WHERE order_id=? AND status='PENDING' FOR UPDATE",
+                (rs,n)->new PendingPayment(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),providerOwner(rs,4)),orderId);
         PaymentProvider extension=provider.getIfAvailable();
         for(PendingPayment payment:pending){
             try{
                 if(extension!=null){
-                    if(!extension.capabilities().cancellation())throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payment provider cannot cancel this checkout");
-                    PaymentProvider.PaymentResult result=extension.cancel(payment.providerReference(),"artio-cancel-"+orderId);
+                    if(payment.owner()==null&&!extension.capabilities().cancellation())throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Payment provider cannot cancel this checkout");
+                    PaymentProvider.PaymentResult result=extension.cancel(payment.owner(),payment.providerReference(),"artio-cancel-"+payment.id()).result();
                     if(result==null||!payment.providerReference().equals(result.providerReference()))throw new IllegalStateException("Provider returned invalid cancellation");
                     if(result.state()==PaymentProvider.PaymentState.CAPTURED)throw new ResponseStatusException(HttpStatus.CONFLICT,"Payment was captured and is being reconciled");
                     if(result.state()!=PaymentProvider.PaymentState.CANCELLED&&result.state()!=PaymentProvider.PaymentState.EXPIRED)
@@ -153,8 +167,8 @@ public class PaymentController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider order is unavailable");
         }
         UUID userId = UUID.fromString(auth.getToken().getSubject());
-        var references = jdbc.query("SELECT provider_reference,status,amount,currency FROM payments WHERE order_id=? AND user_id=? AND method='EXTENSION'",
-                (rs, row) -> new CapturePayment(rs.getString(1), rs.getString(2), rs.getBigDecimal(3), rs.getString(4).trim()), orderId, userId);
+        var references = jdbc.query("SELECT provider_reference,status,amount,currency,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text,id FROM payments WHERE order_id=? AND user_id=? AND method='EXTENSION'",
+                (rs, row) -> new CapturePayment(rs.getString(1), rs.getString(2), rs.getBigDecimal(3), rs.getString(4).trim(), providerOwner(rs,5), rs.getObject(10,UUID.class)), orderId, userId);
         if (references.isEmpty() || !java.security.MessageDigest.isEqual(
                 references.getFirst().providerReference().getBytes(StandardCharsets.UTF_8), returnedProviderReference.getBytes(StandardCharsets.UTF_8))) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider order is unavailable");
@@ -170,7 +184,7 @@ public class PaymentController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Order is not payable");
         }
         PaymentProvider.PaymentResult result;
-        try { result = extension.capture(providerReference, "artio-capture-" + orderId); }
+        try { result = extension.capture(payment.owner(), providerReference, "artio-capture-" + payment.id()).result(); }
         catch (RuntimeException failure) { throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment capture is being reconciled"); }
         if (result == null || !providerReference.equals(result.providerReference())) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an invalid capture result");
@@ -192,13 +206,21 @@ public class PaymentController {
         return Map.of("status", "captured");
     }
 
-    @PostMapping(value="/provider/webhook", consumes=MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping(value={"/provider/webhook", "/provider/bindings/{bindingId}/webhook"}, consumes=MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.OK)
     @Transactional
     public Map<String,String> providerWebhook(@RequestHeader org.springframework.http.HttpHeaders requestHeaders,
-            @RequestBody byte[] body) {
+            @RequestBody byte[] body, @PathVariable(required = false) UUID bindingId) {
         PaymentProvider extension = provider.getIfAvailable();
         if (extension == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider webhook is unavailable");
+        PaymentProvider.ProviderOwner webhookOwner = bindingId == null ? null : webhookOwner(bindingId);
+        if (webhookOwner == null && bindingId == null && extensionProviderId.isBlank()
+                && extension.capabilities().webhooks()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Use the binding-addressed webhook URL for a v2 payment provider");
+        }
+        if (webhookOwner == null && !extension.capabilities().webhooks())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment provider webhook is unavailable");
         PaymentProvider.WebhookResult event;
         Map<String, String> signedHeaders = new java.util.HashMap<>();
         for (String name : java.util.List.of("provider-signature", "stripe-signature", "paypal-transmission-id",
@@ -206,13 +228,27 @@ public class PaymentController {
             String value = requestHeaders.getFirst(name);
             if (value != null && value.length() <= 4096) signedHeaders.put(name, value);
         }
-        try { event = extension.verifyWebhook(Map.copyOf(signedHeaders), body); }
-        catch (RuntimeException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid webhook signature"); }
+        try {
+            event = webhookOwner == null ? extension.verifyWebhook(Map.copyOf(signedHeaders), body)
+                    : extension.verifyWebhook(webhookOwner, Map.copyOf(signedHeaders), body,
+                            UUID.nameUUIDFromBytes((bindingId + ":" + sha256(body)).getBytes(StandardCharsets.UTF_8)).toString()).result();
+        }
+        catch (ExtensionRuntimePort.ExtensionCallException rejected) {
+            if (switch (rejected.statusCode()) { case 400, 401, 403, 422 -> true; default -> false; })
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid webhook signature");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Payment provider could not verify the webhook; retry delivery");
+        } catch (ExtensionRuntimePort.ExtensionTimeoutException | ExtensionRuntimePort.ExtensionUnavailableException unavailable) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Payment provider could not verify the webhook; retry delivery");
+        } catch (ExtensionRuntimePort.ExtensionProtocolException invalidResponse) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Payment provider returned an invalid webhook response");
+        } catch (RuntimeException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid webhook signature"); }
         if (event == null || !event.verified() || event.providerEventId() == null || event.providerEventId().isBlank()
                 || event.eventType() == null || event.eventType().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid webhook signature");
         }
-        String providerKey = extensionProviderId.isBlank() ? "EXTENSION" : extensionProviderId.substring(0, Math.min(32, extensionProviderId.length()));
+        String providerKey = webhookOwner == null
+                ? extensionProviderId.isBlank() ? "EXTENSION" : extensionProviderId.substring(0, Math.min(32, extensionProviderId.length()))
+                : webhookOwner.instanceId().toString().replace("-", "");
         int inserted = jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type) VALUES (?,?,?) ON CONFLICT DO NOTHING",
                 providerKey, event.providerEventId(), event.eventType());
         if (inserted == 0) return Map.of("status", "duplicate");
@@ -220,14 +256,26 @@ public class PaymentController {
             markProviderWebhookProcessed(providerKey, event.providerEventId());
             return Map.of("status", "ignored");
         }
+        if (webhookOwner != null) {
+            UUID paymentOwner = jdbc.query("SELECT provider_instance_id FROM payments WHERE provider_reference=? AND method='EXTENSION'",
+                    (rs, row) -> rs.getObject(1, UUID.class), event.providerReference()).stream().findFirst().orElse(null);
+            if (paymentOwner == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Payment checkout is not persisted yet; retry the provider webhook");
+            if (!webhookOwner.instanceId().equals(paymentOwner)) {
+                markProviderWebhookProcessed(providerKey, event.providerEventId());
+                return Map.of("status", "payment_not_found");
+            }
+        }
         UUID orderId = lockOrderForSession(event.providerReference());
         if (orderId == null) {
+            if (webhookOwner != null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Payment order is not available yet; retry the provider webhook");
             markProviderWebhookProcessed(providerKey, event.providerEventId());
             return Map.of("status", "ignored");
         }
         if (event.state() == PaymentProvider.PaymentState.CAPTURED) {
-            var settlements = jdbc.query("SELECT amount,currency FROM payments WHERE provider_reference=? AND method='EXTENSION'",
-                    (rs, row) -> new java.util.AbstractMap.SimpleImmutableEntry<>(rs.getBigDecimal("amount"), rs.getString("currency").trim()),
+            var settlements = jdbc.query("SELECT amount,currency,provider_instance_id FROM payments WHERE provider_reference=? AND method='EXTENSION'",
+                    (rs, row) -> new PaymentSettlement(rs.getBigDecimal("amount"), rs.getString("currency").trim(), rs.getObject("provider_instance_id", UUID.class)),
                     event.providerReference());
             if (settlements.isEmpty()) {
                 markProviderWebhookProcessed(providerKey, event.providerEventId());
@@ -235,8 +283,9 @@ public class PaymentController {
             }
             var settlement = settlements.getFirst();
             if (event.amount() == null || event.currency() == null
-                    || settlement.getKey().compareTo(event.amount()) != 0
-                    || !settlement.getValue().equalsIgnoreCase(event.currency())) {
+                    || settlement.amount().compareTo(event.amount()) != 0
+                    || !settlement.currency().equalsIgnoreCase(event.currency())
+                    || webhookOwner != null && !webhookOwner.instanceId().equals(settlement.instanceId())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provider settlement amount or currency does not match the payment");
             }
             String orderStatus = jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId);
@@ -279,6 +328,20 @@ public class PaymentController {
                 .stream().findFirst().ifPresent(order->LoyaltyAccounting.earnForOrder(jdbc,(UUID)order[0],orderId,(BigDecimal)order[1]));
     }
 
+    private PaymentProvider.ProviderOwner webhookOwner(UUID bindingId) {
+        return jdbc.query("SELECT i.instance_id,i.release_id,i.configuration_generation,i.external_account_fingerprint,b.scope::text "
+                        + "FROM extension_capability_bindings b JOIN extension_plugin_instances i ON i.instance_id=b.instance_id "
+                        + "JOIN extension_plugin_v2_releases r ON r.release_id=i.release_id "
+                        + "WHERE b.binding_id=? AND b.capability_id='payment.provider.v1' AND b.operation_name='verifyWebhook'",
+                (rs, row) -> providerOwner(rs, 1), bindingId).stream().findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment webhook binding was not found"));
+    }
+
+    private static String sha256(byte[] value) {
+        try { return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value)); }
+        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException("SHA-256 is unavailable", impossible); }
+    }
+
     private void markProviderWebhookProcessed(String providerKey, String eventId) {
         jdbc.update("UPDATE payment_webhook_receipts SET processed_at=now() WHERE provider=? AND event_id=?", providerKey, eventId);
     }
@@ -297,8 +360,8 @@ public class PaymentController {
         if (role == null || !Set.of("ADMIN", "SUPERADMIN").contains(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Idempotency-Key header is required");
-        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method,order_id,user_id,gift_card_id FROM payments WHERE id=? FOR UPDATE",
-                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6),rs.getObject(7,UUID.class),rs.getObject(8,UUID.class),rs.getObject(9,UUID.class)),paymentId);
+        var payments = jdbc.query("SELECT provider_reference,status,amount,refunded_amount,currency,method,order_id,user_id,gift_card_id,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM payments WHERE id=? FOR UPDATE",
+                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6),rs.getObject(7,UUID.class),rs.getObject(8,UUID.class),rs.getObject(9,UUID.class),providerOwner(rs,10)),paymentId);
         if (payments.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
         RefundRow payment = payments.getFirst();
         var priorRows = jdbc.query("SELECT id,amount,status,provider_reference FROM payment_refunds WHERE payment_id=? AND idempotency_key=?",
@@ -333,9 +396,9 @@ public class PaymentController {
                 GiftCardAccounting.refund(jdbc,payment.giftCardId(),payment.userId(),payment.orderId(),refundId,refundAmount);
                 providerReference="giftcard-refund:"+refundId;
             } else if (extension != null) {
-                if (!extension.capabilities().refunds()) throw new IllegalStateException("Provider does not support refunds");
-                PaymentProvider.PaymentResult result = extension.refund(new PaymentProvider.RefundRequest(payment.providerReference(),
-                        "artio-refund-" + refundId, refundAmount, payment.currency()));
+                if (payment.owner()==null&&!extension.capabilities().refunds()) throw new IllegalStateException("Provider does not support refunds");
+                PaymentProvider.PaymentResult result = extension.refund(payment.owner(), new PaymentProvider.RefundRequest(payment.providerReference(),
+                        "artio-refund-" + refundId, refundAmount, payment.currency())).result();
                 if (result == null || result.state() != PaymentProvider.PaymentState.REFUNDED
                         || result.amount() == null || result.amount().compareTo(refundAmount) != 0
                         || !payment.currency().equalsIgnoreCase(result.currency())
@@ -360,12 +423,29 @@ public class PaymentController {
     }
 
     public record CheckoutSession(String sessionId,String checkoutUrl){}
-    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method,UUID orderId,UUID userId,UUID giftCardId){}
+    private static PaymentProvider.ProviderOwner providerOwner(ResultSet rs, int column) throws SQLException {
+        UUID instanceId = rs.getObject(column, UUID.class);
+        if (instanceId == null) return null;
+        Number releaseValue = (Number) rs.getObject(column + 1);
+        Long releaseId = releaseValue == null ? null : releaseValue.longValue();
+        int generation = rs.getInt(column + 2);
+        String fingerprint = rs.getString(column + 3);
+        String scopeJson = rs.getString(column + 4);
+        try {
+            return new PaymentProvider.ProviderOwner(instanceId, releaseId, generation, fingerprint == null ? null : fingerprint.trim(),
+                    scopeJson == null ? Map.of() : OWNER_MAPPER.readValue(scopeJson, OWNER_SCOPE));
+        } catch (Exception invalid) { throw new SQLException("Persisted provider scope is invalid", invalid); }
+    }
+    private static String writeJson(Object value) {
+        try { return OWNER_MAPPER.writeValueAsString(value); } catch (Exception invalid) { throw new IllegalStateException("Provider owner scope could not be serialized", invalid); }
+    }
+    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method,UUID orderId,UUID userId,UUID giftCardId,PaymentProvider.ProviderOwner owner){}
     private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference){}
+    private record PaymentSettlement(BigDecimal amount,String currency,UUID instanceId){}
     public record RefundCommand(BigDecimal amount){}
     public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,
                              BigDecimal remainingAmount,String providerReference,String status){}
-    private record OrderRow(BigDecimal total,String currency,String status){}
-    private record PendingPayment(UUID id,String providerReference,String method){}
-    private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency) { }
+    private record OrderRow(BigDecimal total,String currency,String status,String country){}
+    private record PendingPayment(UUID id,String providerReference,String method,PaymentProvider.ProviderOwner owner){}
+    private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency, PaymentProvider.ProviderOwner owner, UUID id) { }
 }

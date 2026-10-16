@@ -35,4 +35,39 @@ describe('ExtensionAdminComponent', () => {
     button.click();
     expect(actions).toEqual(['toggleRegistration']);
   });
+
+  it('shows runtime compatibility and persisted composition counts', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.extensions = [{
+      id: 'payments.example', name: 'Example Payments', version: '1.0.0', lifecycleState: 'ENABLED',
+      configuredSecrets: [], compatibilityModes: 'CAPABILITY_V2', instanceCount: 2, bindingCount: 3, subscriptionCount: 1,
+      geographicAvailability: { scope: 'GLOBAL', countries: [] }
+    }];
+    fixture.detectChanges();
+    const page = fixture.nativeElement.textContent as string;
+    expect(page).toContain('Compatibility: CAPABILITY_V2 · 2 instance(s) · 3 binding(s) · 1 subscription(s)');
+  });
+
+  it('renders instance lifecycle, configuration, capability binding and subscription controls for v2 plugins', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.selectedExtension = {
+      compatibilityModes: 'CAPABILITY_V2', lifecycleState: 'DISABLED', manifest: { id: 'example.storage', name: 'Storage' }
+    };
+    fixture.componentInstance.extensionInstances = [{ instanceId: 'instance-1', instanceKey: 'primary', releaseId: 4,
+      configurationGeneration: 2, lifecycleState: 'DISABLED' }];
+    fixture.componentInstance.extensionBindings = [{ bindingId: 'binding-1', instanceId: 'instance-1', capabilityId: 'storage.object.v1',
+      operationName: 'put', scope: {}, priority: 10, eligibilityState: 'ACTIVE' }];
+    fixture.componentInstance.extensionSubscriptions = [{ subscriptionId: 'subscription-1', instanceId: 'instance-1',
+      eventType: 'order.paid', schemaVersion: 1, subscriptionState: 'PAUSED' }];
+    fixture.detectChanges();
+    const page = fixture.nativeElement.textContent as string;
+    expect(page).toContain('INSTANCE COMPOSITION');
+    expect(page).toContain('primary');
+    expect(page).toContain('storage.object.v1');
+    expect(page).toContain('order.paid v1');
+    expect(page).toContain('Create instance');
+    expect(page).toContain('Create binding');
+  });
 });

@@ -42,14 +42,16 @@ class PackagedExtensionControllerIntegrationTests {
         Path jar = Path.of(System.getProperty("artio.test.controller-jar"));
         assertThat(Files.isRegularFile(jar)).isTrue();
         Path script = Path.of("..", "artio-docker", "start-api.sh").toAbsolutePath().normalize();
-        String identity = UUID.randomUUID().toString().replace("-", "");
+        String runId = System.getenv("ARTIO_TEST_RUN_ID");
+        String identity = (runId == null || runId.isBlank() ? "manual" : runId) + UUID.randomUUID().toString().replace("-", "");
         String network = "artio-controller-it-" + identity;
         String controlNetwork = "artio-controller-control-it-" + identity;
         String secrets = "artio-controller-secrets-it-" + identity;
         String pluginId = "controller.e2e" + identity;
         var docker = DockerClientFactory.instance().client();
-        docker.createNetworkCmd().withName(network).withInternal(true).exec();
-        docker.createNetworkCmd().withName(controlNetwork).exec();
+        String testRunId = runId == null || runId.isBlank() ? "manual" : runId;
+        docker.createNetworkCmd().withName(network).withInternal(true).withLabels(Map.of("io.artio.test.run", testRunId)).exec();
+        docker.createNetworkCmd().withName(controlNetwork).withLabels(Map.of("io.artio.test.run", testRunId)).exec();
         var volume = docker.createVolumeCmd().withName(secrets).withLabels(Map.of("io.artio.test.fixture", identity)).exec();
         assertThat(volume.getLabels()).containsEntry("io.artio.test.fixture", identity);
         var image = new ImageFromDockerfile("artio/controller-it:" + identity, true)
@@ -65,6 +67,7 @@ class PackagedExtensionControllerIntegrationTests {
                         """);
         try {
             try (var seed = new GenericContainer<>("alpine:3.20")
+                    .withLabel("io.artio.test.run", testRunId)
                     .withCopyToContainer(Transferable.of((TEST_KEY + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8), 0600), "/seed/encryption-key")
                     .withCopyToContainer(Transferable.of((TEST_KEY + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8), 0600), "/seed/extension-auth-key")
                     .withCopyToContainer(Transferable.of((TEST_TOKEN + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8), 0600), "/seed/extension-controller-token")
@@ -75,6 +78,7 @@ class PackagedExtensionControllerIntegrationTests {
                 seed.start();
             }
             try (var controller = new GenericContainer<>(image)
+                    .withLabel("io.artio.test.run", testRunId)
                     .withNetworkMode(controlNetwork).withExposedPorts(8090)
                     .withEnv("ARTIO_RUNTIME_ROLE", "extension-controller")
                     .withEnv("ARTIO_EXTENSION_DOCKER_ENABLED", "true")

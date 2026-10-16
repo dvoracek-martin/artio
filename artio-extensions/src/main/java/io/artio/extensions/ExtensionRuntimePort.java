@@ -8,15 +8,21 @@ import java.util.Map;
 /** Core-owned boundary to an isolated extension process; the Docker adapter is outside this module. */
 public interface ExtensionRuntimePort {
     void install(PluginManifest manifest);
+    /** Installs a package release for one isolated runtime identity. v1 adapters keep the legacy package identity. */
+    default void installInstance(String runtimeIdentity, PluginManifest manifest) { install(manifest); }
     default void update(PluginManifest manifest) { install(manifest); }
     void enable(PluginManifest manifest);
     default void enable(PluginManifest manifest, int credentialGeneration) { enable(manifest); }
     default void enable(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
         enable(manifest, credentialGeneration);
     }
+    default void enableInstance(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
+            Map<String, String> configuration) { enable(manifest, credentialGeneration, configuration); }
     void disable(String pluginId);
+    default void disableInstance(String runtimeIdentity, String pluginId) { disable(pluginId); }
     /** Remove the managed runtime for an already stopped plugin. */
     default void uninstall(String pluginId) { disable(pluginId); }
+    default void uninstallInstance(String runtimeIdentity, String pluginId) { uninstall(pluginId); }
     default void rotateCredentials(PluginManifest manifest, int credentialGeneration, boolean restartIfEnabled) {
         if (restartIfEnabled) {
             disable(manifest.id());
@@ -29,6 +35,7 @@ public interface ExtensionRuntimePort {
     }
     RuntimeHealth health(String pluginId, String healthPath);
     default RuntimeHealth health(PluginManifest manifest) { return health(manifest.id(), manifest.healthPath()); }
+    default RuntimeHealth healthInstance(String runtimeIdentity, PluginManifest manifest) { return health(manifest); }
     default TelemetryResponse forwardOtlp(String pluginId, String signal, byte[] payload) {
         throw new ExtensionUnavailableException("OTLP receiver is unavailable");
     }

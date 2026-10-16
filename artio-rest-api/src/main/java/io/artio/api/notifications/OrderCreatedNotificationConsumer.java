@@ -69,6 +69,34 @@ public class OrderCreatedNotificationConsumer {
                     """, CONSUMER_NAME, eventId, eventType, schemaVersion, orderId.toString());
             if (received == 0) return;
 
+            String publicEventType = publicEventType(eventType);
+            if (publicEventType != null) {
+                // Freeze the subscription and runtime/configuration target in the inbox transaction.
+                // Plugin code never receives Kafka credentials and retries never re-resolve routing.
+                String payload = mapper.writeValueAsString(java.util.Map.of(
+                        "schemaVersion", schemaVersion,
+                        "eventId", eventId.toString(),
+                        "eventType", publicEventType,
+                        "occurredAt", event.path("occurredAt").asText(),
+                        "aggregateId", orderId.toString(),
+                        "data", java.util.Map.of("orderId", orderId.toString())));
+                jdbc.update("""
+                        INSERT INTO extension_event_deliveries(delivery_id,inbox_consumer_name,inbox_event_id,
+                            subscription_id,instance_id,plugin_id,runtime_identity,release_id,configuration_generation,
+                            runtime_credential_generation,public_configuration_snapshot,encrypted_secrets_snapshot,
+                            event_type,schema_version,payload_snapshot)
+                        SELECT md5(? || ':' || s.subscription_id::text)::uuid, ?, ?, s.subscription_id, i.instance_id,
+                            i.plugin_id, i.runtime_identity, i.release_id, i.configuration_generation,p.credential_generation,
+                            i.public_configuration, i.encrypted_secrets, s.event_type, s.schema_version, ?::jsonb
+                        FROM extension_event_subscriptions s
+                        JOIN extension_plugin_instances i ON i.instance_id=s.instance_id
+                        JOIN extension_plugins p ON p.plugin_id=i.plugin_id
+                        WHERE s.event_type=? AND s.schema_version=? AND s.subscription_state='ACTIVE'
+                          AND i.compatibility_mode='CAPABILITY_V2' AND i.lifecycle_state='ENABLED'
+                        ON CONFLICT (inbox_consumer_name,inbox_event_id,subscription_id) DO NOTHING
+                        """, eventId.toString(), CONSUMER_NAME, eventId, payload, publicEventType, schemaVersion);
+            }
+
             // This consumer group only owns order-confirmation email. Other known business events are
             // durably deduplicated here and remain available on the topic to their own consumer groups.
             if (!"ORDER_CREATED".equals(eventType)) return;
@@ -88,6 +116,18 @@ public class OrderCreatedNotificationConsumer {
         } catch (Exception failure) {
             throw new IllegalStateException("Order event could not be processed", failure);
         }
+    }
+
+    private static String publicEventType(String eventType) {
+        return switch (eventType) {
+            case "ORDER_CREATED" -> "order.created";
+            case "ORDER_CANCELLED" -> "order.cancelled";
+            case "ORDER_PAID" -> "order.paid";
+            case "ORDER_SHIPPED" -> "order.shipped";
+            case "ORDER_DELIVERED" -> "order.delivered";
+            case "PAYMENT_REFUNDED" -> "order.refunded";
+            default -> null;
+        };
     }
 
     private static String requiredHeader(ConsumerRecord<String, String> record, String name) {

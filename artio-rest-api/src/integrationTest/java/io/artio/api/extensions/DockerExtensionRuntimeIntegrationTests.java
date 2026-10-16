@@ -32,6 +32,60 @@ class DockerExtensionRuntimeIntegrationTests {
     }
 
     @Test
+    void isolatesTwoLiveInstancesOfTheSameReleaseAndLifecycle() throws Exception {
+        String image = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V1");
+        assumeTrue(image != null, "Run scripts/verify-extension-runtime.ps1 to provide the pinned fixture image");
+        DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        var transport = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost())
+                .sslConfig(config.getSSLConfig()).maxConnections(10).connectionTimeout(Duration.ofSeconds(5))
+                .responseTimeout(Duration.ofSeconds(120)).build();
+        try (DockerClient docker = DockerClientImpl.getInstance(config, transport)) {
+            String network = "artio-multi-it-" + UUID.randomUUID().toString().substring(0, 8);
+            String pluginId = testPluginId("runtime.e2e");
+            String instanceOne = "instance-" + UUID.randomUUID().toString().replace("-", "");
+            String instanceTwo = "instance-" + UUID.randomUUID().toString().replace("-", "");
+            docker.createNetworkCmd().withName(network).withDriver("bridge").withLabels(Map.of("io.artio.test.run", testRunId())).exec();
+            var runtime = new DockerExtensionRuntime(docker, network, 8080,
+                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
+            PluginManifest release = manifest(pluginId, image, "1.0.0", false);
+            try {
+                runtime.installInstance(instanceOne, release);
+                runtime.installInstance(instanceTwo, release);
+                runtime.enableInstance(instanceOne, release, 3, Map.of());
+                runtime.enableInstance(instanceTwo, release, 7, Map.of());
+
+                var firstContainer = docker.inspectContainerCmd(DockerExtensionRuntime.containerName(instanceOne)).exec();
+                var secondContainer = docker.inspectContainerCmd(DockerExtensionRuntime.containerName(instanceTwo)).exec();
+                assertThat(firstContainer.getId()).isNotEqualTo(secondContainer.getId());
+                assertThat(firstContainer.getConfig().getLabels()).containsEntry("io.artio.extension", pluginId)
+                        .containsEntry("io.artio.extension.runtime", instanceOne);
+                assertThat(secondContainer.getConfig().getLabels()).containsEntry("io.artio.extension", pluginId)
+                        .containsEntry("io.artio.extension.runtime", instanceTwo);
+                assertThat(environment(firstContainer, "ARTIO_EXTENSION_TOKEN"))
+                        .isNotEqualTo(environment(secondContainer, "ARTIO_EXTENSION_TOKEN"));
+                assertThat(runtime.healthInstance(instanceOne, release).healthy()).isTrue();
+                assertThat(runtime.healthInstance(instanceTwo, release).healthy()).isTrue();
+                assertInvocation(runtime, instanceOne, 3, "1");
+                assertInvocation(runtime, instanceTwo, 7, "1");
+
+                runtime.disableInstance(instanceOne, pluginId);
+                assertThat(runtime.healthInstance(instanceOne, release).healthy()).isFalse();
+                assertThat(runtime.healthInstance(instanceTwo, release).healthy()).isTrue();
+                runtime.uninstallInstance(instanceOne, pluginId);
+                assertThat(docker.listContainersCmd().withShowAll(true).withLabelFilter(
+                        Map.of("io.artio.extension.runtime", instanceOne)).exec()).isEmpty();
+                assertThat(runtime.healthInstance(instanceTwo, release).healthy()).isTrue();
+            } finally {
+                runtime.disableInstance(instanceOne, pluginId);
+                runtime.uninstallInstance(instanceOne, pluginId);
+                runtime.disableInstance(instanceTwo, pluginId);
+                runtime.uninstallInstance(instanceTwo, pluginId);
+                docker.removeNetworkCmd(network).exec();
+            }
+        }
+    }
+
+    @Test
     void restrictsRealPluginEgressToTheProviderGateway() throws Exception {
         String extensionImage = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V1");
         String proxyImage = System.getenv("ARTIO_TEST_EGRESS_IMAGE");
@@ -45,10 +99,12 @@ class DockerExtensionRuntimeIntegrationTests {
         try (DockerClient docker = DockerClientImpl.getInstance(config, transport)) {
             String privateNetwork = "artio-egress-it-" + UUID.randomUUID().toString().substring(0, 8);
             String outboundNetwork = privateNetwork + "-out";
-            String pluginId = "runtime.egress" + UUID.randomUUID().toString().replace("-", "");
+            String pluginId = testPluginId("runtime.egress");
             String proxyName = "artio-egress-" + UUID.randomUUID().toString().substring(0, 8);
-            docker.createNetworkCmd().withName(privateNetwork).withDriver("bridge").withInternal(true).exec();
-            docker.createNetworkCmd().withName(outboundNetwork).withDriver("bridge").exec();
+            docker.createNetworkCmd().withName(privateNetwork).withDriver("bridge").withInternal(true)
+                    .withLabels(Map.of("io.artio.test.run", testRunId())).exec();
+            docker.createNetworkCmd().withName(outboundNetwork).withDriver("bridge")
+                    .withLabels(Map.of("io.artio.test.run", testRunId())).exec();
             var runtime = new DockerExtensionRuntime(docker, privateNetwork, 8080,
                     new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
             PluginManifest plugin = manifest(pluginId, extensionImage, "1.0.0", false);
@@ -61,7 +117,7 @@ class DockerExtensionRuntimeIntegrationTests {
                                 .withReadonlyRootfs(true).withCapDrop(com.github.dockerjava.api.model.Capability.ALL)
                                 .withSecurityOpts(List.of("no-new-privileges:true")))
                         .withUser("10001:10001").withEnv("ARTIO_EGRESS_ALLOWED_HOSTS=api.stripe.com")
-                        .withLabels(Map.of("io.artio.test.egress", "true")).exec().getId();
+                        .withLabels(Map.of("io.artio.test.egress", testRunId())).exec().getId();
                 docker.startContainerCmd(proxyContainer).exec();
                 docker.connectToNetworkCmd().withContainerId(proxyContainer).withNetworkId(privateNetwork)
                         .withContainerNetwork(new ContainerNetwork().withAliases("extension-egress")).exec();
@@ -131,10 +187,10 @@ class DockerExtensionRuntimeIntegrationTests {
                 .responseTimeout(Duration.ofSeconds(120)).build();
         try (DockerClient docker = DockerClientImpl.getInstance(config, transport)) {
             String network = "artio-ext-it-" + UUID.randomUUID().toString().substring(0, 8);
-            String pluginId = "runtime.e2e" + UUID.randomUUID().toString().replace("-", "");
+            String pluginId = testPluginId("runtime.e2e");
             // The test host is outside Docker's private network, so this harness uses loopback port forwarding.
             // Production uses the private, unpublished extension network and is separately asserted by runtime policy tests.
-            docker.createNetworkCmd().withName(network).withDriver("bridge").exec();
+            docker.createNetworkCmd().withName(network).withDriver("bridge").withLabels(Map.of("io.artio.test.run", testRunId())).exec();
             var runtime = new DockerExtensionRuntime(docker, network, 8080,
                     new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
             PluginManifest current = manifest(pluginId, firstImage, "1.0.0", bundle);
@@ -196,6 +252,27 @@ class DockerExtensionRuntimeIntegrationTests {
         var result = runtime.invoke(pluginId, 1, "payment.provider.v1", "authorize", UUID.randomUUID().toString(),
                 "{}", "{\"amount\":100}", Duration.ofSeconds(5));
         assertThat(new ObjectMapper().readTree(result.responseJson()).path("runtimeVersion").asText()).isEqualTo(expectedVersion);
+    }
+
+    private static void assertInvocation(DockerExtensionRuntime runtime, String runtimeIdentity, int credentialGeneration,
+            String expectedVersion) throws Exception {
+        var result = runtime.invoke(runtimeIdentity, credentialGeneration, "payment.provider.v1", "authorize",
+                UUID.randomUUID().toString(), "{}", "{\"amount\":100}", Duration.ofSeconds(5));
+        assertThat(new ObjectMapper().readTree(result.responseJson()).path("runtimeVersion").asText()).isEqualTo(expectedVersion);
+    }
+
+    private static String environment(com.github.dockerjava.api.command.InspectContainerResponse container, String key) {
+        return java.util.Arrays.stream(container.getConfig().getEnv()).filter(value -> value.startsWith(key + "="))
+                .map(value -> value.substring(key.length() + 1)).findFirst().orElseThrow();
+    }
+
+    private static String testPluginId(String prefix) {
+        return prefix + testRunId() + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private static String testRunId() {
+        String runId = System.getenv("ARTIO_TEST_RUN_ID");
+        return runId == null || runId.isBlank() ? "manual" : runId;
     }
 
     private static void assertPersistentProof(DockerClient docker, String pluginId) throws Exception {

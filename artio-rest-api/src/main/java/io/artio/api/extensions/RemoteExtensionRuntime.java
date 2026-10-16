@@ -36,6 +36,9 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     }
 
     @Override public void install(PluginManifest manifest) { post("internal/v1/extensions/install", new ManifestRequest(manifest, 1), Duration.ofSeconds(150), Void.class); }
+    @Override public void installInstance(String runtimeIdentity, PluginManifest manifest) {
+        post("internal/v1/extensions/instances/install", new InstanceManifestRequest(runtimeIdentity, manifest, 1), Duration.ofSeconds(150), Void.class);
+    }
     @Override public void update(PluginManifest manifest) { post("internal/v1/extensions/update", new ManifestRequest(manifest, 1), Duration.ofSeconds(150), Void.class); }
     @Override public void enable(PluginManifest manifest) { enable(manifest, 1); }
     @Override public void enable(PluginManifest manifest, int generation) {
@@ -44,11 +47,23 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     @Override public void enable(PluginManifest manifest, int generation, Map<String, String> configuration) {
         post("internal/v1/extensions/enable", new EnableRequest(manifest, generation, configuration), Duration.ofSeconds(45), Void.class);
     }
+    @Override public void enableInstance(String runtimeIdentity, PluginManifest manifest, int generation, Map<String, String> configuration) {
+        post("internal/v1/extensions/instances/enable",
+                new InstanceEnableRequest(runtimeIdentity, manifest, generation, configuration), Duration.ofSeconds(45), Void.class);
+    }
     @Override public void disable(String pluginId) {
         post("internal/v1/extensions/" + segment(pluginId) + "/disable", null, Duration.ofSeconds(30), Void.class);
     }
+    @Override public void disableInstance(String runtimeIdentity, String pluginId) {
+        post("internal/v1/extensions/instances/" + segment(runtimeIdentity) + "/disable", new PluginIdentityRequest(pluginId),
+                Duration.ofSeconds(30), Void.class);
+    }
     @Override public void uninstall(String pluginId) {
         post("internal/v1/extensions/" + segment(pluginId) + "/uninstall", null, Duration.ofSeconds(30), Void.class);
+    }
+    @Override public void uninstallInstance(String runtimeIdentity, String pluginId) {
+        post("internal/v1/extensions/instances/" + segment(runtimeIdentity) + "/uninstall", new PluginIdentityRequest(pluginId),
+                Duration.ofSeconds(30), Void.class);
     }
     @Override public void rotateCredentials(PluginManifest manifest, int generation, boolean restartIfEnabled) {
         rotateCredentials(manifest, generation, restartIfEnabled, Map.of());
@@ -62,6 +77,10 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     }
     @Override public RuntimeHealth health(PluginManifest manifest) {
         return post("internal/v1/extensions/" + segment(manifest.id()) + "/bundle-health", new ManifestHealthRequest(manifest), Duration.ofSeconds(30), RuntimeHealth.class);
+    }
+    @Override public RuntimeHealth healthInstance(String runtimeIdentity, PluginManifest manifest) {
+        return post("internal/v1/extensions/instances/" + segment(runtimeIdentity) + "/health",
+                new ManifestHealthRequest(manifest), Duration.ofSeconds(30), RuntimeHealth.class);
     }
     @Override public UiProxyResponse proxyObservability(String pluginId, String method, String path, String query) {
         return proxyObservability(pluginId, method, path, query, null, null);
@@ -139,6 +158,12 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     }
 
     private record ManifestRequest(PluginManifest manifest, int credentialGeneration) { }
+    private record InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration) { }
+    private record PluginIdentityRequest(String pluginId) { }
+    private record InstanceEnableRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
+            Map<String, String> configuration) {
+        private InstanceEnableRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
+    }
     private record EnableRequest(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {
         private EnableRequest { configuration = configuration == null ? Map.of() : Map.copyOf(configuration); }
     }

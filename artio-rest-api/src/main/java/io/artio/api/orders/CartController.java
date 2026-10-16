@@ -53,7 +53,7 @@ public class CartController {
         var destination = new ShippingProvider.Address(country.toUpperCase(java.util.Locale.ROOT), postalCode, locality,
                 addressLine1, null, recipientName);
         ShippingProvider provider = shippingProvider.getIfAvailable();
-        if (provider == null) return List.of(new ShippingMethodView("standard", "Standard delivery", null, shippingCost, market.currency()));
+        if (provider == null || !provider.capabilities().quotes()) return List.of(new ShippingMethodView("standard", "Standard delivery", null, shippingCost, market.currency()));
         if (blank(postalCode) || blank(locality) || blank(addressLine1) || blank(recipientName)) return List.of();
         var capabilities = provider.capabilities();
         if (!capabilities.countries().contains(destination.countryCode())) return List.of();
@@ -68,7 +68,7 @@ public class CartController {
         String country=request.destination().countryCode()==null?null:request.destination().countryCode().toUpperCase(java.util.Locale.ROOT);
         var destination=new ShippingProvider.Address(country,request.destination().postalCode(),request.destination().locality(),request.destination().addressLine1(),request.destination().addressLine2(),request.destination().recipientName());
         Market market = marketForCountry(country);
-        if (provider == null) {
+        if (provider == null || !provider.capabilities().quotes()) {
             if (!"standard".equals(request.methodId())) throw new IllegalArgumentException("Unknown shipping method");
             return new ShippingQuoteView("standard", shippingCost, market.currency(), null);
         }
@@ -166,12 +166,13 @@ public class CartController {
         }
         if(subtotal.signum()<0)throw new IllegalArgumentException("Order total must not be negative");
         ShippingProvider provider = shippingProvider.getIfAvailable();
+        boolean providerQuotes = provider != null && provider.capabilities().quotes();
         BigDecimal shippingAmount = shippingCost;
         String shippingMethodId = null;
         BigDecimal parcelWeight = null;
         String persistedShippingAddress = request.shippingAddress();
         String persistedBillingAddress=request.billingAddress();
-        if (provider != null) {
+        if (providerQuotes) {
             if (request.shippingMethodId() == null || request.shippingDetails() == null) throw new IllegalArgumentException("Choose a shipping method and provide a structured delivery address");
             var destination = request.shippingDetails().toAddress(request.shippingCountry());
             if (!provider.capabilities().countries().contains(destination.countryCode())) throw new IllegalArgumentException("Shipping provider does not serve this country");
@@ -186,7 +187,7 @@ public class CartController {
         }
         UUID orderId = UUID.randomUUID();
         ShippingProvider.ShippingQuote providerQuote = null;
-        if (provider != null) {
+        if (providerQuotes) {
             var destination = request.shippingDetails().toAddress(request.shippingCountry());
             providerQuote = provider.quote(new ShippingProvider.ShippingRequest(orderId.toString(), shippingMethodId, destination,
                     parcelWeight, subtotal.add(tax), currency.getCurrencyCode()));

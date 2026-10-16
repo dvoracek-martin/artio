@@ -9,6 +9,9 @@ import java.time.Instant;
 import java.util.UUID;
 import java.util.List;
 import java.util.HashSet;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
@@ -35,7 +38,9 @@ public class OrderFulfillmentController {
         String status=jdbc.query("SELECT status FROM orders WHERE id=? FOR UPDATE",(rs,n)->rs.getString(1),id).stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found"));
         if(!"PAID".equals(status)&&!"CONFIRMED".equals(status))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only paid or confirmed orders can be shipped");
         ShippingProvider provider=shippingProvider.getIfAvailable();
+        if(provider!=null&&!provider.capabilities().shipmentCreation())provider=null;
         String trackingNumber=request.trackingNumber();String shipmentReference=null;String labelUrl=null;
+        ShippingProvider.ProviderOwner owner=null;
         if(provider!=null){
             ShippingOrder order=jdbc.query("SELECT shipping_address,shipping_country,shipping_method_id,shipping_parcel_weight_kg,subtotal+tax AS declared_value,currency FROM orders WHERE id=?",(rs,n)->new ShippingOrder(rs.getString("shipping_address"),rs.getString("shipping_country").trim(),rs.getString("shipping_method_id"),rs.getBigDecimal("shipping_parcel_weight_kg"),rs.getBigDecimal("declared_value"),rs.getString("currency").trim()),id).stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found"));
             if(order.methodId()!=null){
@@ -43,14 +48,17 @@ public class OrderFulfillmentController {
                 if(!provider.capabilities().shipmentCreation())throw new ResponseStatusException(HttpStatus.CONFLICT,"Configured shipping provider cannot create shipments");
                 try{
                     ShippingProvider.Address destination=mapper.readValue(order.address(),ShippingProvider.Address.class);
-                    var result=provider.createShipment(new ShippingProvider.ShipmentRequest(id.toString(),order.methodId(),destination,order.weightKg(),order.declaredValue(),order.currency(),"ship-order-"+id));
+                    var owned=provider.createShipmentOwned(new ShippingProvider.ShipmentRequest(id.toString(),order.methodId(),destination,order.weightKg(),order.declaredValue(),order.currency(),"ship-order-"+id));
+                    var result=owned.result();owner=owned.owner();
                     shipmentReference=result.shipmentReference();labelUrl=result.labelUrl();if(result.trackingReference()!=null&&!result.trackingReference().isBlank())trackingNumber=result.trackingReference();
                 }catch(ResponseStatusException failure){throw failure;}catch(Exception failure){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Shipping provider could not create the shipment");}
             }
         }
         if(trackingNumber==null||trackingNumber.isBlank())throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Shipping provider did not return a tracking number");
         UUID shipmentId=UUID.randomUUID();
-        jdbc.update("INSERT INTO order_shipments(id,order_id,tracking_number,shipment_reference) VALUES (?,?,?,?)",shipmentId,id,trackingNumber,shipmentReference);
+        jdbc.update("INSERT INTO order_shipments(id,order_id,tracking_number,shipment_reference,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope) VALUES (?,?,?,?,?,?,?,?,?::jsonb)",
+                shipmentId,id,trackingNumber,shipmentReference,owner==null?null:owner.instanceId(),owner==null?null:owner.releaseId(),
+                owner==null?null:owner.configurationGeneration(),owner==null?null:owner.externalAccountFingerprint(),owner==null?"{}":writeJson(owner.scope()));
         jdbc.update("INSERT INTO order_shipment_items(shipment_id,order_item_id,quantity) SELECT ?,id,quantity FROM order_items WHERE order_id=?",shipmentId,id);
         for(var reservation:inventory.reservationsByOrder(id))if(reservation.state()==io.artio.inventory.ReservationState.RESERVED)inventory.allocate(reservation.id());
         jdbc.update("UPDATE orders SET status='SHIPPED',tracking_number=?,shipment_reference=?,shipping_label_url=? WHERE id=?",trackingNumber,shipmentReference,labelUrl,id);
@@ -115,9 +123,11 @@ public class OrderFulfillmentController {
         if(!"SHIPPED".equals(order.status())&& !"DELIVERED".equals(order.status()))throw new ResponseStatusException(HttpStatus.CONFLICT,"Only shipped orders have carrier tracking");
         if(order.trackingNumber()==null||order.trackingNumber().isBlank())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Tracking reference is unavailable");
         ShippingProvider provider=shippingProvider.getIfAvailable();
-        if(provider==null||!provider.capabilities().tracking())throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"The configured carrier does not provide tracking updates");
+        ShippingProvider.ProviderOwner owner=jdbc.query("SELECT provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM order_shipments WHERE order_id=? AND tracking_number=? ORDER BY created_at DESC LIMIT 1",
+                (rs,n)->providerOwner(rs),id,order.trackingNumber()).stream().findFirst().orElse(null);
+        if(provider==null||owner==null&&!provider.capabilities().tracking())throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"The configured carrier does not provide tracking updates");
         ShippingProvider.TrackingResult result;
-        try{result=provider.track(order.trackingNumber());}
+        try{result=provider.track(owner,order.trackingNumber()).result();}
         catch(RuntimeException failure){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Carrier tracking could not be refreshed");}
         if(result==null||!order.trackingNumber().equals(result.trackingReference())||result.status()==null||result.status().isBlank()
                 ||result.status().length()>80||result.lastLocation()!=null&&result.lastLocation().length()>200)
@@ -154,6 +164,15 @@ public class OrderFulfillmentController {
         }catch(RuntimeException invalid){throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Stored shipping label is invalid");}
     }
     private String status(UUID id){var statuses=jdbc.query("SELECT status FROM orders WHERE id=?",(rs,n)->rs.getString(1),id);if(statuses.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Order not found");return statuses.getFirst();}
+    private ShippingProvider.ProviderOwner providerOwner(ResultSet rs)throws SQLException{
+        UUID instanceId=rs.getObject("provider_instance_id",UUID.class);if(instanceId==null)return null;
+        Number release=(Number)rs.getObject("provider_release_id");
+        try{return new ShippingProvider.ProviderOwner(instanceId,release==null?null:release.longValue(),rs.getInt("provider_configuration_generation"),
+                rs.getString("provider_account_fingerprint")==null?null:rs.getString("provider_account_fingerprint").trim(),
+                mapper.readValue(rs.getString("provider_scope"),new TypeReference<java.util.Map<String,String>>(){}));}
+        catch(Exception invalid){throw new SQLException("Persisted carrier owner scope is invalid",invalid);}
+    }
+    private String writeJson(Object value){try{return mapper.writeValueAsString(value);}catch(Exception invalid){throw new IllegalStateException("Carrier owner scope could not be serialized",invalid);}}
     public record ShipRequest(String trackingNumber){} public record FulfillmentView(UUID orderId,String status,String trackingNumber,String shipmentReference,String labelUrl){}
     public record CreateShipmentRequest(String trackingNumber,String shipmentReference,List<ShipmentItemRequest> items){}
     public record ShipmentItemRequest(UUID orderItemId,java.math.BigDecimal quantity){}
