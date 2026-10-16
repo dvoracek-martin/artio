@@ -4,7 +4,7 @@ import { NEVER, of } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app.component';
 
-function createComponent(orderStatus: string | undefined, authenticated = true, route = '/checkout?success=true&orderId=order-1', checkoutRetry = false, products: Array<{id:string;name:string;description:string;sku:string;active:boolean}> = []) {
+function createComponent(orderStatus: string | undefined, authenticated = true, route = '/checkout?success=true&orderId=order-1', checkoutRetry = false, products: Array<{id:string;name:string;description:string;sku:string;active:boolean}> = [], publicProduct?: {id:string;name:string;description:string;sku:string;active:boolean;seoSlug:string;seoTitle:string;seoDescription:string}) {
   localStorage.removeItem('artio-token');
   localStorage.setItem('artio-locale', 'en');
   if (authenticated) localStorage.setItem('artio-token', 'test-token');
@@ -14,10 +14,14 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
     get: vi.fn((url: string) => of(
       url === '/api/v1/public/config'
         ? { googleOidcEnabled: false, countryCode: 'CH', currencyCode: 'CHF', locale: 'en' }
+        : url.startsWith('/api/v1/public/products/')
+          ? publicProduct
         : url === '/api/v1/products'
           ? products
         : url.includes('/localized?locale=')
           ? { name: 'Localized product', description: 'Localized description', seoSlug: 'localized-product', seoTitle: 'SEO product title', seoDescription: 'SEO product description' }
+        : url.endsWith('/variants')
+          ? url.includes(publicProduct?.id ?? 'missing-product') ? [{ id: 'variant-1', name: 'Small', active: true }] : []
         : url.endsWith('/media')
           ? [{ id: 'media-1', contentUrl: 'https://cdn.example.test/product.jpg', altText: 'Product', position: 0 }]
         : url === '/api/v1/cart'
@@ -34,6 +38,8 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
         ? of({ orderId: 'retry-order', status: 'PENDING' })
         : checkoutRetry && url.includes('/checkout-session')
           ? NEVER
+          : url === '/api/v1/pricing/quote'
+            ? of({ unitListPrice: { amount: 25.5, currency: 'CHF' }, total: { amount: 25.5, currency: 'CHF' } })
           : of({}))
   };
   TestBed.configureTestingModule({ imports: [AppComponent], providers: [{ provide: HttpClient, useValue: http }] });
@@ -106,7 +112,7 @@ describe('Storefront payment return', () => {
     expect(document.querySelector('meta[property="og:type"]')?.getAttribute('content')).toBe('website');
   });
 
-  it('publishes product structured data with matching live product anchors on the shop page', () => {
+  it('publishes product structured data with matching standalone detail links on the shop page', () => {
     const product = { id: 'product-1', name: 'Original name', description: 'Original description', sku: 'SKU-1', active: true };
     const { fixture } = createComponent(undefined, false, '/shop', false, [product]);
 
@@ -119,10 +125,28 @@ describe('Storefront payment return', () => {
       description: 'SEO product description',
       sku: 'SKU-1',
       image: 'https://cdn.example.test/product.jpg',
-      url: `${location.origin}/shop#product-product-1`
+      url: `${location.origin}/products/localized-product?locale=en`
     });
-    expect(schema.itemListElement[0].item['@id']).toBe(`${location.origin}/shop#product-product-1`);
+    expect(schema.itemListElement[0].item['@id']).toBe(`${location.origin}/products/localized-product?locale=en`);
     expect(fixture.nativeElement.querySelector('#product-product-1')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('a[href="/products/localized-product?locale=en"]')).toBeTruthy();
+  });
+
+  it('renders a localized product detail page with a selectable variant, Core quote and canonical product schema', () => {
+    const product = { id: 'product-1', name: 'Base name', description: 'Base description', sku: 'SKU-1', active: true, seoSlug: 'tasse', seoTitle: 'Keramiktasse', seoDescription: 'Handgefertigte Keramiktasse' };
+    const { fixture, http } = createComponent(undefined, false, '/products/tasse?locale=de', false, [], product);
+
+    expect(fixture.nativeElement.textContent).toContain('Keramiktasse');
+    expect(fixture.nativeElement.textContent).toContain('Handgefertigte Keramiktasse');
+    expect(fixture.nativeElement.querySelector('.product-option select')?.value).toBe('variant-1');
+    expect(fixture.nativeElement.textContent).toContain('25.5 CHF');
+    expect(http.get).toHaveBeenCalledWith('/api/v1/public/products/tasse?locale=de');
+    expect(http.post).toHaveBeenCalledWith('/api/v1/pricing/quote', { sellableId: 'variant-1', market: 'CH', channel: 'WEB', jurisdiction: 'CH', quantity: 1 });
+    expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('index,follow');
+    expect(document.querySelector('meta[property="og:type"]')?.getAttribute('content')).toBe('product');
+    expect(document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href).toBe(`${location.origin}/products/tasse?locale=de`);
+    const schema = JSON.parse(document.querySelector('script[data-artio-seo="products"]')?.textContent ?? '{}');
+    expect(schema).toMatchObject({ '@type': 'Product', name: 'Keramiktasse', sku: 'SKU-1', offers: { '@type': 'Offer', price: 25.5, priceCurrency: 'CHF' } });
   });
 
   it('gives checkout address and payment controls visible accessible labels', () => {

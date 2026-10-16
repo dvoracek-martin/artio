@@ -101,6 +101,14 @@ public class ProductApplicationService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "catalog-products", key = "'published'")
+    public List<ProductResponse> findPublishedProducts() {
+        return products.findAll().stream()
+                .filter(product -> product.isActive() && !product.isArchived())
+                .map(ProductResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ProductSearchResult> search(String query, int limit) {
         return search(query, limit, "en");
     }
@@ -118,6 +126,15 @@ public class ProductApplicationService {
     @Cacheable(cacheNames = "catalog-products", key = "#id")
     public ProductResponse findById(UUID id) {
         return ProductResponse.from(findProduct(id));
+    }
+
+    @Transactional(readOnly = true)
+    public ProductResponse findPublishedById(UUID id) {
+        var product = findProduct(id);
+        if (!product.isActive() || product.isArchived()) {
+            throw new CatalogNotFoundException("Product not found: " + id);
+        }
+        return ProductResponse.from(product);
     }
 
     @Transactional(readOnly = true)

@@ -27,7 +27,7 @@ public class ProductController {
 
     @GetMapping
     public List<ProductResponse> findAll() {
-        return products.findAll();
+        return products.findPublishedProducts();
     }
 
     @GetMapping("/search")
@@ -40,7 +40,7 @@ public class ProductController {
 
     @GetMapping("/{id}")
     public ProductResponse findById(@PathVariable UUID id) {
-        return products.findById(id);
+        return products.findPublishedById(id);
     }
 
     @PostMapping

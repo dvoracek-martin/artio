@@ -128,7 +128,7 @@ Loyalty points accrue after confirmed payment, reverse proportionally with refun
 
 The default Compose stack starts PostgreSQL, Apache Kafka, the REST API, event-worker, notification-worker, extension-controller and Backoffice. Redis and OpenSearch are optional profiles; start Storefront with `docker compose --profile storefront up -d` or `Start-Artio-With-Storefront.cmd`. Observability has a local Compose overlay and a separately managed plugin source pack; its registry image digests are not yet published. Docker Compose is the supported deployment path.
 
-The Storefront exposes `/sitemap.xml` and `/robots.txt` through Nginx. Core builds those documents using `ARTIO_STOREFRONT_URL`; set it to the public Storefront origin in a deployed environment. The local Compose default is `http://localhost:4200`. The sitemap lists only the public home, shop and bundles routes; private customer and checkout routes are excluded.
+The Storefront exposes `/sitemap.xml` and `/robots.txt` through Nginx. Core builds those documents using `ARTIO_STOREFRONT_URL`; set it to the public Storefront origin in a deployed environment. The local Compose default is `http://localhost:4200`. The sitemap lists the public home, shop, bundles and published product detail routes; private customer and checkout routes are excluded. Published products have localized standalone `/products/{slug}?locale={locale}` pages; inactive and archived products are unavailable publicly.
 
 The Storefront SEO behavior and its client-rendering limits are documented in [the search rendering strategy](docs/storefront-seo.md).
 

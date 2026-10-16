@@ -2,6 +2,9 @@ package io.artio.api.security;
 
 import java.net.URI;
 import java.util.List;
+import java.util.stream.Stream;
+import io.artio.api.catalog.ProductApplicationService;
+import io.artio.api.catalog.ProductResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.CacheControl;
@@ -15,8 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PublicSeoController {
     private static final List<String> PUBLIC_PATHS = List.of("/", "/shop", "/bundles");
     private final String storefrontOrigin;
+    private final ProductApplicationService products;
 
-    public PublicSeoController(@Value("${artio.storefront-url:http://localhost:4200}") String storefrontUrl) {
+    public PublicSeoController(@Value("${artio.storefront-url:http://localhost:4200}") String storefrontUrl,
+            ProductApplicationService products) {
+        this.products = products;
         var uri = URI.create(storefrontUrl.trim());
         if ((!"https".equalsIgnoreCase(uri.getScheme()) && !"http".equalsIgnoreCase(uri.getScheme()))
                 || uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null
@@ -29,7 +35,8 @@ public class PublicSeoController {
 
     @GetMapping(value = "/api/v1/public/sitemap.xml", produces = MediaType.APPLICATION_XML_VALUE)
     public ResponseEntity<String> sitemap() {
-        var entries = PUBLIC_PATHS.stream()
+        var productPaths = products.findPublishedProducts().stream().map(PublicSeoController::productPath);
+        var entries = Stream.concat(PUBLIC_PATHS.stream(), productPaths)
                 .map(path -> "  <url><loc>" + xmlEscape(storefrontOrigin + path) + "</loc></url>")
                 .collect(java.util.stream.Collectors.joining("\n"));
         var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -49,5 +56,11 @@ public class PublicSeoController {
     private static String xmlEscape(String value) {
         return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 .replace("\"", "&quot;").replace("'", "&apos;");
+    }
+
+    private static String productPath(ProductResponse product) {
+        var slug = product.seoSlug();
+        var idOrSlug = slug == null || slug.isBlank() ? product.id().toString() : slug;
+        return "/products/" + idOrSlug + "?locale=en";
     }
 }

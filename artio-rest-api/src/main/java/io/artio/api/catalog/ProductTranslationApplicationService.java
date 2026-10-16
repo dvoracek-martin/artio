@@ -72,6 +72,50 @@ public class ProductTranslationApplicationService {
     }
 
     @Transactional(readOnly = true)
+    public PublicProductView resolvePublishedBySlug(String slug, String locale) {
+        if (slug == null || slug.isBlank()) throw new CatalogNotFoundException("Product not found");
+        var requestedLocale = new LocaleCode(locale).value();
+        UUID productId;
+        try {
+            productId = UUID.fromString(slug);
+        } catch (IllegalArgumentException invalidProductId) {
+            if (!slug.matches("[a-z0-9]+(?:-[a-z0-9]+)*")) {
+                throw new CatalogNotFoundException("Product not found");
+            }
+            productId = findPublishedProductIdBySlug(slug, requestedLocale)
+                    .orElseThrow(() -> new CatalogNotFoundException("Product not found"));
+        }
+        var product = products.findPublishedById(productId);
+        var localized = resolve(productId, requestedLocale);
+        return new PublicProductView(product.id(), localized.name(), localized.description(), product.sku(),
+                localized.seoSlug(), localized.seoTitle(), localized.seoDescription());
+    }
+
+    private java.util.Optional<UUID> findPublishedProductIdBySlug(String slug, String locale) {
+        var localized = jdbc.query("""
+                SELECT p.id FROM catalog_product_translations t
+                JOIN catalog_product p ON p.id=t.product_id
+                WHERE t.locale=? AND t.seo_slug=? AND p.active=TRUE AND p.archived_at IS NULL
+                LIMIT 1
+                """, (rs, row) -> rs.getObject(1, UUID.class), locale, slug).stream().findFirst();
+        if (localized.isPresent()) return localized;
+        if (!"en".equals(locale)) {
+            localized = jdbc.query("""
+                    SELECT p.id FROM catalog_product_translations t
+                    JOIN catalog_product p ON p.id=t.product_id
+                    WHERE t.locale='en' AND t.seo_slug=? AND p.active=TRUE AND p.archived_at IS NULL
+                    LIMIT 1
+                    """, (rs, row) -> rs.getObject(1, UUID.class), slug).stream().findFirst();
+            if (localized.isPresent()) return localized;
+        }
+        return jdbc.query("""
+                SELECT id FROM catalog_product
+                WHERE seo_slug=? AND active=TRUE AND archived_at IS NULL
+                LIMIT 1
+                """, (rs, row) -> rs.getObject(1, UUID.class), slug).stream().findFirst();
+    }
+
+    @Transactional(readOnly = true)
     public List<TranslationView> findAll(UUID productId) {
         products.findById(productId);
         return jdbc.query("SELECT locale,name,description,seo_slug,seo_title,seo_description FROM catalog_product_translations WHERE product_id=? ORDER BY locale",
@@ -88,4 +132,6 @@ public class ProductTranslationApplicationService {
                                   String seoSlug, String seoTitle, String seoDescription) { }
     public record LocalizedProductView(UUID id, String sku, boolean active, String requestedLocale, String name,
                                        String description, String seoSlug, String seoTitle, String seoDescription) { }
+    public record PublicProductView(UUID id, String name, String description, String sku,
+                                    String seoSlug, String seoTitle, String seoDescription) { }
 }
