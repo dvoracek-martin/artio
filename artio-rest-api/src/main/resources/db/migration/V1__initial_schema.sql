@@ -1068,6 +1068,43 @@ CREATE TABLE extension_plugin_instances (
 CREATE INDEX extension_plugin_instances_runtime_idx ON extension_plugin_instances(runtime_identity);
 CREATE INDEX extension_plugin_instances_lifecycle_idx ON extension_plugin_instances(lifecycle_state, plugin_id);
 
+-- Durable, Core-owned plugin installation jobs. Development keeps one consolidated V1 schema snapshot.
+CREATE TABLE extension_installation_jobs (
+    job_id UUID PRIMARY KEY,
+    plugin_id VARCHAR(128) NOT NULL REFERENCES extension_plugins(plugin_id),
+    instance_id UUID,
+    runtime_identity VARCHAR(256) NOT NULL,
+    source_kind VARCHAR(16) NOT NULL CHECK (source_kind IN ('REGISTERED','MARKETPLACE','CUSTOM','ARCHIVE')),
+    source_release_id BIGINT,
+    release_digest CHAR(64),
+    requested_by UUID NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL CHECK (length(idempotency_key) BETWEEN 8 AND 128),
+    manifest_snapshot JSONB NOT NULL CHECK (jsonb_typeof(manifest_snapshot)='object'),
+    permission_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(permission_snapshot)='object'),
+    image_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(image_snapshot)='array'),
+    state VARCHAR(32) NOT NULL CHECK (state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS',
+        'REGISTERING_RELEASE','INSTALLED','CONFIGURATION_REQUIRED','READY','FAILED','CANCELLED')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    lease_token UUID,
+    lease_until TIMESTAMPTZ,
+    error_code VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    FOREIGN KEY (instance_id,plugin_id) REFERENCES extension_plugin_instances(instance_id,plugin_id),
+    FOREIGN KEY (source_release_id,plugin_id) REFERENCES extension_plugin_releases(release_id,plugin_id),
+    CHECK ((lease_token IS NULL) = (lease_until IS NULL)),
+    CHECK (release_digest IS NULL OR release_digest ~ '^[a-f0-9]{64}$'),
+    UNIQUE (requested_by,idempotency_key)
+);
+CREATE INDEX extension_installation_jobs_queue_idx ON extension_installation_jobs(state,created_at)
+    WHERE state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
+CREATE INDEX extension_installation_jobs_plugin_idx ON extension_installation_jobs(plugin_id,created_at DESC);
+CREATE UNIQUE INDEX extension_installation_jobs_one_active_plugin_idx ON extension_installation_jobs(plugin_id)
+    WHERE instance_id IS NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
+CREATE UNIQUE INDEX extension_installation_jobs_one_active_instance_idx ON extension_installation_jobs(plugin_id,instance_id)
+    WHERE instance_id IS NOT NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
+
 -- Historical provider ownership deliberately restricts removal of an instance or release while
 -- payments and shipments still refer to it.
 ALTER TABLE payments ADD CONSTRAINT payments_provider_instance_fk
@@ -1364,3 +1401,16 @@ BEGIN
 END $$;
 CREATE TRIGGER extension_event_backfill_plan_immutable BEFORE UPDATE ON extension_event_backfill_runs
     FOR EACH ROW EXECUTE FUNCTION extension_event_backfill_plan_is_immutable();
+
+-- Current development schema additions are kept in this single V1 snapshot.
+ALTER TABLE users ADD COLUMN token_version BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE artio_password_reset_tokens (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_sha256 CHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX artio_password_reset_tokens_user_id_idx ON artio_password_reset_tokens(user_id);
+CREATE INDEX artio_password_reset_tokens_expiry_idx ON artio_password_reset_tokens(expires_at) WHERE used_at IS NULL;

@@ -1,0 +1,126 @@
+package io.artio.api.extensions;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.artio.extensions.ExtensionRuntimePort;
+import io.artio.extensions.PluginManifest;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+/** PostgreSQL acceptance for idempotent, durable installation job creation and operator controls. */
+@Testcontainers(disabledWithoutDocker = true)
+@SpringBootTest(classes = io.artio.api.ArtioRestApiApplication.class, webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
+class ExtensionInstallationJobIntegrationTests {
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    @Autowired JdbcTemplate jdbc;
+    @Autowired ObjectMapper mapper;
+    @Autowired ExtensionInstallationJobOperations jobs;
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("artio.security.jwt-secret", () -> "integration-test-jwt-secret-value-32-bytes-minimum");
+        registry.add("artio.security.encryption-key", () -> "integration-test-encryption-key-value-32-bytes-minimum");
+        registry.add("artio.setup.token", () -> "integration-test-setup-token-value-32-bytes-minimum");
+        registry.add("artio.workers.enabled", () -> "false");
+        registry.add("artio.events.kafka.consumer-enabled", () -> "false");
+        registry.add("spring.kafka.listener.auto-startup", () -> "false");
+    }
+
+    @BeforeEach
+    void clearFixtures() {
+        jdbc.update("DELETE FROM extension_installation_jobs");
+        jdbc.update("DELETE FROM extension_plugins");
+    }
+
+    @Test
+    void persistsSnapshotAndReturnsSameJobForAnIdempotentRequest() throws Exception {
+        String pluginId = "installation.acceptance";
+        PluginManifest manifest = manifest(pluginId);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, mapper.writeValueAsString(manifest), manifest.image());
+        UUID actorId = UUID.randomUUID();
+
+        var first = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, actorId, "acceptance-key-0001");
+        var repeated = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, actorId, "acceptance-key-0001");
+
+        assertThat(first.jobId()).isEqualTo(repeated.jobId());
+        assertThat(first.state()).isEqualTo("REQUESTED");
+        assertThat(jdbc.queryForObject("SELECT manifest_snapshot->>'id' FROM extension_installation_jobs WHERE job_id=?", String.class,
+                first.jobId())).isEqualTo(pluginId);
+        assertThat(jdbc.queryForObject("SELECT permission_snapshot::text FROM extension_installation_jobs WHERE job_id=?", String.class,
+                first.jobId())).contains("catalog.read");
+        assertThat(jobs.list(pluginId)).extracting(ExtensionInstallationJobOperations.JobView::jobId).containsExactly(first.jobId());
+        assertThatThrownBy(() -> jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, actorId, "different-key-0001"))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(() -> jobs.request("another.plugin", null, "legacy:another.plugin", 0,
+                manifest("another.plugin"), actorId, "acceptance-key-0001"))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+
+    @Test
+    void allowsOnlySafeCancellationAndExplicitRetryOfFailedJobs() throws Exception {
+        String pluginId = "installation.controls";
+        PluginManifest manifest = manifest(pluginId);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, mapper.writeValueAsString(manifest), manifest.image());
+        UUID actorId = UUID.randomUUID();
+        var cancelled = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, actorId, "cancel-key-000001");
+        assertThat(jobs.cancel(cancelled.jobId()).state()).isEqualTo("CANCELLED");
+
+        var failed = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, actorId, "retry-key-000001");
+        jdbc.update("UPDATE extension_installation_jobs SET state='FAILED',error_code='DockerUnavailable',completed_at=now() WHERE job_id=?", failed.jobId());
+        var retried = jobs.retry(failed.jobId());
+        assertThat(retried.state()).isEqualTo("REQUESTED");
+        assertThat(retried.attemptCount()).isZero();
+        assertThat(jobs.get(failed.jobId()).errorCode()).isNull();
+        jdbc.update("UPDATE extension_installation_jobs SET state='FAILED',completed_at=now() WHERE job_id=?", failed.jobId());
+        jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, UUID.randomUUID(), "other-key-000001");
+        assertThatThrownBy(() -> jobs.retry(failed.jobId()))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+
+    @Test
+    void workerInstallsFromTheFrozenSnapshotAndMarksTheJobComplete() throws Exception {
+        String pluginId = "installation.worker";
+        PluginManifest manifest = manifest(pluginId);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, mapper.writeValueAsString(manifest), manifest.image());
+        var job = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest, UUID.randomUUID(), "worker-key-000001");
+        var runtime = org.mockito.Mockito.mock(io.artio.extensions.ExtensionRuntimePort.class);
+        var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper, runtimeBeans.getBeanProvider(ExtensionRuntimePort.class));
+
+        worker.runPending();
+
+        assertThat(jobs.get(job.jobId()).state()).isEqualTo("INSTALLED");
+        assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
+                .isEqualTo("INSTALLED");
+        org.mockito.Mockito.verify(runtime).install(manifest);
+    }
+
+    private static PluginManifest manifest(String id) {
+        return new PluginManifest("2", id, "Acceptance Plugin", "Artio", "1.0.0", "Test manifest",
+                "0.1.0", "9.0.0", "example.invalid/plugin@sha256:" + "a".repeat(64), List.of(),
+                List.of("catalog.read"), Map.of(), List.of("payment.provider.v1"), "/health", "/diagnostics");
+    }
+}

@@ -48,8 +48,8 @@ class MigrationIntegrationTests {
     void installsCleanlyThroughCurrentSchemaWithoutTenantModel() throws Exception {
         Flyway cleanInstall = flyway(POSTGRES.getJdbcUrl()).load();
         var cleanResult = cleanInstall.migrate();
-        assertThat(cleanResult.migrationsExecuted).isEqualTo(2);
-        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("2");
+        assertThat(cleanResult.migrationsExecuted).isEqualTo(1);
+        assertThat(cleanInstall.info().current().getVersion().getVersion()).isEqualTo("1");
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT valid_until FROM pricing_tax_rule WHERE id='00000000-0000-0000-0000-000000000038'")) {
             assertThat(result.next()).isTrue();
@@ -95,6 +95,16 @@ class MigrationIntegrationTests {
                 var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='orders' AND column_name IN ('shipping_country','market','tax_jurisdiction','tax_snapshot')")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getInt(1)).isEqualTo(4);
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT to_regclass('artio_password_reset_tokens')")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("artio_password_reset_tokens");
+        }
+        try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
+                var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='users' AND column_name='token_version'")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt(1)).isEqualTo(1);
         }
         try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='orders' AND column_name='idempotency_key'")) {

@@ -56,6 +56,7 @@ public class ExtensionManagementController {
     private final DistributionPluginProvisioningService provisioning;
     private final PluginEventDeliveryOperations eventDeliveryOperations;
     private final PluginEventBackfillOperations eventBackfillOperations;
+    private final ExtensionInstallationJobOperations installationJobs;
 
     public ExtensionManagementController(PluginManifestValidator manifestValidator,
             PluginConfigurationValidator configurationValidator, EncryptionService encryption,
@@ -63,7 +64,8 @@ public class ExtensionManagementController {
             @Value("${artio.extensions.core-version:0.1.0}") String coreVersion,
             ObjectProvider<ExtensionRuntimePort> dockerRuntime, DistributionPluginProvisioningService provisioning,
             MarketplaceCatalogClient marketplace,
-            PluginEventDeliveryOperations eventDeliveryOperations, PluginEventBackfillOperations eventBackfillOperations) {
+            PluginEventDeliveryOperations eventDeliveryOperations, PluginEventBackfillOperations eventBackfillOperations,
+            ExtensionInstallationJobOperations installationJobs) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
         this.encryption = encryption;
@@ -75,6 +77,7 @@ public class ExtensionManagementController {
         this.provisioning = provisioning;
         this.eventDeliveryOperations = eventDeliveryOperations;
         this.eventBackfillOperations = eventBackfillOperations;
+        this.installationJobs = installationJobs;
     }
 
     @PostMapping("/validate")
@@ -389,6 +392,72 @@ public class ExtensionManagementController {
         }
         audit(pluginId, actor, "INSTANCE_INSTALL", Map.of("instanceId", instanceId.toString(), "releaseId", instance.releaseId()));
         return ResponseEntity.ok(Map.of("instanceId", instanceId, "lifecycleState", "INSTALLED"));
+    }
+
+    @PostMapping("/installations")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> requestInstallation(@RequestBody InstallationRequest request, JwtAuthenticationToken actor) {
+        if (request == null || request.pluginId() == null || request.pluginId().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pluginId is required");
+        }
+        if (request.idempotencyKey() == null || !request.idempotencyKey().matches("[A-Za-z0-9._:-]{8,128}")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "idempotencyKey must contain 8 to 128 safe characters");
+        }
+        UUID actorId = UUID.fromString(actor.getToken().getSubject());
+        PluginManifest manifest;
+        String runtimeIdentity;
+        long releaseId = 0;
+        UUID instanceId = request.instanceId();
+        if (instanceId == null) {
+            PluginRow row = findPlugin(request.pluginId());
+            if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(row.lifecycleState())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Plugin must be configured or stopped before installation");
+            }
+            List<String> errors = new java.util.ArrayList<>(manifestValidator.validate(row.manifest(), coreVersion, registeredPluginIds()));
+            errors.addAll(dependencyErrors(row.manifest(), false));
+            if (!errors.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", errors));
+            manifest = row.manifest();
+            runtimeIdentity = "legacy:" + request.pluginId();
+        } else {
+            InstanceRow instance = findInstance(request.pluginId(), instanceId);
+            if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(instance.lifecycleState())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Instance must be configured or stopped before installation");
+            }
+            manifest = instance.manifest();
+            runtimeIdentity = instance.runtimeIdentity();
+            releaseId = instance.releaseId();
+        }
+        var job = installationJobs.request(request.pluginId(), instanceId, runtimeIdentity, releaseId, manifest, actorId,
+                request.idempotencyKey());
+        audit(request.pluginId(), actor, "INSTALLATION_REQUESTED", Map.of("jobId", job.jobId().toString(),
+                "instanceId", instanceId == null ? "legacy" : instanceId.toString()));
+        return ResponseEntity.accepted().body(job);
+    }
+
+    @GetMapping("/installations")
+    @Transactional(readOnly = true)
+    public List<ExtensionInstallationJobOperations.JobView> installationJobs(@RequestParam(required = false) String pluginId) {
+        return installationJobs.list(pluginId);
+    }
+
+    @GetMapping("/installations/{jobId}")
+    @Transactional(readOnly = true)
+    public ExtensionInstallationJobOperations.JobView installationJob(@PathVariable UUID jobId) {
+        return installationJobs.get(jobId);
+    }
+
+    @PostMapping("/installations/{jobId}/retry")
+    public ExtensionInstallationJobOperations.JobView retryInstallation(@PathVariable UUID jobId, JwtAuthenticationToken actor) {
+        var job = installationJobs.retry(jobId);
+        audit(job.pluginId(), actor, "INSTALLATION_RETRY", Map.of("jobId", jobId.toString()));
+        return job;
+    }
+
+    @PostMapping("/installations/{jobId}/cancel")
+    public ExtensionInstallationJobOperations.JobView cancelInstallation(@PathVariable UUID jobId, JwtAuthenticationToken actor) {
+        var job = installationJobs.cancel(jobId);
+        audit(job.pluginId(), actor, "INSTALLATION_CANCELLED", Map.of("jobId", jobId.toString()));
+        return job;
     }
 
     @PostMapping("/{pluginId}/instances/{instanceId}/enable")
@@ -1581,6 +1650,7 @@ public class ExtensionManagementController {
     public record AuditView(UUID actorUserId, String action, Map<String, Object> details, java.time.Instant occurredAt) { }
     public record InvocationRequest(String extensionPoint, String operation, String idempotencyKey,
                                     Object payload, long deadlineMillis) { }
+    public record InstallationRequest(String pluginId, UUID instanceId, String idempotencyKey) { }
     public record InvocationResponse(int statusCode, Object payload) { }
     public record BindingRequest(String capabilityId, String operationName, Map<String, String> scope, int priority,
             UUID instanceId) { }
