@@ -102,6 +102,7 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
     @if (catalogEditor) {
       <dialog #catalogEditorDialog class="refund-dialog" aria-labelledby="catalog-editor-title" (cancel)="cancelCatalogEditor($event)" (close)="catalogEditorClosed()">
         <form class="refund-dialog-content" (ngSubmit)="saveCatalogEdit()">
+          <button type="button" class="dialog-close-button" (click)="closeCatalogEditor()" [disabled]="catalogEditorBusy" [attr.aria-label]="t('accessClose')" [attr.title]="t('accessClose')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
           <p class="eyebrow">{{t('catalogEditEyebrow')}}</p>
           <h2 id="catalog-editor-title">{{catalogEditor.kind==='category'?t('categoryEditTitle'):catalogEditor.kind==='brand'?t('brandEditTitle'):t('attributeEditTitle')}}</h2>
           @if (catalogEditor.kind==='category') {

@@ -4,4 +4,5 @@ import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/ht
 import { provideRouter } from '@angular/router';
 import { AdminComponent } from './app/admin.component';
 import { authInterceptor } from './app/auth.interceptor';
-bootstrapApplication(AdminComponent,{providers:[provideZoneChangeDetection(),provideHttpClient(withXhr(), withInterceptors([authInterceptor])),provideRouter([{path:'**',component:AdminComponent}])] }).catch(console.error);
+import { loadErrorInterceptor } from './app/load-error.interceptor';
+bootstrapApplication(AdminComponent,{providers:[provideZoneChangeDetection(),provideHttpClient(withXhr(), withInterceptors([authInterceptor, loadErrorInterceptor])),provideRouter([{path:'**',component:AdminComponent}])] }).catch(console.error);

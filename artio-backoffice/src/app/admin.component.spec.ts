@@ -2,14 +2,16 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { EMPTY, type Observable } from 'rxjs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Router, type Event } from '@angular/router';
 import { AdminComponent } from './admin.component';
 
 describe('AdminComponent setup detection', () => {
   let http: HttpTestingController;
+  let router: {url:string;events:Observable<Event>;navigateByUrl:ReturnType<typeof vi.fn>};
 
   beforeEach(async () => {
+    router={url:'/',events:EMPTY as Observable<Event>,navigateByUrl:vi.fn(()=>Promise.resolve(true))};
     await TestBed.configureTestingModule({
       imports: [AdminComponent],
       providers: [
@@ -17,11 +19,7 @@ describe('AdminComponent setup detection', () => {
         provideHttpClientTesting(),
         {
           provide: Router,
-          useValue: {
-            url: '/',
-            events: EMPTY as Observable<Event>,
-            navigateByUrl: () => Promise.resolve(true),
-          },
+          useValue: router,
         },
       ],
     }).compileComponents();
@@ -68,6 +66,28 @@ describe('AdminComponent setup detection', () => {
     http.expectNone('/api/v1/admin/orders?page=0&size=1&sort=createdAt&direction=desc');
   });
 
+  it('redirects the legacy camel-case user URL to its kebab-case route',()=>{
+    router.url='/userAdmin';
+    const fixture=TestBed.createComponent(AdminComponent);
+    fixture.detectChanges();
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/user-admin',{replaceUrl:true});
+    http.expectOne('/api/v1/setup/status').flush({required:true,developerMode:false});
+  });
+
+  it('loads managed users on the user-admin route after session setup',()=>{
+    const fixture=TestBed.createComponent(AdminComponent);
+    fixture.detectChanges();
+    http.expectOne('/api/v1/setup/status').flush({required:false,developerMode:false});
+    const component=fixture.componentInstance;
+    component.token=`header.${btoa(JSON.stringify({role:'SUPERADMIN',sub:'00000000-0000-0000-0000-000000000001'}))}.signature`;
+    router.url='/user-admin';
+    (component as any).syncRoute();
+    http.expectOne('/api/v1/superadmin/users?limit=100&offset=0').flush([{id:'self',email:'admin@example.test',firstName:'Alex',lastName:'Admin',role:'SUPERADMIN',permissions:[],emailVerified:true,active:true}]);
+    fixture.detectChanges();
+    expect(component.users).toHaveLength(1);
+    expect(fixture.nativeElement.textContent).toContain('admin@example.test');
+  });
+
   it('asks Core to verify and queue a Marketplace v1 release without relaying its manifest', () => {
     const fixture = TestBed.createComponent(AdminComponent);
     fixture.detectChanges();
@@ -77,9 +97,13 @@ describe('AdminComponent setup detection', () => {
     fixture.componentInstance.installMarketplaceRelease({ pluginId: 'legacy.plugin', version: '1.0.0' });
     const installation = http.expectOne('/api/v1/admin/extensions/marketplace/plugins/legacy.plugin/releases/1.0.0/installations');
     expect(installation.request.body.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
-    installation.flush({ job: { jobId: 'job-123' } });
+    installation.flush({ job: { jobId: 'job-123', state: 'REQUESTED' } });
     http.expectOne('/api/v1/admin/extensions').flush([]);
     http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
+    http.expectOne('/api/v1/admin/extensions/installations/job-123').flush({ jobId: 'job-123', state: 'INSTALLED' });
+    http.expectOne('/api/v1/admin/extensions').flush([]);
+    http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
+    expect(fixture.componentInstance.extensionHealth).toContain('Plugin installed');
   });
 
   it('queues a Marketplace capability release through the same server-verified v1 API route', () => {
@@ -91,8 +115,12 @@ describe('AdminComponent setup detection', () => {
     fixture.componentInstance.installMarketplaceRelease({ pluginId: 'capability.plugin', version: '1.0.0' });
     const installation = http.expectOne('/api/v1/admin/extensions/marketplace/plugins/capability.plugin/releases/1.0.0/installations');
     expect(installation.request.body.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
-    installation.flush({ job: { jobId: 'job-456' } });
+    installation.flush({ job: { jobId: 'job-456', state: 'REQUESTED' } });
     http.expectOne('/api/v1/admin/extensions').flush([]);
     http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
+    http.expectOne('/api/v1/admin/extensions/installations/job-456').flush({ jobId: 'job-456', state: 'FAILED', errorCode: 'IMAGE_PULL_DENIED' });
+    http.expectOne('/api/v1/admin/extensions').flush([]);
+    http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
+    expect(fixture.componentInstance.extensionHealth).toContain('Installation failed · IMAGE_PULL_DENIED');
   });
 });

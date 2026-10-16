@@ -15,7 +15,7 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
     <dialog #mediaDialog class="workspace-dialog media-dialog" aria-labelledby="product-media-heading" (close)="close.emit()"><section class="workspace-dialog-panel" aria-labelledby="product-media-heading">
       <div class="panel-heading">
         <div><p class="eyebrow">{{m('eyebrow')}}</p><h2 id="product-media-heading">{{productName}} {{m('titleSuffix')}}</h2></div>
-        <button type="button" class="link-button" (click)="close.emit()">{{m('close')}}</button>
+        <button type="button" class="dialog-close-button" (click)="mediaDialog.close()" [attr.aria-label]="m('close')" [attr.title]="m('close')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       @if (storageLoading) { <p class="muted loading-indicator" role="status">{{m('loading')}}</p> }
       @if (!storageLoading && !uploadAvailable) { <div class="notice"><p>{{m('storagePluginRequired')}}</p><button type="button" class="link-button" (click)="installStoragePlugin.emit()">{{m('installStoragePlugin')}}</button></div> }
@@ -50,6 +50,7 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
       @if (deleteTarget) {
         <dialog #deleteDialog class="refund-dialog" aria-labelledby="delete-media-title" (cancel)="cancelDeleteDialog($event)" (close)="deleteDialogClosed()">
           <form class="refund-dialog-content" (ngSubmit)="confirmDelete()">
+            <button type="button" class="dialog-close-button" (click)="closeDeleteDialog()" [disabled]="deleteBusy" [attr.aria-label]="t('accessClose')" [attr.title]="t('accessClose')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
             <p class="eyebrow">{{t('deleteMediaEyebrow')}}</p>
             <h2 id="delete-media-title">{{t('deleteMediaTitle')}}</h2>
             <p class="muted">{{t('deleteMediaDescription')}}</p>

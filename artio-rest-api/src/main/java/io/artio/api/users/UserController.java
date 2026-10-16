@@ -45,10 +45,10 @@ public class UserController {
         if(q.length()>120||limit<1||limit>200||offset<0||offset>1_000_000)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid account search bounds");
         String pattern="%"+q.trim()+"%";
         return jdbc.query("SELECT id,email,first_name,last_name,role,permissions,email_verified,active,created_at,last_login FROM users "
-                        +"WHERE role<>'SUPERADMIN' AND (?='' OR email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?) "
+                        +"WHERE (role<>'SUPERADMIN' OR id=?) AND (?='' OR email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?) "
                         +"ORDER BY role,email,id LIMIT ? OFFSET ?",
                 (rs,n)->view(rs.getObject("id",UUID.class),rs.getString("email"),rs.getString("first_name"),rs.getString("last_name"),rs.getString("role"),rs.getString("permissions"),rs.getBoolean("email_verified"),rs.getBoolean("active"),rs.getTimestamp("created_at").toInstant(),rs.getTimestamp("last_login")==null?null:rs.getTimestamp("last_login").toInstant()),
-                q.trim(),pattern,pattern,pattern,limit,offset);
+                UUID.fromString(auth.getToken().getSubject()),q.trim(),pattern,pattern,pattern,limit,offset);
     }
 
     @GetMapping("/api/v1/admin/customers/{id}")

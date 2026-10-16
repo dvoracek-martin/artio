@@ -11,6 +11,13 @@ const ACCOUNT_MESSAGES: Record<StoreLocale, Record<string, string>> = {
   it: {forgotPassword:'Password dimenticata?',resetIntro:'Inserisci l’indirizzo e-mail del tuo account per ricevere le istruzioni di recupero.',sendReset:'Invia il link',resetPassword:'Scegli una nuova password',newPassword:'Nuova password',savePassword:'Salva password',resetLinkMissing:'Il link di recupero è mancante o non valido.',resetComplete:'Password aggiornata. Reindirizzamento all’accesso…',backToSignIn:'Torna all’accesso',accountSettings:'Impostazioni account',personalDetails:'Dati personali',currentPassword:'Password attuale',saveChanges:'Salva modifiche',changeEmail:'Modifica indirizzo e-mail',newEmail:'Nuovo indirizzo e-mail',requestEmailChange:'Richiedi modifica e-mail',emailConfirmationToken:'Codice di conferma e-mail',confirmEmailChange:'Conferma modifica e-mail',changePassword:'Modifica password',profileSaved:'I tuoi dati sono stati aggiornati.',passwordChanged:'Password aggiornata. Accedi di nuovo.',devResetLink:'Apri il link di recupero locale',accountUnavailable:'Impossibile caricare l’account.',profileSaveUnavailable:'Impossibile aggiornare i tuoi dati.',passwordChangeUnavailable:'Impossibile aggiornare la password.',emailChangeUnavailable:'Impossibile modificare l’indirizzo e-mail.',resetRequestUnavailable:'Impossibile richiedere il recupero della password.',resetCompleteUnavailable:'Impossibile reimpostare la password.'},
 };
 
+const LANGUAGE_MESSAGES: Record<StoreLocale, Record<string, string>> = {
+  en: {preferredLanguage:'Preferred language',languageSaved:'Your preferred language has been saved.',languageUnavailable:'Could not save your preferred language.',language_en:'English',language_de:'German',language_fr:'French',language_it:'Italian'},
+  de: {preferredLanguage:'Bevorzugte Sprache',languageSaved:'Ihre bevorzugte Sprache wurde gespeichert.',languageUnavailable:'Bevorzugte Sprache konnte nicht gespeichert werden.',language_en:'Englisch',language_de:'Deutsch',language_fr:'Französisch',language_it:'Italienisch'},
+  fr: {preferredLanguage:'Langue préférée',languageSaved:'Votre langue préférée a été enregistrée.',languageUnavailable:'Impossible d’enregistrer votre langue préférée.',language_en:'Anglais',language_de:'Allemand',language_fr:'Français',language_it:'Italien'},
+  it: {preferredLanguage:'Lingua preferita',languageSaved:'La lingua preferita è stata salvata.',languageUnavailable:'Impossibile salvare la lingua preferita.',language_en:'Inglese',language_de:'Tedesco',language_fr:'Francese',language_it:'Italiano'},
+};
+
 @Component({
   selector: 'artio-account',
   standalone: true,
@@ -20,7 +27,9 @@ const ACCOUNT_MESSAGES: Record<StoreLocale, Record<string, string>> = {
 export class AccountComponent implements OnChanges {
   @Input() page = 'account';
   @Input() locale: StoreLocale = 'en';
+  @Input() availableLanguages: string[] = ['en', 'de', 'fr', 'it'];
   @Output() signedOut = new EventEmitter<void>();
+  @Output() preferredLocaleChange = new EventEmitter<StoreLocale>();
   private http = inject(HttpClient);
   private locales = inject(LocaleService);
   token = localStorage.getItem('artio-token');
@@ -37,15 +46,25 @@ export class AccountComponent implements OnChanges {
   resetEmail = '';
   resetPassword = '';
   resetToken = '';
+  preferredLocale: StoreLocale = 'en';
+  languageSaving = false;
 
   ngOnChanges(): void {
     if (this.page === 'account' && this.token && !this.account && !this.loading) this.loadAccount();
     if (this.page === 'reset-password') this.resetToken = new URLSearchParams(location.search).get('token') ?? '';
   }
-  t(key: string): string { return ACCOUNT_MESSAGES[this.locale][key] ?? this.locales.translate(key, this.locale); }
+  t(key: string): string { return LANGUAGE_MESSAGES[this.locale][key] ?? ACCOUNT_MESSAGES[this.locale][key] ?? this.locales.translate(key, this.locale); }
   private loadAccount(): void {
     this.loading = true;
-    this.http.get<any>('/api/v1/users/me').subscribe({ next: user => { this.account = user; this.firstName = user.firstName ?? ''; this.lastName = user.lastName ?? ''; this.loading = false; }, error: e => { this.error = this.apiErrorMessage(e, this.t('accountUnavailable')); this.loading = false; } });
+    this.http.get<any>('/api/v1/users/me').subscribe({ next: user => { this.account = user; this.firstName = user.firstName ?? ''; this.lastName = user.lastName ?? ''; this.http.get<{preferredLocale:string|null;defaultLocale:string;availableLanguages:string[]}>('/api/v1/users/me/preferences').subscribe({next:preferences=>{this.availableLanguages=preferences.availableLanguages;this.preferredLocale=this.locales.normalize(preferences.preferredLocale??preferences.defaultLocale);this.loading=false;},error:()=>{this.loading=false;}}); }, error: e => { this.error = this.apiErrorMessage(e, this.t('accountUnavailable')); this.loading = false; } });
+  }
+  savePreferredLanguage(): void {
+    if (this.languageSaving || !this.availableLanguages.includes(this.preferredLocale)) return;
+    this.languageSaving = true; this.error = ''; this.message = '';
+    this.http.put<{preferredLocale:string}>('/api/v1/users/me/preferences', {locale:this.preferredLocale}).subscribe({
+      next: saved => { this.preferredLocale=this.locales.normalize(saved.preferredLocale); this.locales.set(this.preferredLocale); this.preferredLocaleChange.emit(this.preferredLocale); this.message=this.t('languageSaved'); this.languageSaving=false; },
+      error: e => { this.error=this.apiErrorMessage(e,this.t('languageUnavailable')); this.languageSaving=false; }
+    });
   }
   saveProfile(): void { this.error = ''; this.message = ''; this.http.put<any>('/api/v1/users/me/profile', { firstName: this.firstName, lastName: this.lastName, currentPassword: this.currentPassword }).subscribe({ next: user => { this.account = user; this.currentPassword = ''; this.message = this.t('profileSaved'); }, error: e => this.error = this.apiErrorMessage(e, this.t('profileSaveUnavailable')) }); }
   changePassword(): void { this.error = ''; this.message = ''; this.http.put('/api/v1/users/me/password', { currentPassword: this.currentPassword, newPassword: this.newPassword }).subscribe({ next: () => { localStorage.removeItem('artio-token'); this.token = null; this.message = this.t('passwordChanged'); setTimeout(() => location.assign('/login'), 1200); }, error: e => this.error = this.apiErrorMessage(e, this.t('passwordChangeUnavailable')) }); }

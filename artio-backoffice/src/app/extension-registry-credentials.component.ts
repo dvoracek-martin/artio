@@ -1,16 +1,16 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, OnInit } from '@angular/core';
+import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { currentBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 
 type RegistryCredential = { registryHost: string; username: string; createdAt: string; updatedAt: string };
 
 const COPY: Record<BackofficeLocale, Record<string, string>> = {
-  en: { title: 'Private registry credentials', help: 'Credentials are encrypted by Core and can be used only for registry hosts explicitly trusted by Core configuration. Recent MFA is required.', host: 'Trusted registry host and optional port', username: 'Username', password: 'Password', save: 'Save credentials', remove: 'Remove', empty: 'No private registry credentials are configured.', loading: 'Loading registry credentials…', saved: 'Registry credentials saved.', removed: 'Registry credentials removed.', mfa: 'Sign in again with your authenticator code to manage private registry credentials.', error: 'Registry credentials could not be loaded.' },
-  de: { title: 'Zugangsdaten für private Registries', help: 'Core verschlüsselt die Zugangsdaten und verwendet sie nur für explizit freigegebene Registry-Hosts. Eine aktuelle MFA-Prüfung ist erforderlich.', host: 'Freigegebener Registry-Host, optional mit Port', username: 'Benutzername', password: 'Passwort', save: 'Zugangsdaten speichern', remove: 'Entfernen', empty: 'Keine Zugangsdaten für private Registries konfiguriert.', loading: 'Zugangsdaten werden geladen…', saved: 'Zugangsdaten gespeichert.', removed: 'Zugangsdaten entfernt.', mfa: 'Melden Sie sich mit Ihrem Authenticator-Code erneut an, um Zugangsdaten zu verwalten.', error: 'Zugangsdaten konnten nicht geladen werden.' },
-  it: { title: 'Credenziali dei registry privati', help: 'Core cifra le credenziali e le usa solo per gli host autorizzati esplicitamente nella configurazione. È richiesta una MFA recente.', host: 'Host registry autorizzato e porta opzionale', username: 'Nome utente', password: 'Password', save: 'Salva credenziali', remove: 'Rimuovi', empty: 'Nessuna credenziale per registry privati configurata.', loading: 'Caricamento credenziali…', saved: 'Credenziali salvate.', removed: 'Credenziali rimosse.', mfa: 'Accedi di nuovo con il codice dell’autenticatore per gestire le credenziali.', error: 'Impossibile caricare le credenziali.' },
-  fr: { title: 'Identifiants des registres privés', help: 'Core chiffre les identifiants et les utilise uniquement pour les hôtes autorisés dans sa configuration. Une MFA récente est requise.', host: 'Hôte autorisé et port facultatif', username: 'Nom d’utilisateur', password: 'Mot de passe', save: 'Enregistrer les identifiants', remove: 'Supprimer', empty: 'Aucun identifiant de registre privé configuré.', loading: 'Chargement des identifiants…', saved: 'Identifiants enregistrés.', removed: 'Identifiants supprimés.', mfa: 'Reconnectez-vous avec votre code d’authentification pour gérer ces identifiants.', error: 'Impossible de charger les identifiants.' },
+  en: { title: 'Private registry credentials', help: 'Credentials are encrypted by Core and can be used only for registry hosts explicitly trusted by Core configuration. Recent MFA is required.', host: 'Trusted registry host and optional port', username: 'Username', password: 'Password', save: 'Save credentials', remove: 'Remove', removeTitle:'Remove registry credentials?', removeHelp:'Credentials for {host} will be permanently removed.', confirmRemove:'Remove credentials', cancel:'Cancel', close:'Close', empty: 'No private registry credentials are configured.', loading: 'Loading registry credentials…', saved: 'Registry credentials saved.', removed: 'Registry credentials removed.', mfa: 'Sign in again with your authenticator code to manage private registry credentials.', error: 'Registry credentials could not be loaded.' },
+  de: { title: 'Zugangsdaten für private Registries', help: 'Core verschlüsselt die Zugangsdaten und verwendet sie nur für explizit freigegebene Registry-Hosts. Eine aktuelle MFA-Prüfung ist erforderlich.', host: 'Freigegebener Registry-Host, optional mit Port', username: 'Benutzername', password: 'Passwort', save: 'Zugangsdaten speichern', remove: 'Entfernen', removeTitle:'Registry-Zugangsdaten entfernen?', removeHelp:'Die Zugangsdaten für {host} werden dauerhaft entfernt.', confirmRemove:'Zugangsdaten entfernen', cancel:'Abbrechen', close:'Schließen', empty: 'Keine Zugangsdaten für private Registries konfiguriert.', loading: 'Zugangsdaten werden geladen…', saved: 'Zugangsdaten gespeichert.', removed: 'Zugangsdaten entfernt.', mfa: 'Melden Sie sich mit Ihrem Authenticator-Code erneut an, um Zugangsdaten zu verwalten.', error: 'Zugangsdaten konnten nicht geladen werden.' },
+  it: { title: 'Credenziali dei registry privati', help: 'Core cifra le credenziali e le usa solo per gli host autorizzati esplicitamente nella configurazione. È richiesta una MFA recente.', host: 'Host registry autorizzato e porta opzionale', username: 'Nome utente', password: 'Password', save: 'Salva credenziali', remove: 'Rimuovi', removeTitle:'Rimuovere le credenziali del registry?', removeHelp:'Le credenziali per {host} verranno rimosse definitivamente.', confirmRemove:'Rimuovi credenziali', cancel:'Annulla', close:'Chiudi', empty: 'Nessuna credenziale per registry privati configurata.', loading: 'Caricamento credenziali…', saved: 'Credenziali salvate.', removed: 'Credenziali rimosse.', mfa: 'Accedi di nuovo con il codice dell’autenticatore per gestire le credenziali.', error: 'Impossibile caricare le credenziali.' },
+  fr: { title: 'Identifiants des registres privés', help: 'Core chiffre les identifiants et les utilise uniquement pour les hôtes autorisés dans sa configuration. Une MFA récente est requise.', host: 'Hôte autorisé et port facultatif', username: 'Nom d’utilisateur', password: 'Mot de passe', save: 'Enregistrer les identifiants', remove: 'Supprimer', removeTitle:'Supprimer ces identifiants ?', removeHelp:'Les identifiants de {host} seront définitivement supprimés.', confirmRemove:'Supprimer les identifiants', cancel:'Annuler', close:'Fermer', empty: 'Aucun identifiant de registre privé configuré.', loading: 'Chargement des identifiants…', saved: 'Identifiants enregistrés.', removed: 'Identifiants supprimés.', mfa: 'Reconnectez-vous avec votre code d’authentification pour gérer ces identifiants.', error: 'Impossible de charger les identifiants.' },
 };
 
 @Component({
@@ -39,9 +39,11 @@ const COPY: Record<BackofficeLocale, Record<string, string>> = {
         </tbody></table>
       }
     </section>
+    @if (removalHost) { <dialog #removeDialog class="refund-dialog" aria-labelledby="registry-remove-title" (cancel)="cancelRemove($event)" (close)="removalDialogClosed()"><form class="refund-dialog-content" (ngSubmit)="confirmRemove()"><button type="button" class="dialog-close-button" (click)="removeDialogRef?.nativeElement.close()" [disabled]="busy" [attr.aria-label]="t('close')" [attr.title]="t('close')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button><p class="eyebrow">{{t('title')}}</p><h2 id="registry-remove-title">{{t('removeTitle')}}</h2><p class="muted">{{t('removeHelp').replace('{host}',removalHost)}}</p><div class="refund-dialog-actions"><button type="button" class="secondary" [disabled]="busy" (click)="removeDialogRef?.nativeElement.close()">{{t('cancel')}}</button><button type="submit" class="danger-button" [disabled]="busy">{{t('confirmRemove')}}</button></div></form></dialog> }
   `,
 })
 export class ExtensionRegistryCredentialsComponent implements OnInit {
+  @ViewChild('removeDialog') removeDialogRef?:ElementRef<HTMLDialogElement>;
   registries: RegistryCredential[] = [];
   registryHost = '';
   username = '';
@@ -50,6 +52,7 @@ export class ExtensionRegistryCredentialsComponent implements OnInit {
   busy = false;
   message = '';
   error = '';
+  removalHost='';
 
   constructor(private readonly http: HttpClient) {}
 
@@ -77,6 +80,11 @@ export class ExtensionRegistryCredentialsComponent implements OnInit {
   }
 
   remove(host: string): void {
+    this.removalHost=host;this.message='';this.error='';queueMicrotask(()=>this.removeDialogRef?.nativeElement.showModal());
+  }
+
+  confirmRemove(): void {
+    const host=this.removalHost;if(!host||this.busy)return;
     this.busy = true;
     this.message = '';
     this.error = '';
@@ -84,11 +92,15 @@ export class ExtensionRegistryCredentialsComponent implements OnInit {
       next: () => {
         this.message = this.t('removed');
         this.busy = false;
+        this.removeDialogRef?.nativeElement.close();
         this.load();
       },
       error: response => this.fail(response),
     });
   }
+
+  cancelRemove(event:Event):void{event.preventDefault();if(!this.busy)this.removeDialogRef?.nativeElement.close()}
+  removalDialogClosed():void{if(!this.busy)this.removalHost=''}
 
   private load(): void {
     this.loading = true;

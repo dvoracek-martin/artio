@@ -18,6 +18,10 @@ describe('ProductWizardComponent', () => {
   afterEach(() => http.verify());
 
   function loadOptions(fixture: ComponentFixture<ProductWizardComponent>) {
+    fixture.componentInstance.draft.name = 'Studio lamp';
+    fixture.componentInstance.draft.sku = 'STUDIO-LAMP-001';
+    fixture.componentInstance.draft.variantSku = 'STUDIO-LAMP-001-STD';
+    fixture.componentInstance.next();
     fixture.detectChanges();
     http.expectOne('/api/v1/categories').flush([
       { id: 'category-1', name: 'Lighting', parentId: null, active: true }
@@ -33,6 +37,11 @@ describe('ProductWizardComponent', () => {
 
   it('replaces the loading state with catalog-backed product fields', () => {
     const fixture = TestBed.createComponent(ProductWizardComponent);
+    fixture.detectChanges();
+    fixture.componentInstance.draft.name = 'Studio lamp';
+    fixture.componentInstance.draft.sku = 'STUDIO-LAMP-001';
+    fixture.componentInstance.draft.variantSku = 'STUDIO-LAMP-001-STD';
+    fixture.componentInstance.next();
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('Loading your catalog…');
@@ -63,6 +72,11 @@ describe('ProductWizardComponent', () => {
 
   it('shows a recoverable error when an option request fails', () => {
     const fixture = TestBed.createComponent(ProductWizardComponent);
+    fixture.detectChanges();
+    fixture.componentInstance.draft.name = 'Studio lamp';
+    fixture.componentInstance.draft.sku = 'STUDIO-LAMP-001';
+    fixture.componentInstance.draft.variantSku = 'STUDIO-LAMP-001-STD';
+    fixture.componentInstance.next();
     fixture.detectChanges();
 
     http.expectOne('/api/v1/categories').flush([], { status: 200, statusText: 'OK' });

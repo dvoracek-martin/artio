@@ -12,7 +12,7 @@ type Variant = { id: string; productId: string; name: string; sku: string; activ
     selector: 'artio-sellable-select', imports: [FormsModule, SearchSelectComponent],
     providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SellableSelectComponent), multi: true }],
     changeDetection: ChangeDetectionStrategy.Eager,
-    template: `<artio-search-select [ngModel]="value" (ngModelChange)="select($event)" [ngModelOptions]="{standalone:true}" [label]="label" [options]="options" [multiple]="multiple" [disabled]="disabled" [loading]="loading" [placeholder]="text('sellableSearchPlaceholder')" (search)="query.next($event)"></artio-search-select>@if (showHelp && !error) {<small class="picker-help">{{text('sellableSearchHelp')}}</small>}@if (error) {<small class="picker-error" role="alert">{{error}} <button type="button" class="link-button" (click)="reload()">{{text('retry')}}</button></small>}`
+    template: `<artio-search-select [ngModel]="value" (ngModelChange)="select($event)" [ngModelOptions]="{standalone:true}" [label]="label" [options]="options" [multiple]="multiple" [disabled]="disabled" [loading]="loading" [placeholder]="text('sellableSearchPlaceholder')" (search)="query.next($event)"></artio-search-select>@if (showHelp) {<small class="picker-help">{{text('sellableSearchHelp')}}</small>}@if (loadError) {<small class="picker-error" role="alert">{{text('sellableLoadFailure')}} <button type="button" class="link-button" (click)="reload()">{{text('retry')}}</button></small>}`
 })
 export class SellableSelectComponent implements ControlValueAccessor {
   @Input() label = 'Product variant';
@@ -22,8 +22,8 @@ export class SellableSelectComponent implements ControlValueAccessor {
   private destroyRef = inject(DestroyRef);
   query = new Subject<string>();
   loading = false;
+  loadError = false;
   disabled = false;
-  error = '';
   value: string | string[] = '';
   private found: SelectOption[] = [];
   private retained = new Map<string, SelectOption>();
@@ -32,9 +32,9 @@ export class SellableSelectComponent implements ControlValueAccessor {
   get options(): SelectOption[] { return [...new Map([...this.retained.values(), ...this.found].map(option => [option.value,option])).values()]; }
   text(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
   constructor() {
-    this.query.pipe(startWith(''),debounceTime(200),tap(()=>{this.loading=true;this.error='';}),switchMap(q=>this.http.get<{items:{id:string;name:string;sku:string}[]}>('/api/v1/admin/catalog/products',{params:{q,page:0,size:10,state:'ALL',sort:'name',direction:'asc'}}).pipe(
+    this.query.pipe(startWith(''),debounceTime(200),tap(()=>{this.loading=true;this.loadError=false;}),switchMap(q=>this.http.get<{items:{id:string;name:string;sku:string}[]}>('/api/v1/admin/catalog/products',{params:{q,page:0,size:10,state:'ALL',sort:'name',direction:'asc'}}).pipe(
       switchMap(page=>page.items.length?forkJoin(page.items.map(product=>this.http.get<Variant[]>(`/api/v1/products/${product.id}/variants`).pipe(map(variants=>variants.filter(x=>x.active).map(variant=>({value:variant.id,label:product.name+' · '+variant.name,detail:product.sku+' / '+variant.sku})))))):of([])),
-      map(groups=>groups.flat()),catchError(()=>{this.error=this.text('sellableLoadFailure');return of([]);})
+      map(groups=>groups.flat()),catchError(()=>{this.loadError=true;return of([])})
     )),takeUntilDestroyed(this.destroyRef)).subscribe(options=>{this.found=options;this.loading=false;});
   }
   reload():void{this.query.next(' ');}

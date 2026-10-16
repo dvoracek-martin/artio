@@ -49,6 +49,7 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
     @if (statusTarget) {
       <dialog #statusDialog class="refund-dialog" aria-labelledby="gift-card-status-title" (cancel)="cancelStatusDialog($event)" (close)="statusDialogClosed()">
         <form class="refund-dialog-content" (ngSubmit)="submitStatusChange()">
+          <button type="button" class="dialog-close-button" (click)="closeStatusDialog()" [disabled]="statusBusy" [attr.aria-label]="t('accessClose')" [attr.title]="t('accessClose')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
           <p class="eyebrow">{{t('giftCardStatusEyebrow')}}</p>
           <h2 id="gift-card-status-title">{{statusTarget.active?t('disableGiftCardTitle'):t('enableGiftCardTitle')}}</h2>
           <p class="muted">{{statusTarget.active?t('disableGiftCardDescription'):t('enableGiftCardDescription')}}</p>

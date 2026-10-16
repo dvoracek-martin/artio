@@ -86,6 +86,7 @@ type LowStock = { warehouseId: string; sellableId: string; available: number; th
     @if (adjustmentConfirmation) {
       <dialog #adjustmentDialog class="refund-dialog" aria-labelledby="inventory-adjust-title" (cancel)="cancelAdjustmentDialog($event)" (close)="adjustmentDialogClosed()">
         <form class="refund-dialog-content" (ngSubmit)="confirmAdjustment()">
+          <button type="button" class="dialog-close-button" (click)="closeAdjustmentDialog()" [disabled]="adjustmentDialogBusy" [attr.aria-label]="t('accessClose')" [attr.title]="t('accessClose')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
           <p class="eyebrow">{{t('inventoryAdjustEyebrow')}}</p>
           <h2 id="inventory-adjust-title">{{t('inventoryAdjustTitle')}}</h2>
           <p class="muted">{{t('inventoryAdjustDescription')}}</p>

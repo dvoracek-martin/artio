@@ -4,7 +4,7 @@ import { NEVER, of } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app.component';
 
-function createComponent(orderStatus: string | undefined, authenticated = true, route = '/checkout?success=true&orderId=order-1', checkoutRetry = false, products: Array<{id:string;name:string;description:string;sku:string;active:boolean}> = [], publicProduct?: {id:string;name:string;description:string;sku:string;active:boolean;seoSlug:string;seoTitle:string;seoDescription:string}) {
+function createComponent(orderStatus: string | undefined, authenticated = true, route = '/checkout?success=true&orderId=order-1', checkoutRetry = false, products: Array<{id:string;name:string;description:string;sku:string;active:boolean}> = [], publicProduct?: {id:string;name:string;description:string;sku:string;active:boolean;seoSlug:string;seoTitle:string;seoDescription:string}, preferredLocale: string|null = null) {
   localStorage.removeItem('artio-token');
   localStorage.setItem('artio-locale', 'en');
   if (authenticated) localStorage.setItem('artio-token', 'test-token');
@@ -13,7 +13,9 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
   const http = {
     get: vi.fn((url: string) => of(
       url === '/api/v1/public/config'
-        ? { googleOidcEnabled: false, countryCode: 'CH', currencyCode: 'CHF', locale: 'en' }
+        ? { googleOidcEnabled: false, countryCode: 'CH', currencyCode: 'CHF', locale: 'en', availableLanguages: ['en','de'] }
+        : url === '/api/v1/users/me/preferences'
+          ? { preferredLocale, defaultLocale: 'en', availableLanguages: ['en','de'] }
         : url.startsWith('/api/v1/public/products/')
           ? publicProduct
         : url === '/api/v1/products'
@@ -25,7 +27,7 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
         : url.endsWith('/media')
           ? [{ id: 'media-1', contentUrl: 'https://cdn.example.test/product.jpg', altText: 'Product', position: 0 }]
         : url === '/api/v1/cart'
-          ? { items: [] }
+          ? { items: route === '/checkout' ? [{ itemId: 'cart-item-1', variantId: 'variant-1', quantity: 1, unitPrice: 25.5, currency: 'CHF' }] : [] }
           : url === '/api/v1/cart/orders'
             ? orders
             : []
@@ -58,6 +60,13 @@ describe('Storefront payment return', () => {
     document.querySelector('script[data-artio-seo="website"]')?.remove();
     document.querySelector('script[data-artio-seo="products"]')?.remove();
     document.querySelector('meta[name="robots"]')?.remove();
+  });
+
+  it('uses a signed-in customer language preference instead of the shop default', () => {
+    const { fixture, http } = createComponent(undefined, true, '/shop', false, [], undefined, 'de');
+    expect(fixture.componentInstance.locale).toBe('de');
+    expect(localStorage.getItem('artio-locale')).toBe('de');
+    expect(http.get).toHaveBeenCalledWith('/api/v1/users/me/preferences');
   });
 
   it('shows confirmation only after Core reports the returned order as paid', () => {
@@ -138,7 +147,7 @@ describe('Storefront payment return', () => {
 
     expect(fixture.nativeElement.textContent).toContain('Keramiktasse');
     expect(fixture.nativeElement.textContent).toContain('Handgefertigte Keramiktasse');
-    expect(fixture.nativeElement.querySelector('.product-option select')?.value).toBe('variant-1');
+    expect(fixture.nativeElement.querySelector('.variant-select select')?.value).toBe('variant-1');
     expect(fixture.nativeElement.textContent).toContain('25.5 CHF');
     expect(http.get).toHaveBeenCalledWith('/api/v1/public/products/tasse?locale=de');
     expect(http.post).toHaveBeenCalledWith('/api/v1/pricing/quote', { sellableId: 'variant-1', market: 'CH', channel: 'WEB', jurisdiction: 'CH', quantity: 1 });

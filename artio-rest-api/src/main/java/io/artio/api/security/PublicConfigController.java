@@ -16,9 +16,11 @@ public class PublicConfigController {
     @GetMapping("/api/v1/public/config") public PublicConfig get(){
         var settings=jdbc.query("SELECT country_code,currency_code,locale FROM artio_installation_settings WHERE singleton_id=true",
                 (rs,row)->new PublicStoreSettings(rs.getString(1).trim(),rs.getString(2).trim(),rs.getString(3)));
+        var languages=jdbc.query("SELECT jsonb_array_elements_text(available_languages) FROM artio_installation_settings WHERE singleton_id=true",(rs,row)->rs.getString(1));
         PublicStoreSettings store=settings.stream().findFirst().orElse(new PublicStoreSettings("CH","CHF","de-CH"));
-        return new PublicConfig(oauth2Enabled,store.countryCode(),store.currencyCode(),store.locale());
+        if(languages.isEmpty())languages=List.of("de","fr","it","en");
+        return new PublicConfig(oauth2Enabled,store.countryCode(),store.currencyCode(),store.locale(),languages);
     }
-    public record PublicConfig(boolean googleOidcEnabled,String countryCode,String currencyCode,String locale){}
+    public record PublicConfig(boolean googleOidcEnabled,String countryCode,String currencyCode,String locale,List<String> availableLanguages){}
     private record PublicStoreSettings(String countryCode,String currencyCode,String locale){}
 }

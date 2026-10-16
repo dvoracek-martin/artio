@@ -9,6 +9,7 @@ describe('ProductMediaAdminComponent', () => {
   let http: HttpTestingController;
 
   beforeEach(async () => {
+    TestBed.resetTestingModule();
     await TestBed.configureTestingModule({
       imports: [ProductMediaAdminComponent],
       providers: [provideHttpClient(), provideHttpClientTesting()]
@@ -19,6 +20,7 @@ describe('ProductMediaAdminComponent', () => {
   afterEach(() => {
     http.verify();
     localStorage.removeItem('artio-backoffice-language');
+    TestBed.resetTestingModule();
   });
 
   it.each([
@@ -31,6 +33,8 @@ describe('ProductMediaAdminComponent', () => {
     const fixture = TestBed.createComponent(ProductMediaAdminComponent);
     fixture.componentInstance.productName = 'Coffee';
     fixture.componentRef.setInput('productId', 'product-1');
+    fixture.detectChanges();
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ uploadAvailable: true });
     fixture.detectChanges();
 
     let page = fixture.nativeElement.textContent as string;
@@ -64,6 +68,8 @@ describe('ProductMediaAdminComponent', () => {
     const fixture = TestBed.createComponent(ProductMediaAdminComponent);
     fixture.componentRef.setInput('productId', 'product-1');
     fixture.detectChanges();
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ uploadAvailable: true });
+    fixture.detectChanges();
     http.expectOne('/api/v1/products/product-1/media').flush({}, { status: 503, statusText: 'Service unavailable' });
     fixture.detectChanges();
 
@@ -80,6 +86,7 @@ describe('ProductMediaAdminComponent', () => {
     setBackofficeLocale(locale as BackofficeLocale);
     const fixture = TestBed.createComponent(ProductMediaAdminComponent);
     fixture.componentInstance.productId = 'product-1';
+    fixture.componentInstance.uploadAvailable = true;
     fixture.componentInstance.file = new File(['invalid image'], 'notes.txt', { type: 'text/plain' });
     fixture.componentInstance.upload({ value: '' } as HTMLInputElement);
     expect(fixture.componentInstance.error).toBe(message);
@@ -97,6 +104,8 @@ describe('ProductMediaAdminComponent', () => {
       const fixture = TestBed.createComponent(ProductMediaAdminComponent);
       fixture.componentRef.setInput('productId', 'product-1');
       fixture.detectChanges();
+      http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ uploadAvailable: true });
+      fixture.detectChanges();
       http.expectOne('/api/v1/products/product-1/media').flush([]);
       fixture.componentInstance.items = [{ id: 'media-1', altText: 'Front view', position: 0, contentUrl: '/media/1', width: 400, height: 300 }];
       fixture.detectChanges();
@@ -105,7 +114,7 @@ describe('ProductMediaAdminComponent', () => {
       await new Promise(resolve => setTimeout(resolve, 0));
       fixture.detectChanges();
 
-      const dialog = fixture.nativeElement.querySelector('dialog') as HTMLDialogElement;
+      const dialog = fixture.nativeElement.querySelector('dialog[aria-labelledby="delete-media-title"]') as HTMLDialogElement;
       expect(dialog.open).toBe(true);
       expect(dialog.getAttribute('aria-labelledby')).toBe('delete-media-title');
       expect(dialog.querySelector('#delete-media-title')?.textContent?.trim()).toBe('Delete product image');
