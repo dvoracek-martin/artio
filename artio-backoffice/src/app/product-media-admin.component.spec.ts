@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 import { ProductMediaAdminComponent } from './product-media-admin.component';
 
@@ -83,5 +83,46 @@ describe('ProductMediaAdminComponent', () => {
     fixture.componentInstance.file = new File(['invalid image'], 'notes.txt', { type: 'text/plain' });
     fixture.componentInstance.upload({ value: '' } as HTMLInputElement);
     expect(fixture.componentInstance.error).toBe(message);
+  });
+
+  it('confirms product-image removal in a labelled modal and preserves retry after API failure', async () => {
+    const previousShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: vi.fn(function (this: HTMLDialogElement) {
+        Object.defineProperty(this, 'open', { configurable: true, value: true });
+      })
+    });
+    try {
+      const fixture = TestBed.createComponent(ProductMediaAdminComponent);
+      fixture.componentRef.setInput('productId', 'product-1');
+      fixture.detectChanges();
+      http.expectOne('/api/v1/products/product-1/media').flush([]);
+      fixture.componentInstance.items = [{ id: 'media-1', altText: 'Front view', position: 0, contentUrl: '/media/1', width: 400, height: 300 }];
+      fixture.detectChanges();
+      fixture.componentInstance.remove(fixture.componentInstance.items[0]);
+      fixture.detectChanges();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      fixture.detectChanges();
+
+      const dialog = fixture.nativeElement.querySelector('dialog') as HTMLDialogElement;
+      expect(dialog.open).toBe(true);
+      expect(dialog.getAttribute('aria-labelledby')).toBe('delete-media-title');
+      expect(dialog.querySelector('#delete-media-title')?.textContent?.trim()).toBe('Delete product image');
+      expect(dialog.querySelector('.refund-payment-summary')?.textContent?.trim()).toBe('Front view');
+      expect(dialog.textContent).toContain('This image will be removed from the product and cannot be restored.');
+
+      fixture.componentInstance.confirmDelete();
+      fixture.detectChanges();
+      expect(dialog.querySelector('[role="status"]')?.textContent?.trim()).toBe('Deleting image…');
+      const deletion = http.expectOne('/api/v1/products/product-1/media/media-1');
+      deletion.flush({ detail: 'Image is still referenced by an active product.' }, { status: 409, statusText: 'Conflict' });
+      fixture.detectChanges();
+      expect(dialog.querySelector('[role="alert"]')?.textContent?.trim()).toBe('Image is still referenced by an active product.');
+      expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(false);
+    } finally {
+      if (previousShowModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', previousShowModal);
+      else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
+    }
   });
 });
