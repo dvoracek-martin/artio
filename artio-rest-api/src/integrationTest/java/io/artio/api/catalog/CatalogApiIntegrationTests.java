@@ -591,25 +591,41 @@ class CatalogApiIntegrationTests {
                 HttpMethod.GET, null, Map.class, marketplacePluginId, marketplaceVersion);
         assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(fetched.getBody()).isNotNull();
-        var manifest = mapper.convertValue(fetched.getBody(), io.artio.extensions.PluginManifest.class);
-        assertThat(manifest.id()).isEqualTo(marketplacePluginId);
-        assertThat(manifest.version()).isEqualTo(marketplaceVersion);
-        assertThat(manifest.image()).contains("@sha256:");
+        var manifestJson = mapper.valueToTree(fetched.getBody());
+        String pluginId;
+        if (manifestJson.has("packageManifest")) {
+            var manifest = mapper.treeToValue(manifestJson, io.artio.extensions.PluginManifestV2.class);
+            var packageManifest = manifest.packageManifest();
+            pluginId = packageManifest.id();
+            assertThat(pluginId).isEqualTo(marketplacePluginId);
+            assertThat(packageManifest.version()).isEqualTo(marketplaceVersion);
+            assertThat(packageManifest.image()).contains("@sha256:");
 
-        var validation = adminExchange("/api/v1/admin/extensions/validate", HttpMethod.POST, manifest,
-                io.artio.api.extensions.ExtensionManagementController.ManifestValidationResponse.class);
-        assertThat(validation.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(validation.getBody()).isNotNull();
-        assertThat(validation.getBody().valid()).as("Imported Marketplace manifest validation errors: %s", validation.getBody().errors())
-                .isTrue();
+            var registered = adminExchange("/api/v1/admin/extensions/register-v2", HttpMethod.POST, manifest, Map.class);
+            assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(registered.getBody()).containsEntry("compatibilityMode", "CAPABILITY_V2");
+        } else {
+            var manifest = mapper.treeToValue(manifestJson, io.artio.extensions.PluginManifest.class);
+            pluginId = manifest.id();
+            assertThat(pluginId).isEqualTo(marketplacePluginId);
+            assertThat(manifest.version()).isEqualTo(marketplaceVersion);
+            assertThat(manifest.image()).contains("@sha256:");
 
-        var registered = adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, manifest,
-                io.artio.api.extensions.ExtensionManagementController.PluginView.class);
-        assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(registered.getBody()).isNotNull();
-        assertThat(registered.getBody().manifest().image()).isEqualTo(manifest.image());
+            var validation = adminExchange("/api/v1/admin/extensions/validate", HttpMethod.POST, manifest,
+                    io.artio.api.extensions.ExtensionManagementController.ManifestValidationResponse.class);
+            assertThat(validation.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(validation.getBody()).isNotNull();
+            assertThat(validation.getBody().valid()).as("Imported Marketplace manifest validation errors: %s", validation.getBody().errors())
+                    .isTrue();
 
-        var removed = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, manifest.id());
+            var registered = adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, manifest,
+                    io.artio.api.extensions.ExtensionManagementController.PluginView.class);
+            assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(registered.getBody()).isNotNull();
+            assertThat(registered.getBody().manifest().image()).isEqualTo(manifest.image());
+        }
+
+        var removed = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, pluginId);
         assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(removed.getBody()).containsEntry("lifecycleState", "UNINSTALLED");
     }
