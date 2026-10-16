@@ -13,7 +13,7 @@
     "healthPath": "/health",
     "diagnosticsPath": "/diagnostics",
     "persistentPaths": [
-      "/data"
+      "/data/minio"
     ],
     "configuration": {
       "mode": {
@@ -208,7 +208,7 @@
         },
         "dependsOn": [],
         "persistentPaths": [
-          "/data"
+          "/data/minio"
         ],
         "internalPorts": [],
         "memoryLimitMb": 512

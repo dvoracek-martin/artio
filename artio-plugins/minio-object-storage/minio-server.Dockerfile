@@ -19,12 +19,12 @@ FROM alpine:3.23@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9
 COPY --from=build /out/minio /usr/bin/minio
 COPY --from=build /out/usr/share/licenses/minio /usr/share/licenses/minio
 COPY artio-plugins/minio-object-storage/minio-server-entrypoint.sh /usr/local/bin/minio-entrypoint
-RUN mkdir -p /data && chown 10001:10001 /data && chmod 0700 /data
+RUN mkdir -p /data/minio && chown 10001:10001 /data/minio && chmod 0700 /data/minio
 ENV HOME=/data
 ENV MINIO_ROOT_USER_FILE=/run/secrets/minio-root-user
 ENV MINIO_ROOT_PASSWORD_FILE=/run/secrets/minio-root-password
 USER 10001:10001
 EXPOSE 9000
-VOLUME ["/data"]
+VOLUME ["/data/minio"]
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/minio-entrypoint"]
-CMD ["server", "/data", "--address", ":9000"]
+CMD ["server", "/data/minio", "--address", ":9000"]

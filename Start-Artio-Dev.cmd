@@ -33,10 +33,23 @@ if not defined ARTIO_MARKETPLACE_BASE_URL (
     pause
     exit /b 1
 )
+for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\release-trusted-key.txt'; if (-not (Test-Path -LiteralPath $path)) { exit 1 }; $key = (Get-Content -Raw -LiteralPath $path).Trim(); if ($key -notmatch '^[A-Za-z0-9._-]+=[A-Za-z0-9_-]+$') { exit 1 }; Write-Output $key"`) do set "ARTIO_MARKETPLACE_TRUSTED_KEYS=%%A"
+if not defined ARTIO_MARKETPLACE_TRUSTED_KEYS (
+    echo Could not resolve the local Marketplace release verification key.
+    echo Review %MARKETPLACE_ROOT%\.local-marketplace\release-trusted-key.txt
+    pause
+    exit /b 1
+)
 for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\advisory-trusted-key.txt'; if (-not (Test-Path -LiteralPath $path)) { exit 1 }; $key = (Get-Content -Raw -LiteralPath $path).Trim(); if ($key -notmatch '^[A-Za-z0-9._-]+=[A-Za-z0-9_-]+$') { exit 1 }; Write-Output $key"`) do set "ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS=%%A"
 if not defined ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS (
     echo Could not resolve the local Marketplace advisory verification key.
     echo Review %MARKETPLACE_ROOT%\.local-marketplace\advisory-trusted-key.txt
+    pause
+    exit /b 1
+)
+for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\connection.txt'; $line = Get-Content -LiteralPath $path | Where-Object { $_ -like 'Public OCI registry:*' } | Select-Object -First 1; if (-not $line) { exit 1 }; $registry = ($line -replace '^Public OCI registry:\s*', '').Trim(); if ($registry -notmatch '^localhost:[0-9]{4,5}$') { exit 1 }; Write-Output $registry"`) do set "ARTIO_EXTENSION_TRUSTED_REGISTRIES=%%A"
+if not defined ARTIO_EXTENSION_TRUSTED_REGISTRIES (
+    echo Could not resolve the local Marketplace OCI registry trust host.
     pause
     exit /b 1
 )
