@@ -5,6 +5,8 @@
 
 ## Aktuální checkpoint Marketplace (2026-10-16)
 
+> **Opakovaný běh (2026-10-17):** `:artio-rest-api:test :artio-rest-api:integrationTest --no-daemon --max-workers=1` znovu skončil chybou `NoSuchFileException` pro `artio-rest-api/build/test-results/test/binary/in-progress-results-generic.bin`. Během přípravy opakování byl ve stejném checkoutu zjištěn další Gradle test proces; výstup obsahuje úspěšně dokončené scénáře, ale Gradle task ani úplná acceptance brána proto nejsou zelené. Před dalším pokusem je nutné potvrdit, že neběží jiný Gradle build/test nad tímto checkoutem. Tato aktualizace zachycuje stav k 2026-10-17.
+
 - Podepsaná živá acceptance přes Zot → Marketplace → Core proběhla až k importu v2 release. `CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured` **prošel**: Core dokončil idempotentní Marketplace instalační job, zachoval v2 zdrojový manifest ve `extension_plugin_v2_releases`, vytvořil očekávanou v1 runtime projekci a stáhl image přes přesný digest release.
 - Tato kontrola je uložena v Core commitu `2681ee4` (`Assert v2 Marketplace release image installation`) a je pushnutá na `origin/main`.
 - Samostatné Docker runtime acceptance pro digestovaný v2 fixture ověřilo instalaci, invoke, update/rollback, bundle sidecar a persistentní data. Live Marketplace revocation acceptance také prošel.
