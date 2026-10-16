@@ -1113,6 +1113,51 @@ BEGIN RAISE EXCEPTION 'extension_plugin_v2_releases is immutable'; END $$;
 CREATE TRIGGER extension_plugin_v2_releases_immutable
     BEFORE UPDATE OR DELETE ON extension_plugin_v2_releases FOR EACH ROW EXECUTE FUNCTION artio_plugin_v2_release_immutable();
 
+-- The Core registry remains the semantic source of truth. This table mirrors only closed-policy
+-- operations whose binding overlap must also be rejected by PostgreSQL, including direct writers.
+CREATE TABLE extension_exclusive_routing_rules (
+    capability_id VARCHAR(128) NOT NULL,
+    operation_name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (capability_id, operation_name)
+);
+INSERT INTO extension_exclusive_routing_rules(capability_id, operation_name)
+VALUES ('catalog.enrichment.v1', 'enrich');
+
+CREATE FUNCTION artio_exclusive_scopes_overlap(left_scope JSONB, left_priority INTEGER,
+        right_scope JSONB, right_priority INTEGER) RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE AS $$
+    SELECT left_priority = right_priority
+       AND (SELECT count(*) FROM jsonb_object_keys(left_scope))
+           = (SELECT count(*) FROM jsonb_object_keys(right_scope))
+       AND NOT EXISTS (
+           SELECT 1 FROM jsonb_each(left_scope) left_entry
+           JOIN jsonb_each(right_scope) right_entry USING (key)
+           WHERE left_entry.value <> right_entry.value
+       )
+$$;
+
+CREATE FUNCTION artio_guard_exclusive_capability_binding() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.eligibility_state <> 'ACTIVE' OR NOT EXISTS (
+        SELECT 1 FROM extension_exclusive_routing_rules
+        WHERE capability_id=NEW.capability_id AND operation_name=NEW.operation_name
+    ) THEN
+        RETURN NEW;
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext(NEW.capability_id), hashtext(NEW.operation_name));
+    IF EXISTS (
+        SELECT 1 FROM extension_capability_bindings existing
+        WHERE existing.capability_id=NEW.capability_id
+          AND existing.operation_name=NEW.operation_name
+          AND existing.eligibility_state='ACTIVE'
+          AND existing.binding_id IS DISTINCT FROM NEW.binding_id
+          AND artio_exclusive_scopes_overlap(NEW.scope, NEW.priority, existing.scope, existing.priority)
+    ) THEN
+        RAISE EXCEPTION 'An equal-priority exclusive capability binding overlaps an active route'
+            USING ERRCODE='23505', CONSTRAINT='extension_capability_bindings_exclusive_overlap';
+    END IF;
+    RETURN NEW;
+END $$;
+
 CREATE TABLE extension_capability_bindings (
     binding_id UUID PRIMARY KEY,
     instance_id UUID NOT NULL REFERENCES extension_plugin_instances(instance_id),
@@ -1127,6 +1172,9 @@ CREATE TABLE extension_capability_bindings (
 );
 CREATE INDEX extension_capability_bindings_lookup_idx
     ON extension_capability_bindings(capability_id, operation_name, eligibility_state, priority DESC);
+CREATE TRIGGER extension_capability_bindings_exclusive_guard
+    BEFORE INSERT OR UPDATE OF capability_id, operation_name, scope, priority, eligibility_state
+    ON extension_capability_bindings FOR EACH ROW EXECUTE FUNCTION artio_guard_exclusive_capability_binding();
 
 -- Durable, frozen routing decisions and mutable attempt progress live together so a retry cannot
 -- silently resolve to a different provider after a release, config, binding, or health change.

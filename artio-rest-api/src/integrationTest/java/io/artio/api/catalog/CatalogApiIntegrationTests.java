@@ -87,6 +87,52 @@ class CatalogApiIntegrationTests {
     @Autowired
     private io.artio.api.extensions.CommerceCapabilityInvoker commerceCapabilityInvoker;
 
+    @Test
+    void postgresDetectsEqualPriorityOverlappingExclusiveCapabilityScopes() {
+        Set<String> databaseRules = jdbc.query("SELECT capability_id || '/' || operation_name FROM extension_exclusive_routing_rules",
+                (rs, row) -> rs.getString(1)).stream().collect(java.util.stream.Collectors.toSet());
+        Set<String> coreRules = io.artio.extensions.CapabilityRegistry.capabilityIds().stream()
+                .flatMap(capabilityId -> io.artio.extensions.CapabilityRegistry.find(capabilityId).orElseThrow().operations().entrySet().stream()
+                        .filter(operation -> operation.getValue().policy() == io.artio.extensions.CapabilityRegistry.Policy.EXCLUSIVE)
+                        .map(operation -> capabilityId + "/" + operation.getKey()))
+                .collect(java.util.stream.Collectors.toSet());
+        Boolean overlap = jdbc.queryForObject("SELECT artio_exclusive_scopes_overlap(?::jsonb, ?, ?::jsonb, ?)",
+                Boolean.class, "{\"country\":\"CH\"}", 5, "{\"currency\":\"CHF\"}", 5);
+        Boolean differentPriority = jdbc.queryForObject("SELECT artio_exclusive_scopes_overlap(?::jsonb, ?, ?::jsonb, ?)",
+                Boolean.class, "{\"country\":\"CH\"}", 5, "{\"country\":\"CH\"}", 6);
+        Boolean disjoint = jdbc.queryForObject("SELECT artio_exclusive_scopes_overlap(?::jsonb, ?, ?::jsonb, ?)",
+                Boolean.class, "{\"country\":\"CH\"}", 5, "{\"country\":\"DE\"}", 5);
+
+        assertThat(databaseRules).isEqualTo(coreRules);
+        assertThat(overlap).isTrue();
+        assertThat(differentPriority).isFalse();
+        assertThat(disjoint).isFalse();
+
+        UUID firstInstance = createRouteGuardInstance();
+        UUID secondInstance = createRouteGuardInstance();
+        jdbc.update("INSERT INTO extension_capability_bindings(binding_id,instance_id,capability_id,operation_name,scope,priority) "
+                        + "VALUES (?,?,'catalog.enrichment.v1','enrich','{\"country\":\"CH\"}'::jsonb,5)",
+                UUID.randomUUID(), firstInstance);
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO extension_capability_bindings(binding_id,instance_id,capability_id,operation_name,scope,priority) "
+                        + "VALUES (?,?,'catalog.enrichment.v1','enrich','{\"currency\":\"CHF\"}'::jsonb,5)",
+                UUID.randomUUID(), secondInstance)).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+    private UUID createRouteGuardInstance() {
+        String pluginId = "route-" + UUID.randomUUID().toString().replace("-", "");
+        String image = "ghcr.io/example/route@sha256:" + "a".repeat(64);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, "{\"id\":\"" + pluginId + "\",\"version\":\"1.0.0\"}", image);
+        Long releaseId = jdbc.queryForObject("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) "
+                + "VALUES (?,'1.0.0',?,?::jsonb) RETURNING release_id", Long.class, pluginId, image,
+                "{\"id\":\"" + pluginId + "\",\"version\":\"1.0.0\"}");
+        UUID instanceId = UUID.randomUUID();
+        jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
+                        + "lifecycle_state,runtime_identity) VALUES (?,?,'default',?,'CAPABILITY_V2','ENABLED',?)",
+                instanceId, pluginId, releaseId, "route-" + instanceId.toString().replace("-", ""));
+        return instanceId;
+    }
+
     @Autowired
     private io.artio.api.payments.CheckoutFailureCompensation checkoutFailureCompensation;
 
