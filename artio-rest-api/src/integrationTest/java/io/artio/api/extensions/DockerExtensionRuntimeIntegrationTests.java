@@ -12,6 +12,7 @@ import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.HostConfig;
 import io.artio.api.security.ExtensionCredentialService;
+import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.PluginManifest;
 import java.time.Duration;
 import java.util.List;
@@ -66,6 +67,58 @@ class DockerExtensionRuntimeIntegrationTests {
     @Test
     void managesSidecarHealthAndPreservesDataAcrossBundleUpdateAndRollback() throws Exception {
         verifyLifecycle(true);
+    }
+
+    @Test
+    void marketplaceDigestBanStopsTheLivePluginAndPersistsContainmentWithoutRewritingLifecycle() throws Exception {
+        String image = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V1");
+        assumeTrue(image != null, "Run scripts/verify-extension-runtime.ps1 to provide the pinned fixture image");
+        String digest = image.substring(image.lastIndexOf('@') + 1);
+        String pluginId = testPluginId("security.e2e");
+        String network = "artio-security-it-" + UUID.randomUUID().toString().substring(0, 8);
+        DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        var transport = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost())
+                .sslConfig(config.getSSLConfig()).maxConnections(8).connectionTimeout(Duration.ofSeconds(5))
+                .responseTimeout(Duration.ofSeconds(120)).build();
+        try (DockerClient docker = DockerClientImpl.getInstance(config, transport);
+                var postgres = new org.testcontainers.containers.PostgreSQLContainer<>("postgres:16-alpine")) {
+            postgres.start();
+            org.flywaydb.core.Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                    .locations("classpath:db/migration").load().migrate();
+            var jdbc = new org.springframework.jdbc.core.JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
+            docker.createNetworkCmd().withName(network).withDriver("bridge")
+                    .withLabels(Map.of("io.artio.test.run", testRunId())).exec();
+            var runtime = new DockerExtensionRuntime(docker, network, 8080,
+                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
+            PluginManifest manifest = manifest(pluginId, image, "1.0.0", false);
+            try {
+                runtime.install(manifest);
+                runtime.enable(manifest, 1, Map.of());
+                String manifestJson = new ObjectMapper().writeValueAsString(manifest);
+                jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'ENABLED')",
+                        pluginId, manifestJson, image);
+                jdbc.update("INSERT INTO extension_marketplace_banned_artifacts(image_digest,first_plugin_id,first_version,release_descriptor_digest,reason_code,feed_sequence) "
+                                + "VALUES (?,?,?,'sha256:" + "0".repeat(64) + "','SECURITY_REVOKED',1)",
+                        digest, pluginId, manifest.version());
+
+                @SuppressWarnings("unchecked")
+                org.springframework.beans.factory.ObjectProvider<ExtensionRuntimePort> runtimeProvider = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+                org.mockito.Mockito.when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+                new ExtensionSecurityContainmentWorker(jdbc, new ObjectMapper(), runtimeProvider).reconcile();
+
+                var contained = docker.inspectContainerCmd(DockerExtensionRuntime.containerName(pluginId)).exec();
+                assertThat(contained.getState().getRunning()).isFalse();
+                assertThat(jdbc.queryForObject("SELECT containment_status FROM extension_security_blocked_targets WHERE plugin_id=?", String.class, pluginId))
+                        .isEqualTo("STOPPED");
+                assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
+                        .isEqualTo("ENABLED");
+            } finally {
+                try { runtime.disable(pluginId); } catch (RuntimeException ignored) { }
+                try { runtime.uninstall(pluginId); } catch (RuntimeException ignored) { }
+                docker.removeNetworkCmd(network).exec();
+            }
+        }
     }
 
     @Test
