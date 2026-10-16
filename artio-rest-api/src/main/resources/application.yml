@@ -65,6 +65,8 @@ artio:
     enabled: ${ARTIO_WORKERS_ENABLED:true}
   setup:
     token: ${ARTIO_SETUP_TOKEN:}
+  marketplace:
+    base-url: ${ARTIO_MARKETPLACE_BASE_URL:}
   cache:
     redis:
       enabled: ${ARTIO_CACHE_REDIS_ENABLED:false}

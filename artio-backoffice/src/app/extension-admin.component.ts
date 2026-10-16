@@ -5,7 +5,9 @@ import { currentBackofficeLocale } from './backoffice-locale';
 import { extensionAdminText, type ExtensionAdminTextKey } from './extension-admin-locale';
 
 export type ExtensionAdminAction =
-  | { type: 'toggleRegistration' | 'register' | 'closeAudit' | 'closeSettings' | 'saveConfiguration' | 'invoke' | 'openDashboards' }
+  | { type: 'toggleRegistration' | 'register' | 'closeAudit' | 'closeSettings' | 'saveConfiguration' | 'invoke' | 'openDashboards' | 'marketplaceSearch' }
+  | { type: 'marketplacePage'; page: number }
+  | { type: 'marketplaceRegister'; item: any; country: string }
   | { type: 'restoreRegistration' | 'manageRelease'; item: any }
   | { type: 'lifecycle'; extension: any; action: 'install' | 'enable' | 'disable' }
   | { type: 'rotateCredential' | 'update' | 'rollback' | 'health' | 'configure' | 'activity' | 'uninstall'; extension: any }
@@ -21,6 +23,13 @@ export type ExtensionAdminAction =
 
 @Component({ selector: 'artio-extension-admin', imports: [CommonModule, FormsModule], template: `
   <section><div class="toolbar"><p>{{t('intro')}}</p><button type="button" class="primary" (click)="emit({type:'toggleRegistration'})">＋ {{t('register')}}</button></div>
+    <div class="panel table-panel"><p class="eyebrow">{{t('marketplace')}}</p><h2>{{t('marketplaceTitle')}}</h2><p class="muted">{{t('marketplaceHelp')}}</p>
+      <form class="create-form" (ngSubmit)="emit({type:'marketplaceSearch'})"><label>{{t('marketplaceSearchLabel')}}<input [(ngModel)]="marketplaceQuery" name="marketplaceQuery" maxlength="100"></label><label>{{t('marketplaceCountry')}}<input [(ngModel)]="marketplaceCountry" name="marketplaceCountry" maxlength="2" pattern="[A-Z]{2}"></label><button class="primary">{{t('marketplaceSearchButton')}}</button></form>
+      <table><thead><tr><th scope="col">{{t('plugin')}}</th><th scope="col">{{t('status')}}</th><th scope="col">{{t('action')}}</th></tr></thead><tbody>@for (item of marketplacePlugins; track item.pluginId) {
+        <tr><td><strong>{{item.metadata?.title || item.pluginId}}</strong><small>{{item.pluginId}} · {{item.metadata?.tagline || item.metadata?.description || ''}}</small><small>{{item.vendor}} · v{{item.version}}</small></td><td>{{item.compatibility?.minimumCoreVersion || '—'}} – {{item.compatibility?.maximumCoreVersion || '—'}}</td><td>@if (!isRegistered(item.pluginId)) { <button type="button" class="link-button" (click)="emit({type:'marketplaceRegister',item,country:marketplaceCountry})">{{t('marketplaceRegister')}}</button> }@else { <span class="muted">{{t('marketplaceAlreadyRegistered')}}</span> }</td></tr>
+      }@empty { <tr><td colspan="3" class="empty">{{t('marketplaceEmpty')}}</td></tr> }</tbody></table>
+      @if (marketplaceTotal > 20) { <div class="panel-heading"><button type="button" class="link-button" [disabled]="marketplacePage===0" (click)="emit({type:'marketplacePage',page:marketplacePage-1})">{{t('marketplacePrevious')}}</button><span class="muted">{{marketplacePage+1}} · {{marketplaceTotal}}</span><button type="button" class="link-button" [disabled]="(marketplacePage+1)*20>=marketplaceTotal" (click)="emit({type:'marketplacePage',page:marketplacePage+1})">{{t('marketplaceNext')}}</button></div> }
+    </div>
     <div class="panel table-panel"><p class="eyebrow">{{t('discovery')}}</p><h2>{{t('regionalCatalog')}}</h2><p class="muted">{{t('discoveryHelp')}}</p><table><thead><tr><th scope="col">{{t('plugin')}}</th><th scope="col">{{t('region')}}</th><th scope="col">{{t('capability')}}</th><th scope="col">{{t('status')}}</th></tr></thead><tbody>@for (item of extensionCatalog; track item.pluginId) {
       <tr><td><strong>{{item.name}}</strong><small>{{item.pluginId}} · {{item.description}}</small></td><td>{{item.countryCode}} · {{item.optional?t('optional'):t('recommended')}}</td><td>{{item.extensionPoints.join(', ')}}</td><td>{{statusText(item.status)}}@if (item.version) { <small>v{{item.version}}</small> }@if (item.releaseRegistered && item.lifecycleState==='UNINSTALLED') { <button type="button" class="link-button" (click)="emit({type:'restoreRegistration',item})">{{t('restoreRegistration')}}</button> }@if (item.releaseRegistered && item.lifecycleState!=='UNINSTALLED') { <button type="button" class="link-button" (click)="emit({type:'manageRelease',item})">{{t('manageRelease')}}</button> }</td></tr>
     }@empty { <tr><td colspan="4" class="empty">{{t('noRecommendations')}}</td></tr> }</tbody></table></div>
@@ -51,13 +60,14 @@ export type ExtensionAdminAction =
   </section>
 ` })
 export class ExtensionAdminComponent {
-  @Input() extensionCatalog:any[]=[]; @Input() extensions:any[]=[]; @Input() error=''; @Input() extensionHealth=''; @Input() showExtensionRegistration=false; @Input() extensionManifestJson=''; @Input() extensionAuditFor:string|null=null; @Input() extensionAudit:any[]=[]; @Input() selectedExtension:any=null; @Input() extensionConfig:Record<string,any>={}; @Input() extensionInvocation:any={extensionPoint:'',operation:'health',payloadJson:'{}'}; @Input() extensionInvocationResult:any=null;
+  @Input() extensionCatalog:any[]=[]; @Input() marketplacePlugins:any[]=[]; @Input() marketplaceTotal=0; @Input() marketplacePage=0; @Input() marketplaceQuery=''; @Input() marketplaceCountry=''; @Input() extensions:any[]=[]; @Input() error=''; @Input() extensionHealth=''; @Input() showExtensionRegistration=false; @Input() extensionManifestJson=''; @Input() extensionAuditFor:string|null=null; @Input() extensionAudit:any[]=[]; @Input() selectedExtension:any=null; @Input() extensionConfig:Record<string,any>={}; @Input() extensionInvocation:any={extensionPoint:'',operation:'health',payloadJson:'{}'}; @Input() extensionInvocationResult:any=null;
   @Input() extensionInstances:any[]=[]; @Input() extensionBindings:any[]=[]; @Input() extensionSubscriptions:any[]=[];
   @Input() instanceHealth:Record<string,any>={}; @Input() instanceObligations:Record<string,any>={};
   newInstanceKey='region-1'; newInstanceConfigurationJson='{}'; @Input() instanceConfigurations:Record<string,string>={};
   newBinding={instanceId:'',capabilityId:'',operationName:'',scopeJson:'{}',priority:0};
   @Output() action=new EventEmitter<ExtensionAdminAction>(); @Output() manifestChange=new EventEmitter<string>();
   t(key:ExtensionAdminTextKey):string{return extensionAdminText(currentBackofficeLocale(),key)}
+  isRegistered(pluginId:string):boolean{return this.extensions.some(extension=>extension.id===pluginId&&extension.lifecycleState!=='UNINSTALLED')}
   emit(action:ExtensionAdminAction):void{this.action.emit(action)}
   extensionFields():Array<{key:string;value:any}>{return Object.entries(this.selectedExtension?.manifest.configuration??{}).map(([key,value])=>({key,value}))}
   lifecycleText(state:string):string{const keys:Record<string,ExtensionAdminTextKey>={WAITING_FOR_RELEASE:'lifecycleWaiting',VALIDATED:'lifecycleValidated',CONFIGURATION_REQUIRED:'lifecycleConfiguration',CONFIGURED:'lifecycleConfigured',READY_TO_INSTALL:'lifecycleConfigured',INSTALLED:'lifecycleInstalled',INSTALLED_DISABLED:'lifecycleDisabled',DISABLED:'lifecycleDisabled',ENABLED:'lifecycleEnabled',ACTIVE:'lifecycleEnabled',FAILED:'lifecycleFailed',UNINSTALLED:'lifecycleUninstalled',UNINSTALLED_BY_ADMIN:'lifecycleUninstalled',LIFECYCLE_IN_PROGRESS:'lifecycleUnknown'};const key=keys[state];return key?this.t(key):state}

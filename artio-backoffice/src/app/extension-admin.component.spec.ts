@@ -10,11 +10,11 @@ describe('ExtensionAdminComponent', () => {
   afterEach(() => localStorage.removeItem('artio-backoffice-language'));
 
   it.each([
-    ['en', 'Register trusted extensions', 'Regional catalog', 'No plugins are recommended', 'No extensions are registered.'],
-    ['de', 'Registrieren Sie vertrauenswürdige Erweiterungen', 'Regionale Übersicht', 'Für die Paketdistribution werden keine Plugins empfohlen.', 'Keine Erweiterungen registriert.'],
-    ['it', 'Registra estensioni attendibili', 'Catalogo regionale', 'Nessun plugin è consigliato', 'Nessuna estensione registrata.'],
-    ['fr', 'Enregistrez des extensions fiables', 'Catalogue régional', 'Aucun plugin n’est recommandé', 'Aucune extension enregistrée.']
-  ] as const)('renders discovery and empty states in %s', (locale, intro, catalog, noRecommendations, noPlugins) => {
+    ['en', 'Register trusted extensions', 'Regional catalog', 'No plugins are recommended', 'No extensions are registered.', 'Discover published plugins'],
+    ['de', 'Registrieren Sie vertrauenswürdige Erweiterungen', 'Regionale Übersicht', 'Für die Paketdistribution werden keine Plugins empfohlen.', 'Keine Erweiterungen registriert.', 'Veröffentlichte Plugins entdecken'],
+    ['it', 'Registra estensioni attendibili', 'Catalogo regionale', 'Nessun plugin è consigliato', 'Nessuna estensione registrata.', 'Scopri i plugin pubblicati'],
+    ['fr', 'Enregistrez des extensions fiables', 'Catalogue régional', 'Aucun plugin n’est recommandé', 'Aucune extension enregistrée.', 'Découvrir les plugins publiés']
+  ] as const)('renders discovery and empty states in %s', (locale, intro, catalog, noRecommendations, noPlugins, marketplaceTitle) => {
     setBackofficeLocale(locale as BackofficeLocale);
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
     fixture.detectChanges();
@@ -23,6 +23,7 @@ describe('ExtensionAdminComponent', () => {
     expect(page).toContain(catalog);
     expect(page).toContain(noRecommendations);
     expect(page).toContain(noPlugins);
+    expect(page).toContain(marketplaceTitle);
   });
 
   it('emits registration actions to the owner of extension lifecycle behavior', () => {
@@ -47,6 +48,22 @@ describe('ExtensionAdminComponent', () => {
     fixture.detectChanges();
     const page = fixture.nativeElement.textContent as string;
     expect(page).toContain('Compatibility: CAPABILITY_V2 · 2 instance(s) · 3 binding(s) · 1 subscription(s)');
+  });
+
+  it('renders a compatible marketplace release and emits an explicit registration action', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.marketplacePlugins = [{ pluginId: 'shipping.demo', version: '1.2.3', vendor: 'Demo',
+      metadata: { title: 'Demo Shipping', tagline: 'Tracked delivery' }, compatibility: { minimumCoreVersion: '1.0.0' } }];
+    fixture.componentInstance.marketplaceCountry = 'CH';
+    const actions: any[] = [];
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Demo Shipping');
+    const button = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Review and register')) as HTMLButtonElement;
+    button.click();
+    expect(actions).toEqual([{ type: 'marketplaceRegister', item: fixture.componentInstance.marketplacePlugins[0], country: 'CH' }]);
   });
 
   it('renders instance lifecycle, configuration, capability binding and subscription controls for v2 plugins', () => {

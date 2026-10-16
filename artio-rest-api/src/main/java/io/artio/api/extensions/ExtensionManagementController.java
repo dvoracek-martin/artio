@@ -53,6 +53,7 @@ public class ExtensionManagementController {
     private final ObjectMapper mapper;
     private final String coreVersion;
     private final ObjectProvider<ExtensionRuntimePort> dockerRuntime;
+    private final MarketplaceCatalogClient marketplace;
     private final DistributionPluginProvisioningService provisioning;
     private final PluginEventDeliveryOperations eventDeliveryOperations;
     private final PluginEventBackfillOperations eventBackfillOperations;
@@ -62,6 +63,7 @@ public class ExtensionManagementController {
             JdbcTemplate jdbc, ObjectMapper mapper,
             @Value("${artio.extensions.core-version:0.1.0}") String coreVersion,
             ObjectProvider<ExtensionRuntimePort> dockerRuntime, DistributionPluginProvisioningService provisioning,
+            MarketplaceCatalogClient marketplace,
             PluginEventDeliveryOperations eventDeliveryOperations, PluginEventBackfillOperations eventBackfillOperations) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
@@ -70,6 +72,7 @@ public class ExtensionManagementController {
         this.mapper = mapper;
         this.coreVersion = coreVersion;
         this.dockerRuntime = dockerRuntime;
+        this.marketplace = marketplace;
         this.provisioning = provisioning;
         this.eventDeliveryOperations = eventDeliveryOperations;
         this.eventBackfillOperations = eventBackfillOperations;
@@ -110,6 +113,32 @@ public class ExtensionManagementController {
     public List<DistributionPluginProvisioningService.CatalogItem> catalog(
             @RequestParam(required = false) String country) {
         return provisioning.catalog(country);
+    }
+
+    @GetMapping("/marketplace/plugins")
+    @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public JsonNode marketplacePlugins(@RequestParam(required = false) String q,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String country,
+            @RequestParam(defaultValue = "false") boolean includePrerelease,
+            @RequestParam(defaultValue = "en") String locale,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        if (page < 0 || size < 1 || size > 100)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page must be nonnegative and size must be between 1 and 100");
+        if (country != null && !country.matches("[A-Z]{2}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "country must be an ISO 3166-1 alpha-2 code");
+        return marketplace.plugins(q, category, country, coreVersion, includePrerelease, locale, page, size);
+    }
+
+    @GetMapping("/marketplace/plugins/{pluginId}/releases/{version}/manifest")
+    @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public JsonNode marketplaceManifest(@PathVariable String pluginId, @PathVariable String version,
+            @RequestParam(required = false) String country,
+            @RequestParam(defaultValue = "false") boolean includePrerelease) {
+        if (country != null && !country.matches("[A-Z]{2}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "country must be an ISO 3166-1 alpha-2 code");
+        return marketplace.releaseManifest(pluginId, version, coreVersion, country, includePrerelease);
     }
 
     @PostMapping("/register")
