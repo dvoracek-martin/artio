@@ -4,7 +4,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.JsonNode;
 import io.artio.api.security.EncryptionService;
 import io.artio.api.distributions.DistributionPluginProvisioningService;
 import io.artio.extensions.PluginConfigurationValidator;
@@ -1192,7 +1191,7 @@ public class ExtensionManagementController {
         try {
             var result = runtime().invoke(pluginId, row.credentialGeneration(), request.extensionPoint(), request.operation(), request.idempotencyKey(),
                     configuration, payload, java.time.Duration.ofMillis(request.deadlineMillis()));
-            JsonNode response = mapper.readTree(result.responseJson());
+            Object response = mapper.readValue(result.responseJson(), Object.class);
             audit(pluginId, actor, "INVOKE", Map.of("extensionPoint", request.extensionPoint(),
                     "operation", request.operation(), "statusCode", result.statusCode()));
             return new InvocationResponse(result.statusCode(), response);
@@ -1575,8 +1574,8 @@ public class ExtensionManagementController {
     }
     public record AuditView(UUID actorUserId, String action, Map<String, Object> details, java.time.Instant occurredAt) { }
     public record InvocationRequest(String extensionPoint, String operation, String idempotencyKey,
-                                    JsonNode payload, long deadlineMillis) { }
-    public record InvocationResponse(int statusCode, JsonNode payload) { }
+                                    Object payload, long deadlineMillis) { }
+    public record InvocationResponse(int statusCode, Object payload) { }
     public record BindingRequest(String capabilityId, String operationName, Map<String, String> scope, int priority,
             UUID instanceId) { }
     public record BindingStateRequest(String state) { }
