@@ -19,12 +19,18 @@ class RestControllerApiVersionContractTests {
         scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
         var controllers = scanner.findCandidateComponents("io.artio.api");
         var unversioned = new ArrayList<String>();
+        var incorrectlyVersioned = new ArrayList<String>();
         int routeCount = 0;
 
         for (var candidate : controllers) {
             var controller = ClassUtils.forName(candidate.getBeanClassName(), getClass().getClassLoader());
             var controllerMapping = AnnotatedElementUtils.findMergedAnnotation(controller, RequestMapping.class);
             var prefixes = paths(controllerMapping);
+            for (var prefix : prefixes) {
+                if (!isDevelopmentApiPrefix(prefix)) {
+                    incorrectlyVersioned.add(controller.getSimpleName() + " class mapping => " + prefix);
+                }
+            }
             for (var method : controller.getDeclaredMethods()) {
                 var methodMapping = AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
                 if (methodMapping == null) continue;
@@ -32,8 +38,12 @@ class RestControllerApiVersionContractTests {
                 for (var prefix : prefixes) {
                     for (var route : paths(methodMapping)) {
                         var fullPath = (prefix + "/" + route).replaceAll("/{2,}", "/");
-                        if (!fullPath.equals("/api/v1") && !fullPath.startsWith("/api/v1/")) {
+                        if (!isDevelopmentApiPrefix(fullPath)) {
                             unversioned.add(controller.getSimpleName() + "#" + method.getName() + " => " + fullPath);
+                        }
+                        if (route.matches(".*(?:^|/)v\\d+(?:/|$).*") || !prefix.contains("/api/v1")) {
+                            incorrectlyVersioned.add(controller.getSimpleName() + "#" + method.getName()
+                                    + " => class=" + prefix + ", method=" + route);
                         }
                     }
                 }
@@ -44,6 +54,13 @@ class RestControllerApiVersionContractTests {
         assertThat(unversioned)
                 .as("REST controllers must expose only the development /api/v1 surface")
                 .isEmpty();
+        assertThat(incorrectlyVersioned)
+                .as("REST version belongs to the controller mapping; method routes cannot introduce another version")
+                .isEmpty();
+    }
+
+    private static boolean isDevelopmentApiPrefix(String path) {
+        return path.equals("/api/v1") || path.startsWith("/api/v1/");
     }
 
     private static List<String> paths(RequestMapping mapping) {
