@@ -4,7 +4,7 @@ import { NEVER, of } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app.component';
 
-function createComponent(orderStatus: string | undefined, authenticated = true, route = '/checkout?success=true&orderId=order-1', checkoutRetry = false) {
+function createComponent(orderStatus: string | undefined, authenticated = true, route = '/checkout?success=true&orderId=order-1', checkoutRetry = false, products: Array<{id:string;name:string;description:string;sku:string;active:boolean}> = []) {
   localStorage.removeItem('artio-token');
   localStorage.setItem('artio-locale', 'en');
   if (authenticated) localStorage.setItem('artio-token', 'test-token');
@@ -14,6 +14,12 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
     get: vi.fn((url: string) => of(
       url === '/api/v1/public/config'
         ? { googleOidcEnabled: false, countryCode: 'CH', currencyCode: 'CHF', locale: 'en' }
+        : url === '/api/v1/products'
+          ? products
+        : url.includes('/localized?locale=')
+          ? { name: 'Localized product', description: 'Localized description', seoSlug: 'localized-product', seoTitle: 'SEO product title', seoDescription: 'SEO product description' }
+        : url.endsWith('/media')
+          ? [{ id: 'media-1', contentUrl: 'https://cdn.example.test/product.jpg', altText: 'Product', position: 0 }]
         : url === '/api/v1/cart'
           ? { items: [] }
           : url === '/api/v1/cart/orders'
@@ -44,6 +50,7 @@ describe('Storefront payment return', () => {
     history.replaceState({}, '', '/');
     document.querySelector('link[rel="canonical"]')?.remove();
     document.querySelector('script[data-artio-seo="website"]')?.remove();
+    document.querySelector('script[data-artio-seo="products"]')?.remove();
     document.querySelector('meta[name="robots"]')?.remove();
   });
 
@@ -97,6 +104,25 @@ describe('Storefront payment return', () => {
     expect(document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href).toBe(`${location.origin}/shop`);
     expect(document.documentElement.lang).toBe('en');
     expect(document.querySelector('meta[property="og:type"]')?.getAttribute('content')).toBe('website');
+  });
+
+  it('publishes product structured data with matching live product anchors on the shop page', () => {
+    const product = { id: 'product-1', name: 'Original name', description: 'Original description', sku: 'SKU-1', active: true };
+    const { fixture } = createComponent(undefined, false, '/shop', false, [product]);
+
+    const schema = JSON.parse(document.querySelector('script[data-artio-seo="products"]')?.textContent ?? '{}');
+    expect(schema['@type']).toBe('ItemList');
+    expect(schema.numberOfItems).toBe(1);
+    expect(schema.itemListElement[0].item).toMatchObject({
+      '@type': 'Product',
+      name: 'SEO product title',
+      description: 'SEO product description',
+      sku: 'SKU-1',
+      image: 'https://cdn.example.test/product.jpg',
+      url: `${location.origin}/shop#product-product-1`
+    });
+    expect(schema.itemListElement[0].item['@id']).toBe(`${location.origin}/shop#product-product-1`);
+    expect(fixture.nativeElement.querySelector('#product-product-1')).toBeTruthy();
   });
 
   it('gives checkout address and payment controls visible accessible labels', () => {
