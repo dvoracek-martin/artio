@@ -94,17 +94,26 @@ public interface PaymentProvider {
 
     record CheckoutResult(String providerReference, String checkoutUrl, PaymentState state) { }
     record RefundRequest(String providerReference, String idempotencyKey, BigDecimal amount, String currency) { }
-    record PaymentResult(String providerReference, PaymentState state, BigDecimal amount, String currency,
-                         String failureCode) { }
-    record WebhookResult(String providerEventId, String eventType, String providerReference,
+    record PaymentResult(String providerReference, String transactionReference, PaymentState state,
+                         BigDecimal amount, String currency, String failureCode) {
+        public PaymentResult(String providerReference, PaymentState state, BigDecimal amount, String currency,
+                String failureCode) {
+            this(providerReference, null, state, amount, currency, failureCode);
+        }
+    }
+    record WebhookResult(String providerEventId, String eventType, String providerReference, String transactionReference,
                          PaymentState state, BigDecimal amount, String currency, boolean verified) {
+        public WebhookResult(String providerEventId, String eventType, String providerReference,
+                PaymentState state, BigDecimal amount, String currency, boolean verified) {
+            this(providerEventId, eventType, providerReference, null, state, amount, currency, verified);
+        }
         /** Compatibility constructor for non-settlement events that do not carry an amount. */
         public WebhookResult(String providerEventId, String eventType, String providerReference,
                 PaymentState state, boolean verified) {
-            this(providerEventId, eventType, providerReference, state, null, null, verified);
+            this(providerEventId, eventType, providerReference, null, state, null, null, verified);
         }
     }
-    enum PaymentState { PENDING, AUTHORIZED, CAPTURED, CANCELLED, REFUNDED, FAILED, EXPIRED }
+    enum PaymentState { PENDING, AUTHORIZED, CAPTURED, DISPUTED, DISPUTE_WON, DISPUTE_LOST, REVERSED, CANCELLED, REFUNDED, FAILED, EXPIRED }
 
     /** A checkout rejection that the provider contract guarantees created no remote session or charge. */
     final class CheckoutRejectedException extends RuntimeException {

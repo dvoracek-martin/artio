@@ -193,7 +193,7 @@ def operation(configuration, name, payload, envelope):
         state = "CAPTURED" if status == "complete" and payment_status == "paid" else "EXPIRED" if status == "expired" else "PENDING"
         if state == "PENDING":
             return {"result": None}
-        return {"result": {"providerReference": reference, "state": state,
+        return {"result": {"providerReference": reference, "transactionReference": session.get("payment_intent"), "state": state,
                 "amount": major_units(session.get("amount_total"), session.get("currency")),
                 "currency": str(session.get("currency") or "").upper() or None, "failureCode": None}}
     if name == "verifyWebhook":
@@ -218,10 +218,19 @@ def operation(configuration, name, payload, envelope):
             state = "EXPIRED"
         elif event_type in ("checkout.session.async_payment_failed",):
             state = "FAILED"
+        elif event_type in ("charge.dispute.created", "charge.dispute.funds_withdrawn"):
+            state = "DISPUTED"
+        elif event_type in ("charge.dispute.funds_reinstated",) or (
+                event_type == "charge.dispute.closed" and obj.get("status") == "won"):
+            state = "DISPUTE_WON"
+        elif event_type == "charge.dispute.closed" and obj.get("status") == "lost":
+            state = "DISPUTE_LOST"
         currency = str(obj.get("currency") or "").upper() or None
+        transaction_reference = obj.get("payment_intent")
         return {"providerEventId": event.get("id"), "eventType": event_type,
-                "providerReference": obj.get("id"), "state": state,
-                "amount": major_units(obj.get("amount_total"), currency), "currency": currency, "verified": True}
+                "providerReference": obj.get("id"), "transactionReference": transaction_reference,
+                "state": state, "amount": major_units(obj.get("amount_total", obj.get("amount")), currency),
+                "currency": currency, "verified": True}
     if name == "capture":
         raise ProviderError(409, "Hosted Checkout does not support separate capture")
     raise ProviderError(400, "Unsupported payment operation")

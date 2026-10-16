@@ -96,6 +96,8 @@ The provider-neutral `payment.provider.v1` port now owns checkout, cancellation,
 
 Checkout persists a payment attempt and stable provider/account namespace before invoking a PSP. Verified captures are recorded in an immutable settlement ledger, while `payments.amount` keeps the requested obligation and `captured_amount`/`captured_currency` keep the provider's actual financial result. A late capture, second successful attempt, overpayment, underpayment or currency mismatch creates an operator reconciliation case. `GET /api/v1/admin/payments/reconciliation-cases` exposes open cases; an administrator can refund against the actual captured amount, and a full refund resolves that payment's open cases. Review cases prevent an underpaid or currency-mismatched obligation from starting another checkout.
 
+The settlement ledger also records disputes and provider reversals. Provider transaction references let dispute events correlate to a checkout even when the provider's event reference is a separate dispute ID. Open disputes pause refunds for the affected payment; wins resolve only their corresponding case, while losses and reversals reduce the refundable balance and stay visible for reconciliation. Reports keep captured, refunded, reversed, and net value distinct. The development schema remains the current V1 clean-install snapshot until production upgrade history is introduced.
+
 ## Verification required before claiming a boundary
 
 - Architecture dependency checker passes and fails when a domain takes an adapter/framework dependency.

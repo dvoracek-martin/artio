@@ -22,9 +22,9 @@ public class ReportingService {
             WITH selected_orders AS (
                 SELECT id,user_id,currency,total FROM orders WHERE created_at>=? AND created_at<?
             ), payment_totals AS (
-                SELECT p.order_id,SUM(COALESCE(p.captured_amount,p.amount)) captured,SUM(p.refunded_amount) refunded
+                SELECT p.order_id,SUM(COALESCE(p.captured_amount,p.amount)) captured,SUM(p.refunded_amount) refunded,SUM(p.reversed_amount) reversed
                 FROM payments p JOIN selected_orders o ON o.id=p.order_id AND o.currency=p.currency
-                WHERE p.status IN ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED') GROUP BY p.order_id
+                WHERE p.status IN ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED','REVERSED') GROUP BY p.order_id
             )
             """;
     private final JdbcTemplate jdbc;
@@ -44,12 +44,12 @@ public class ReportingService {
                 (rs, row) -> new StatusCount(rs.getString(1), rs.getLong(2)), window.start(), window.end());
         var currencies = jdbc.query(COHORT + """
                 SELECT o.currency,count(*) orders,count(DISTINCT o.user_id) customers,
-                    COALESCE(SUM(p.captured),0) captured,COALESCE(SUM(p.refunded),0) refunded
+                    COALESCE(SUM(p.captured),0) captured,COALESCE(SUM(p.refunded),0) refunded,COALESCE(SUM(p.reversed),0) reversed
                 FROM selected_orders o LEFT JOIN payment_totals p ON p.order_id=o.id
                 GROUP BY o.currency ORDER BY o.currency
                 """, (rs, row) -> new CurrencySales(rs.getString("currency").trim(), rs.getLong("orders"),
                         rs.getLong("customers"), rs.getBigDecimal("captured"), rs.getBigDecimal("refunded"),
-                        rs.getBigDecimal("captured").subtract(rs.getBigDecimal("refunded"))), window.start(), window.end());
+                        rs.getBigDecimal("reversed"), rs.getBigDecimal("captured").subtract(rs.getBigDecimal("refunded")).subtract(rs.getBigDecimal("reversed"))), window.start(), window.end());
         return new StandardReport(window.since(), window.until(), totals.orders(), totals.customers(), statuses, currencies);
     }
 
@@ -64,7 +64,7 @@ public class ReportingService {
                         SUM(i.quantity*i.unit_price) recorded_line_value
                     FROM selected_orders o JOIN payment_totals p ON p.order_id=o.id
                     JOIN order_items i ON i.order_id=o.id AND i.currency=o.currency
-                    WHERE p.captured>=o.total AND p.captured>0
+                    WHERE p.captured-p.reversed>=o.total AND p.captured>0
                     GROUP BY o.currency,i.variant_id
                 ), ranked AS (
                     SELECT *,row_number() OVER (PARTITION BY currency ORDER BY units DESC,variant_id) position
@@ -80,21 +80,22 @@ public class ReportingService {
                         rs.getBigDecimal("units"), rs.getBigDecimal("recorded_line_value"), rs.getInt("position")), window.start(), window.end());
         var lifetime = jdbc.query("""
                 WITH customer_values AS (
-                    SELECT p.currency,o.user_id,SUM(COALESCE(p.captured_amount,p.amount)) captured,SUM(p.refunded_amount) refunded
+                    SELECT p.currency,o.user_id,SUM(COALESCE(p.captured_amount,p.amount)) captured,SUM(p.refunded_amount) refunded,SUM(p.reversed_amount) reversed
                     FROM payments p JOIN orders o ON o.id=p.order_id AND o.currency=p.currency
-                    WHERE o.created_at<? AND p.status IN ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED')
+                    WHERE o.created_at<? AND p.status IN ('CAPTURED','PARTIALLY_REFUNDED','REFUNDED','REVERSED')
                     GROUP BY p.currency,o.user_id
                 )
-                SELECT currency,count(*) customers,SUM(captured) captured,SUM(refunded) refunded,
-                    AVG(captured-refunded) average_value FROM customer_values GROUP BY currency ORDER BY currency
+                SELECT currency,count(*) customers,SUM(captured) captured,SUM(refunded) refunded,SUM(reversed) reversed,
+                    AVG(captured-refunded-reversed) average_value FROM customer_values GROUP BY currency ORDER BY currency
                 """, (rs, row) -> {
                     String currency = rs.getString("currency").trim();
                     BigDecimal captured = rs.getBigDecimal("captured");
                     BigDecimal refunded = rs.getBigDecimal("refunded");
+                    BigDecimal reversed = rs.getBigDecimal("reversed");
                     int digits = Currency.getInstance(currency).getDefaultFractionDigits();
                     if (digits < 0) throw new IllegalStateException("Reporting currency requires a minor-unit policy");
-                    return new CustomerLifetimeValue(currency, rs.getLong("customers"), captured, refunded,
-                            captured.subtract(refunded), rs.getBigDecimal("average_value").setScale(digits, RoundingMode.HALF_EVEN));
+                    return new CustomerLifetimeValue(currency, rs.getLong("customers"), captured, refunded, reversed,
+                            captured.subtract(refunded).subtract(reversed), rs.getBigDecimal("average_value").setScale(digits, RoundingMode.HALF_EVEN));
                 }, window.end());
         return new AdvancedReport(window.since(), window.until(), variants, lifetime);
     }
@@ -116,13 +117,13 @@ public class ReportingService {
     private record Counts(long orders, long customers) { }
     public record StatusCount(String status, long orders) { }
     public record CurrencySales(String currency, long orders, long customers, BigDecimal capturedAmount,
-            BigDecimal refundedAmount, BigDecimal netCapturedAmount) { }
+            BigDecimal refundedAmount, BigDecimal reversedAmount, BigDecimal netCapturedAmount) { }
     public record StandardReport(Instant since, Instant until, long orders, long activeCustomers,
             List<StatusCount> ordersByStatus, List<CurrencySales> salesByCurrency) { }
     public record TopVariant(String currency, UUID variantId, String sku, String variantName, UUID productId, String productName, BigDecimal unitsOnCapturedOrders,
             BigDecimal recordedLineValue, int rank) { }
     public record CustomerLifetimeValue(String currency, long customers, BigDecimal capturedAmount,
-            BigDecimal refundedAmount, BigDecimal netCapturedAmount, BigDecimal averageNetCapturedValue) { }
+            BigDecimal refundedAmount, BigDecimal reversedAmount, BigDecimal netCapturedAmount, BigDecimal averageNetCapturedValue) { }
     public record AdvancedReport(Instant since, Instant until, List<TopVariant> topVariants,
             List<CustomerLifetimeValue> customerLifetimeValues) { }
 }

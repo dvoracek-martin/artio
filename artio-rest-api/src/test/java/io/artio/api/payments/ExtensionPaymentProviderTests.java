@@ -81,13 +81,14 @@ class ExtensionPaymentProviderTests {
         byte[] body = "{\"id\":\"evt-1\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         when(invoker.invoke(eq("payments.example"), eq("payment.provider.v1"), eq("verifyWebhook"),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new ObjectMapper().readTree("{\"providerEventId\":\"evt-1\",\"eventType\":\"test\",\"providerReference\":\"ref-1\",\"state\":\"CAPTURED\",\"amount\":\"12.50\",\"currency\":\"CHF\",\"verified\":true}"));
+                .thenReturn(new ObjectMapper().readTree("{\"providerEventId\":\"evt-1\",\"eventType\":\"test\",\"providerReference\":\"ref-1\",\"transactionReference\":\"pi-1\",\"state\":\"CAPTURED\",\"amount\":\"12.50\",\"currency\":\"CHF\",\"verified\":true}"));
 
         var result = provider.verifyWebhook(Map.of("paypal-transmission-id", "tx-1", "paypal-transmission-sig", "sig-1"), body);
 
         assertThat(result.verified()).isTrue();
         assertThat(result.amount()).isEqualByComparingTo("12.50");
         assertThat(result.currency()).isEqualTo("CHF");
+        assertThat(result.transactionReference()).isEqualTo("pi-1");
         org.mockito.ArgumentCaptor<Object> payload = org.mockito.ArgumentCaptor.forClass(Object.class);
         verify(invoker).invoke(eq("payments.example"), eq("payment.provider.v1"), eq("verifyWebhook"),
                 org.mockito.ArgumentMatchers.anyString(), payload.capture());

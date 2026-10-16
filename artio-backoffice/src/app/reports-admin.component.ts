@@ -8,12 +8,12 @@ type FeatureAvailability = { edition: string; state: string; features: string[];
 type StandardReport = {
   since: string; until: string; orders: number; activeCustomers: number;
   ordersByStatus: Array<{ status: string; orders: number }>;
-  salesByCurrency: Array<{ currency: string; orders: number; customers: number; capturedAmount: number; refundedAmount: number; netCapturedAmount: number }>;
+  salesByCurrency: Array<{ currency: string; orders: number; customers: number; capturedAmount: number; refundedAmount: number; reversedAmount: number; netCapturedAmount: number }>;
 };
 type AdvancedReport = {
   since: string; until: string;
   topVariants: Array<{ currency: string; variantId: string; sku: string | null; variantName: string | null; productId: string | null; productName: string | null; unitsOnCapturedOrders: number; recordedLineValue: number; rank: number }>;
-  customerLifetimeValues: Array<{ currency: string; customers: number; capturedAmount: number; refundedAmount: number; netCapturedAmount: number; averageNetCapturedValue: number }>;
+  customerLifetimeValues: Array<{ currency: string; customers: number; capturedAmount: number; refundedAmount: number; reversedAmount: number; netCapturedAmount: number; averageNetCapturedValue: number }>;
 };
 
 @Component({
@@ -39,9 +39,9 @@ type AdvancedReport = {
       <div class="metrics compact-metrics"><article><span>{{t('ordersCreated')}}</span><strong>{{report.orders}}</strong><small>{{t('selectedPeriod')}}</small></article><article><span>{{t('customersActive')}}</span><strong>{{report.activeCustomers}}</strong><small>{{t('withOrder')}}</small></article></div>
       <div class="table-panel"><h3>{{t('capturedRefunded')}}</h3>
       @if (report.salesByCurrency.length) {
-        <table class="report-table"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('orders')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th></tr></thead>
+        <table class="report-table"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('orders')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('reversed')}}</th><th scope="col">{{t('netCaptured')}}</th></tr></thead>
         <tbody>@for (row of report.salesByCurrency; track row) {
-          <tr><td>{{row.currency}}</td><td>{{row.orders}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td><strong>{{money(row.netCapturedAmount,row.currency)}}</strong></td></tr>
+          <tr><td>{{row.currency}}</td><td>{{row.orders}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td>{{money(row.reversedAmount,row.currency)}}</td><td><strong>{{money(row.netCapturedAmount,row.currency)}}</strong></td></tr>
         }</tbody></table>
       } @else {
         <p class="empty">{{t('noOrders')}}</p>
@@ -74,8 +74,8 @@ type AdvancedReport = {
       <p class="empty">{{t('noVariants')}}</p>
       }<small class="muted">{{t('recordedLineValueHelp')}}</small></div>
       <div class="table-panel"><h3>{{t('lifetimeValue')}}</h3>@if (advanced.customerLifetimeValues.length) {
-      <table class="report-table"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('netCaptured')}}</th><th scope="col">{{t('averageNet')}}</th></tr></thead><tbody>@for (row of advanced.customerLifetimeValues; track row) {
-      <tr><td>{{row.currency}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td>{{money(row.netCapturedAmount,row.currency)}}</td><td>{{money(row.averageNetCapturedValue,row.currency)}}</td></tr>
+      <table class="report-table"><thead><tr><th scope="col">{{t('currency')}}</th><th scope="col">{{t('customers')}}</th><th scope="col">{{t('captured')}}</th><th scope="col">{{t('refunded')}}</th><th scope="col">{{t('reversed')}}</th><th scope="col">{{t('netCaptured')}}</th><th scope="col">{{t('averageNet')}}</th></tr></thead><tbody>@for (row of advanced.customerLifetimeValues; track row) {
+      <tr><td>{{row.currency}}</td><td>{{row.customers}}</td><td>{{money(row.capturedAmount,row.currency)}}</td><td>{{money(row.refundedAmount,row.currency)}}</td><td>{{money(row.reversedAmount,row.currency)}}</td><td>{{money(row.netCapturedAmount,row.currency)}}</td><td>{{money(row.averageNetCapturedValue,row.currency)}}</td></tr>
     }</tbody></table>
     } @else {
       <p class="empty">{{t('noLifetime')}}</p>

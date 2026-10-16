@@ -1994,6 +1994,49 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void verifiedDisputeAndReversalWebhooksCorrelateByProviderTransactionReference() throws Exception {
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID wonOrder = insertPendingOrder(userId);
+        UUID wonPayment = UUID.randomUUID();
+        String wonSession = "cs_dispute_won_" + wonPayment;
+        String wonTransaction = "pi_dispute_won_" + wonPayment;
+        String wonDispute = "dp_won_" + wonPayment;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
+                wonPayment, wonOrder, userId, wonSession);
+        providerWebhook("checkout.session.completed", wonSession, "paid", "1.00", "USD", wonTransaction);
+        var disputeOpened = providerWebhook("payment.dispute.opened", wonDispute, "disputed", "1.00", "USD", wonTransaction);
+        assertThat(disputeOpened.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, wonPayment)).isEqualTo("CAPTURE_REVIEW");
+        assertThat(jdbc.queryForObject("SELECT case_type FROM payment_reconciliation_cases WHERE payment_id=?", String.class, wonPayment)).isEqualTo("CHARGEBACK");
+        assertThat(jdbc.queryForObject("SELECT provider_transaction_reference FROM payments WHERE id=?", String.class, wonPayment)).isEqualTo(wonTransaction);
+        var blockedRefundHeaders = new HttpHeaders();
+        blockedRefundHeaders.setBearerAuth(adminToken);
+        blockedRefundHeaders.set("Idempotency-Key", "blocked-dispute-refund-" + wonPayment);
+        var blockedRefund = http.exchange("/api/v1/payments/{paymentId}/refund", HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.payments.PaymentController.RefundCommand(new BigDecimal("1.00")), blockedRefundHeaders),
+                ApiError.class, wonPayment);
+        assertThat(blockedRefund.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        providerWebhook("payment.dispute.won", wonDispute, "won", "1.00", "USD", wonTransaction);
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, wonPayment)).isEqualTo("CAPTURED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payment_reconciliation_cases WHERE payment_id=?", String.class, wonPayment)).isEqualTo("RESOLVED");
+
+        UUID lostOrder = insertPendingOrder(userId);
+        UUID lostPayment = UUID.randomUUID();
+        String lostSession = "cs_dispute_lost_" + lostPayment;
+        String lostTransaction = "pi_dispute_lost_" + lostPayment;
+        String lostDispute = "dp_lost_" + lostPayment;
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
+                lostPayment, lostOrder, userId, lostSession);
+        providerWebhook("checkout.session.completed", lostSession, "paid", "1.00", "USD", lostTransaction);
+        providerWebhook("payment.dispute.opened", lostDispute, "disputed", "1.00", "USD", lostTransaction);
+        providerWebhook("payment.dispute.lost", lostDispute, "lost", "1.00", "USD", lostTransaction);
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?", String.class, lostPayment)).isEqualTo("REVERSED");
+        assertThat(jdbc.queryForObject("SELECT reversed_amount FROM payments WHERE id=?", BigDecimal.class, lostPayment)).isEqualByComparingTo("1.00");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_settlements WHERE payment_id=? AND disposition='CHARGEBACK_LOST'", Integer.class, lostPayment)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM payment_reconciliation_cases WHERE payment_id=? AND case_type='CHARGEBACK'", String.class, lostPayment)).isEqualTo("OPEN");
+    }
+
+    @Test
     void retainsOrderOutboxEventAndSchedulesRetryWhenKafkaIsUnavailable() {
         UUID eventId = UUID.randomUUID();
         jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload) "
@@ -2050,9 +2093,14 @@ class CatalogApiIntegrationTests {
     }
 
     private ResponseEntity<String> providerWebhook(String type, String sessionId, String paymentStatus, String amount, String currency) throws Exception {
+        return providerWebhook(type,sessionId,paymentStatus,amount,currency,null);
+    }
+
+    private ResponseEntity<String> providerWebhook(String type,String sessionId,String paymentStatus,String amount,String currency,String transactionReference) throws Exception {
         String eventId = "evt_test_" + UUID.nameUUIDFromBytes((type + ":" + sessionId).getBytes(StandardCharsets.UTF_8));
         String body = "{\"id\":\"" + eventId + "\",\"type\":\"" + type + "\",\"data\":{\"object\":{\"id\":\"" + sessionId
-                + "\",\"payment_status\":\"" + paymentStatus + "\",\"amount\":\"" + amount + "\",\"currency\":\"" + currency + "\"}}}";
+                + "\",\"payment_status\":\"" + paymentStatus + "\",\"amount\":\"" + amount + "\",\"currency\":\"" + currency + "\""
+                + (transactionReference==null?"":",\"transactionReference\":\""+transactionReference+"\"") + "}}}";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
         headers.set("Provider-Signature", "integration-test-signature");
@@ -2850,10 +2898,17 @@ class CatalogApiIntegrationTests {
                         JsonNode event = mapper.readTree(rawBody);
                         String type = event.path("type").asText();
                         String state = event.path("data").path("object").path("payment_status").asText();
-                        PaymentState paymentState = "checkout.session.expired".equals(type) ? PaymentState.EXPIRED
-                                : "paid".equals(state) ? PaymentState.CAPTURED : PaymentState.PENDING;
+                        PaymentState paymentState = switch(type){
+                            case "checkout.session.expired" -> PaymentState.EXPIRED;
+                            case "payment.dispute.opened" -> PaymentState.DISPUTED;
+                            case "payment.dispute.won" -> PaymentState.DISPUTE_WON;
+                            case "payment.dispute.lost" -> PaymentState.DISPUTE_LOST;
+                            case "payment.reversed" -> PaymentState.REVERSED;
+                            default -> "paid".equals(state) ? PaymentState.CAPTURED : PaymentState.PENDING;
+                        };
                         JsonNode object = event.path("data").path("object");
-                        return new WebhookResult(event.path("id").asText(), type, object.path("id").asText(), paymentState,
+                        return new WebhookResult(event.path("id").asText(), type, object.path("id").asText(),
+                                object.has("transactionReference")?object.path("transactionReference").asText():null,paymentState,
                                 new BigDecimal(object.path("amount").asText()), object.path("currency").asText(), true);
                     } catch (RuntimeException invalid) {
                         return new WebhookResult("", "", "", PaymentState.FAILED, false);

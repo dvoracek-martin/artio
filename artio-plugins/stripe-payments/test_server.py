@@ -130,8 +130,42 @@ class StripeExtensionTests(unittest.TestCase):
             "headers": {"stripe-signature": header}, "rawBodyBase64": base64.b64encode(body).decode(),
         }, {})
         self.assertEqual({"providerEventId": "evt_123", "eventType": "checkout.session.completed",
-                          "providerReference": "cs_123", "state": "CAPTURED", "amount": "12.50",
+                          "providerReference": "cs_123", "transactionReference": None, "state": "CAPTURED", "amount": "12.50",
                           "currency": "CHF", "verified": True}, result)
+
+    def test_dispute_events_are_correlated_to_payment_intent(self):
+        secret = "whsec_test"
+        timestamp = str(int(time.time()))
+        body = json.dumps({"id": "evt_dispute", "type": "charge.dispute.created", "data": {
+            "object": {"id": "dp_123", "payment_intent": "pi_123", "amount": 725,
+                       "currency": "chf", "status": "needs_response"}}}).encode()
+        digest = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+
+        result = server.operation({"webhookSecret": secret}, "verifyWebhook", {
+            "headers": {"stripe-signature": f"t={timestamp},v1={digest}"},
+            "rawBodyBase64": base64.b64encode(body).decode(),
+        }, {})
+
+        self.assertEqual("DISPUTED", result["state"])
+        self.assertEqual("dp_123", result["providerReference"])
+        self.assertEqual("pi_123", result["transactionReference"])
+        self.assertEqual("7.25", result["amount"])
+
+    def test_lost_dispute_is_a_reversal(self):
+        secret = "whsec_test"
+        timestamp = str(int(time.time()))
+        body = json.dumps({"id": "evt_lost", "type": "charge.dispute.closed", "data": {
+            "object": {"id": "dp_123", "payment_intent": "pi_123", "amount": 725,
+                       "currency": "chf", "status": "lost"}}}).encode()
+        digest = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+
+        result = server.operation({"webhookSecret": secret}, "verifyWebhook", {
+            "headers": {"stripe-signature": f"t={timestamp},v1={digest}"},
+            "rawBodyBase64": base64.b64encode(body).decode(),
+        }, {})
+
+        self.assertEqual("DISPUTE_LOST", result["state"])
+        self.assertEqual("dp_123", result["providerReference"])
 
     def test_credential_errors_never_return_secret_values(self):
         with self.assertRaises(server.ProviderError) as error:

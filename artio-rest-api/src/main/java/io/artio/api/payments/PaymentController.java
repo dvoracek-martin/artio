@@ -321,8 +321,8 @@ public class PaymentController {
         UUID settlementId = UUID.randomUUID();
         jdbc.update("INSERT INTO payment_settlements(settlement_id,payment_id,provider_event_id,provider_reference,amount,currency,disposition) VALUES (?,?,?,?,?,?,'APPLIED')",
                 settlementId, payment.id(), "buyer-return:" + payment.id(), providerReference, result.amount(), result.currency().trim().toUpperCase(java.util.Locale.ROOT));
-        jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status='CAPTURED',updated_at=now() WHERE id=? AND status='PENDING'",
-                result.amount(), result.currency().trim().toUpperCase(java.util.Locale.ROOT), payment.id());
+        jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,provider_transaction_reference=COALESCE(?,provider_transaction_reference),status='CAPTURED',updated_at=now() WHERE id=? AND status='PENDING'",
+                result.amount(), result.currency().trim().toUpperCase(java.util.Locale.ROOT), result.transactionReference(), payment.id());
         jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", payment.id());
         int changed = jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
         if (changed > 0) {
@@ -381,13 +381,14 @@ public class PaymentController {
         int inserted = jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type) VALUES (?,?,?) ON CONFLICT DO NOTHING",
                 providerKey, event.providerEventId(), event.eventType());
         if (inserted == 0) return Map.of("status", "duplicate");
-        if (event.providerReference() == null || event.providerReference().isBlank()) {
+        if ((event.providerReference() == null || event.providerReference().isBlank())
+                && (event.transactionReference() == null || event.transactionReference().isBlank())) {
             markProviderWebhookProcessed(providerKey, event.providerEventId());
             return Map.of("status", "ignored");
         }
-        UUID linkedPaymentId = paymentIdForReference(event.providerReference(), webhookOwner);
+        UUID linkedPaymentId = paymentIdForReference(event.providerReference(), event.transactionReference(), webhookOwner);
         if (webhookOwner != null) {
-            if (linkedPaymentId == null && paymentReferenceExists(event.providerReference())) {
+            if (linkedPaymentId == null && paymentReferenceExists(event.providerReference(), event.transactionReference())) {
                 markProviderWebhookProcessed(providerKey, event.providerEventId());
                 return Map.of("status", "payment_not_found");
             }
@@ -400,6 +401,61 @@ public class PaymentController {
                     "Payment order is not available yet; retry the provider webhook");
             markProviderWebhookProcessed(providerKey, event.providerEventId());
             return Map.of("status", "ignored");
+        }
+        if (Set.of(PaymentProvider.PaymentState.DISPUTED, PaymentProvider.PaymentState.DISPUTE_WON,
+                PaymentProvider.PaymentState.DISPUTE_LOST, PaymentProvider.PaymentState.REVERSED).contains(event.state())) {
+            var paymentRows = jdbc.query("SELECT COALESCE(a.amount,p.amount) expected_amount,COALESCE(p.captured_amount,p.amount) captured_amount,"
+                    + "p.currency,COALESCE(p.captured_currency,p.currency) captured_currency,p.provider_instance_id,p.refunded_amount,p.reversed_amount,p.status "
+                    + "FROM payments p LEFT JOIN payment_attempts a ON a.attempt_id=p.payment_attempt_id WHERE p.id=? AND p.method='EXTENSION' FOR UPDATE OF p",
+                    (rs,row) -> new PaymentRiskRow(rs.getBigDecimal("expected_amount"),rs.getBigDecimal("captured_amount"),rs.getString("currency").trim(),
+                            rs.getString("captured_currency").trim(),rs.getObject("provider_instance_id",UUID.class),rs.getBigDecimal("refunded_amount"),
+                            rs.getBigDecimal("reversed_amount"),rs.getString("status")),linkedPaymentId);
+            if(paymentRows.isEmpty()){
+                markProviderWebhookProcessed(providerKey,event.providerEventId());
+                return Map.of("status","payment_not_found");
+            }
+            PaymentRiskRow payment=paymentRows.getFirst();
+            if(!Set.of("CAPTURED","CAPTURE_REVIEW","PARTIALLY_REFUNDED","REFUNDED","REVERSED").contains(payment.status()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"A provider dispute or reversal does not match a captured payment");
+            if(event.amount()==null||event.amount().signum()<=0||event.currency()==null||event.currency().length()!=3
+                    ||webhookOwner!=null&&!webhookOwner.instanceId().equals(payment.instanceId()))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Provider risk event amount or owner does not match the payment");
+            String currency=event.currency().trim().toUpperCase(java.util.Locale.ROOT);
+            if(!currency.equalsIgnoreCase(payment.capturedCurrency()))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Provider risk event currency does not match the captured payment");
+            String disposition=switch(event.state()){
+                case DISPUTED -> "CHARGEBACK_OPEN";
+                case DISPUTE_WON -> "CHARGEBACK_WON";
+                case DISPUTE_LOST -> "CHARGEBACK_LOST";
+                case REVERSED -> "PAYMENT_REVERSAL";
+                default -> throw new IllegalStateException("Unexpected payment risk state");
+            };
+            UUID settlementId=UUID.randomUUID();
+            jdbc.update("INSERT INTO payment_settlements(settlement_id,payment_id,provider_event_id,provider_reference,amount,currency,disposition) VALUES (?,?,?,?,?,?,?)",
+                    settlementId,linkedPaymentId,event.providerEventId(),event.providerReference(),event.amount(),currency,disposition);
+            boolean openChargeback=Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payment_reconciliation_cases c JOIN payment_settlements s ON s.settlement_id=c.settlement_id WHERE c.payment_id=? AND c.case_type='CHARGEBACK' AND c.status='OPEN' AND s.provider_reference=? AND s.disposition='CHARGEBACK_OPEN')",Boolean.class,linkedPaymentId,event.providerReference()));
+            String caseType=event.state()==PaymentProvider.PaymentState.REVERSED?"PAYMENT_REVERSAL"
+                    :event.state()==PaymentProvider.PaymentState.DISPUTED||event.state()==PaymentProvider.PaymentState.DISPUTE_LOST&&!openChargeback?"CHARGEBACK":null;
+            if(caseType!=null)jdbc.update("INSERT INTO payment_reconciliation_cases(case_id,payment_id,order_id,settlement_id,case_type,expected_amount,captured_amount,expected_currency,captured_currency) VALUES (?,?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(),linkedPaymentId,orderId,settlementId,caseType,payment.expectedAmount(),event.amount(),payment.currency(),currency);
+            if(event.state()==PaymentProvider.PaymentState.DISPUTED){
+                jdbc.update("UPDATE payments SET provider_transaction_reference=COALESCE(?,provider_transaction_reference),status='CAPTURE_REVIEW',updated_at=now() WHERE id=?",
+                        event.transactionReference(),linkedPaymentId);
+            }else if(event.state()==PaymentProvider.PaymentState.DISPUTE_WON){
+                jdbc.update("UPDATE payment_reconciliation_cases c SET status='RESOLVED',resolution_note='Provider resolved the chargeback in the merchant’s favor',resolved_at=now() WHERE c.payment_id=? AND c.case_type='CHARGEBACK' AND c.status='OPEN' AND c.settlement_id IN (SELECT settlement_id FROM payment_settlements WHERE provider_reference=? AND disposition='CHARGEBACK_OPEN')",linkedPaymentId,event.providerReference());
+                jdbc.update("UPDATE payments p SET provider_transaction_reference=COALESCE(?,provider_transaction_reference),status=CASE WHEN p.refunded_amount>=COALESCE(p.captured_amount,p.amount) THEN 'REFUNDED' WHEN p.refunded_amount>0 THEN 'PARTIALLY_REFUNDED' ELSE 'CAPTURED' END,updated_at=now() WHERE p.id=? AND p.status='CAPTURE_REVIEW' AND NOT EXISTS (SELECT 1 FROM payment_reconciliation_cases c WHERE c.payment_id=p.id AND c.status='OPEN')",
+                        event.transactionReference(),linkedPaymentId);
+            }else{
+                BigDecimal remainingCapture=payment.capturedAmount().subtract(payment.refundedAmount()).subtract(payment.reversedAmount());
+                if(event.amount().compareTo(remainingCapture)>0)
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Provider reversal exceeds the remaining captured balance");
+                jdbc.update("UPDATE payments SET provider_transaction_reference=COALESCE(?,provider_transaction_reference),reversed_amount=reversed_amount+?,status='REVERSED',updated_at=now() WHERE id=?",
+                        event.transactionReference(),event.amount(),linkedPaymentId);
+                if(event.state()==PaymentProvider.PaymentState.DISPUTE_LOST)
+                    jdbc.update("UPDATE payment_reconciliation_cases c SET resolution_note='Provider ruled against the merchant; the disputed funds were reversed' WHERE c.payment_id=? AND c.case_type='CHARGEBACK' AND c.status='OPEN' AND c.settlement_id IN (SELECT settlement_id FROM payment_settlements WHERE provider_reference=? AND disposition='CHARGEBACK_OPEN')",linkedPaymentId,event.providerReference());
+            }
+            markProviderWebhookProcessed(providerKey,event.providerEventId());
+            return Map.of("status","reconciliation_required");
         }
         if (event.state() == PaymentProvider.PaymentState.CAPTURED) {
             var settlements = jdbc.query("SELECT p.id,COALESCE(a.amount,p.amount) amount,p.currency,p.provider_instance_id,p.status FROM payments p LEFT JOIN payment_attempts a ON a.attempt_id=p.payment_attempt_id WHERE p.id=? AND p.method='EXTENSION'",
@@ -436,12 +492,12 @@ public class PaymentController {
                         UUID.randomUUID(), settlement.id(), orderId, settlementId, caseType, settlement.amount(), event.amount(), settlement.currency(), capturedCurrency);
             }
             if ("UNDERPAYMENT".equals(disposition) || "CURRENCY_MISMATCH".equals(disposition)) {
-            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status='CAPTURE_REVIEW',updated_at=now() WHERE id=?", event.amount(), capturedCurrency, settlement.id());
+            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,provider_transaction_reference=COALESCE(?,provider_transaction_reference),status='CAPTURE_REVIEW',updated_at=now() WHERE id=?", event.amount(), capturedCurrency, event.transactionReference(), settlement.id());
                 jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", settlement.id());
                 markProviderWebhookProcessed(providerKey, event.providerEventId());
                 return Map.of("status", "reconciliation_required");
             }
-            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status='CAPTURED',updated_at=now() WHERE id=? AND status IN ('PENDING','FAILED','CANCELLED','CAPTURED')", event.amount(), capturedCurrency, settlement.id());
+            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,provider_transaction_reference=COALESCE(?,provider_transaction_reference),status='CAPTURED',updated_at=now() WHERE id=? AND status IN ('PENDING','FAILED','CANCELLED','CAPTURED')", event.amount(), capturedCurrency, event.transactionReference(), settlement.id());
             jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", settlement.id());
             if ("LATE_CAPTURE".equals(disposition)) {
                 markProviderWebhookProcessed(providerKey, event.providerEventId());
@@ -494,24 +550,25 @@ public class PaymentController {
         jdbc.update("UPDATE payment_webhook_receipts SET processed_at=now() WHERE provider=? AND event_id=?", providerKey, eventId);
     }
 
-    private boolean paymentReferenceExists(String providerReference) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payments WHERE provider_reference=? AND method='EXTENSION')",
-                Boolean.class, providerReference));
+    private boolean paymentReferenceExists(String providerReference,String transactionReference) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payments WHERE method='EXTENSION' AND "
+                + "(provider_reference IN (?,?) OR provider_transaction_reference IN (?,?))",Boolean.class,
+                providerReference,transactionReference,providerReference,transactionReference));
     }
 
-    private UUID paymentIdForReference(String providerReference, PaymentProvider.ProviderOwner owner) {
-        if (owner != null) return jdbc.query("SELECT id FROM payments WHERE provider_reference=? AND method='EXTENSION' AND provider_plugin_id IS NOT NULL "
+    private UUID paymentIdForReference(String providerReference,String transactionReference,PaymentProvider.ProviderOwner owner) {
+        if (owner != null) return jdbc.query("SELECT id FROM payments WHERE (provider_reference IN (?,?) OR provider_transaction_reference IN (?,?)) AND method='EXTENSION' AND provider_plugin_id IS NOT NULL "
                         + "AND provider_instance_id=? AND provider_release_id IS NOT DISTINCT FROM ? AND provider_configuration_generation=? "
                         + "AND provider_account_fingerprint IS NOT DISTINCT FROM ?",
-                (rs, row) -> rs.getObject(1, UUID.class), providerReference, owner.instanceId(), owner.releaseId(),
+                (rs, row) -> rs.getObject(1, UUID.class), providerReference,transactionReference,providerReference,transactionReference,owner.instanceId(), owner.releaseId(),
                 owner.configurationGeneration(), owner.externalAccountFingerprint()).stream().findFirst().orElse(null);
         if (!extensionProviderId.isBlank()) {
-            UUID configured = jdbc.query("SELECT id FROM payments WHERE provider_reference=? AND method='EXTENSION' AND provider_plugin_id=?",
-                    (rs, row) -> rs.getObject(1, UUID.class), providerReference, extensionProviderId).stream().findFirst().orElse(null);
+            UUID configured = jdbc.query("SELECT id FROM payments WHERE (provider_reference IN (?,?) OR provider_transaction_reference IN (?,?)) AND method='EXTENSION' AND provider_plugin_id=?",
+                    (rs, row) -> rs.getObject(1, UUID.class), providerReference,transactionReference,providerReference,transactionReference,extensionProviderId).stream().findFirst().orElse(null);
             if (configured != null) return configured;
         }
-        return jdbc.query("SELECT id FROM payments WHERE provider_reference=? AND method='EXTENSION' AND provider_plugin_id IS NULL",
-                (rs, row) -> rs.getObject(1, UUID.class), providerReference).stream().findFirst().orElse(null);
+        return jdbc.query("SELECT id FROM payments WHERE (provider_reference IN (?,?) OR provider_transaction_reference IN (?,?)) AND method='EXTENSION' AND provider_plugin_id IS NULL",
+                (rs, row) -> rs.getObject(1, UUID.class), providerReference,transactionReference,providerReference,transactionReference).stream().findFirst().orElse(null);
     }
 
     private UUID lockOrderForPayment(UUID paymentId) {
@@ -528,14 +585,14 @@ public class PaymentController {
         if (role == null || !Set.of("ADMIN", "SUPERADMIN").contains(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Idempotency-Key header is required");
-        var payments = jdbc.query("SELECT provider_reference,status,COALESCE(captured_amount,amount) amount,refunded_amount,COALESCE(captured_currency,currency) currency,method,order_id,user_id,gift_card_id,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM payments WHERE id=? FOR UPDATE",
-                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getString(5).trim(),rs.getString(6),rs.getObject(7,UUID.class),rs.getObject(8,UUID.class),rs.getObject(9,UUID.class),providerOwner(rs,10)),paymentId);
+        var payments = jdbc.query("SELECT provider_reference,status,COALESCE(captured_amount,amount) amount,refunded_amount,reversed_amount,COALESCE(captured_currency,currency) currency,method,order_id,user_id,gift_card_id,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM payments WHERE id=? FOR UPDATE",
+                (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getBigDecimal(5),rs.getString(6).trim(),rs.getString(7),rs.getObject(8,UUID.class),rs.getObject(9,UUID.class),rs.getObject(10,UUID.class),providerOwner(rs,11)),paymentId);
         if (payments.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
         RefundRow payment = payments.getFirst();
         var priorRows = jdbc.query("SELECT id,amount,status,provider_reference FROM payment_refunds WHERE payment_id=? AND idempotency_key=?",
                 (rs,n)->new RefundRecord(rs.getObject("id",UUID.class),rs.getBigDecimal("amount"),rs.getString("status"),rs.getString("provider_reference")),paymentId,idempotencyKey);
         RefundRecord prior = priorRows.isEmpty() ? null : priorRows.getFirst();
-        BigDecimal remaining = payment.amount().subtract(payment.refundedAmount());
+        BigDecimal remaining = payment.amount().subtract(payment.refundedAmount()).subtract(payment.reversedAmount());
         if (prior != null && prior.status().equals("COMPLETED")) {
             if (command != null && command.amount() != null && prior.amount().compareTo(command.amount()) != 0)
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"This idempotency key was already used for a different refund amount");
@@ -544,6 +601,8 @@ public class PaymentController {
         }
         if (!Set.of("CAPTURED", "CAPTURE_REVIEW", "PARTIALLY_REFUNDED").contains(payment.status()))
             throw new ResponseStatusException(HttpStatus.CONFLICT,"Only captured payments can be refunded");
+        if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM payment_reconciliation_cases WHERE payment_id=? AND case_type IN ('CHARGEBACK','PAYMENT_REVERSAL') AND status='OPEN')",Boolean.class,paymentId)))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"A provider dispute or reversal must be reconciled before issuing a refund");
         BigDecimal refundAmount = command == null || command.amount() == null ? remaining : command.amount();
         int fractionDigits = Currency.getInstance(payment.currency()).getDefaultFractionDigits();
         if (fractionDigits < 0 || refundAmount.signum() <= 0 || refundAmount.compareTo(remaining) > 0 || refundAmount.stripTrailingZeros().scale() > fractionDigits)
@@ -588,7 +647,7 @@ public class PaymentController {
         OrderTimelineEvents.record(jdbc,payment.orderId(),UUID.fromString(auth.getToken().getSubject()),"PAYMENT_REFUNDED",
                 "Refund processed: "+refundAmount.toPlainString()+" "+payment.currency(),true);
         return ResponseEntity.ok(new RefundView(refundId,paymentId,refundAmount,payment.currency(),totalRefunded,
-                payment.amount().subtract(totalRefunded),providerReference,"COMPLETED"));
+                payment.amount().subtract(totalRefunded).subtract(payment.reversedAmount()),providerReference,"COMPLETED"));
     }
 
     public record CheckoutSession(String sessionId,String checkoutUrl){}
@@ -608,9 +667,10 @@ public class PaymentController {
     private static String writeJson(Object value) {
         try { return OWNER_MAPPER.writeValueAsString(value); } catch (Exception invalid) { throw new IllegalStateException("Provider owner scope could not be serialized", invalid); }
     }
-    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,String currency,String method,UUID orderId,UUID userId,UUID giftCardId,PaymentProvider.ProviderOwner owner){}
+    private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,BigDecimal reversedAmount,String currency,String method,UUID orderId,UUID userId,UUID giftCardId,PaymentProvider.ProviderOwner owner){}
     private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference){}
     private record PaymentSettlement(UUID id,BigDecimal amount,String currency,UUID instanceId,String status){}
+    private record PaymentRiskRow(BigDecimal expectedAmount,BigDecimal capturedAmount,String currency,String capturedCurrency,UUID instanceId,BigDecimal refundedAmount,BigDecimal reversedAmount,String status){}
     public record RefundCommand(BigDecimal amount){}
     public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,
                              BigDecimal remainingAmount,String providerReference,String status){}

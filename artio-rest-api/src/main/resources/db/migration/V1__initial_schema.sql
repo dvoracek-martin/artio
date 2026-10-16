@@ -318,7 +318,8 @@ CREATE TABLE payments (
   amount NUMERIC(19,4) NOT NULL CHECK (amount >= 0),
   captured_amount NUMERIC(19,4) CHECK (captured_amount IS NULL OR captured_amount >= 0),
   captured_currency CHAR(3),
-  refunded_amount NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0 AND refunded_amount <= COALESCE(captured_amount,amount)),
+  refunded_amount NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (refunded_amount >= 0),
+  reversed_amount NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (reversed_amount >= 0),
   currency CHAR(3) NOT NULL,
   method VARCHAR(32) NOT NULL,
   payment_method_id VARCHAR(64) CHECK (payment_method_id IS NULL OR payment_method_id ~ '^[a-z][a-z0-9._-]{0,63}$'),
@@ -326,6 +327,7 @@ CREATE TABLE payments (
   status VARCHAR(32) NOT NULL,
   provider_plugin_id VARCHAR(128),
   provider_reference VARCHAR(255) NOT NULL,
+  provider_transaction_reference VARCHAR(255),
   provider_instance_id UUID,
   provider_release_id BIGINT,
   provider_configuration_generation INTEGER CHECK (provider_configuration_generation >= 0),
@@ -335,9 +337,12 @@ CREATE TABLE payments (
   updated_at TIMESTAMPTZ NOT NULL,
   CHECK ((provider_instance_id IS NULL AND provider_release_id IS NULL AND provider_configuration_generation IS NULL)
       OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL AND provider_configuration_generation IS NOT NULL)),
-  CHECK ((captured_amount IS NULL AND captured_currency IS NULL) OR (captured_amount IS NOT NULL AND captured_currency IS NOT NULL))
+  CHECK ((captured_amount IS NULL AND captured_currency IS NULL) OR (captured_amount IS NOT NULL AND captured_currency IS NOT NULL)),
+  CHECK (refunded_amount + reversed_amount <= COALESCE(captured_amount,amount))
 );
 CREATE UNIQUE INDEX uq_payments_provider_reference ON payments(provider_plugin_id,provider_instance_id,provider_account_fingerprint,provider_reference) NULLS NOT DISTINCT;
+CREATE UNIQUE INDEX uq_payments_provider_transaction_reference ON payments(provider_plugin_id,provider_instance_id,provider_account_fingerprint,provider_transaction_reference)
+    WHERE provider_transaction_reference IS NOT NULL;
 CREATE INDEX idx_payments_order ON payments(order_id);
 CREATE INDEX idx_payments_provider_owner ON payments(provider_instance_id,created_at DESC) WHERE provider_instance_id IS NOT NULL;
 -- The selected provider and stable idempotency identity are durable before invoking a PSP.
@@ -377,7 +382,7 @@ CREATE TABLE payment_settlements (
   provider_reference VARCHAR(255) NOT NULL,
   amount NUMERIC(19,4) NOT NULL CHECK (amount >= 0),
   currency CHAR(3) NOT NULL,
-  disposition VARCHAR(32) NOT NULL CHECK (disposition IN ('APPLIED','LATE_CAPTURE','OVERPAYMENT','UNDERPAYMENT','CURRENCY_MISMATCH')),
+  disposition VARCHAR(32) NOT NULL CHECK (disposition IN ('APPLIED','LATE_CAPTURE','OVERPAYMENT','UNDERPAYMENT','CURRENCY_MISMATCH','CHARGEBACK_OPEN','CHARGEBACK_WON','CHARGEBACK_LOST','PAYMENT_REVERSAL')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(payment_id, provider_event_id)
 );
@@ -391,7 +396,7 @@ CREATE TABLE payment_reconciliation_cases (
   payment_id UUID NOT NULL REFERENCES payments(id),
   order_id UUID NOT NULL REFERENCES orders(id),
   settlement_id UUID NOT NULL UNIQUE REFERENCES payment_settlements(settlement_id),
-  case_type VARCHAR(32) NOT NULL CHECK (case_type IN ('LATE_CAPTURE','OVERPAYMENT','UNDERPAYMENT','CURRENCY_MISMATCH')),
+  case_type VARCHAR(32) NOT NULL CHECK (case_type IN ('LATE_CAPTURE','OVERPAYMENT','UNDERPAYMENT','CURRENCY_MISMATCH','CHARGEBACK','PAYMENT_REVERSAL')),
   expected_amount NUMERIC(19,4) NOT NULL CHECK (expected_amount >= 0),
   captured_amount NUMERIC(19,4) NOT NULL CHECK (captured_amount >= 0),
   expected_currency CHAR(3) NOT NULL,

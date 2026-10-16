@@ -130,7 +130,7 @@ def operation(configuration, name, payload, envelope):
         capture = captures[0] if captures else {}
         amount = capture.get("amount") or {}
         state = "CAPTURED" if capture.get("status") == "COMPLETED" else "PENDING"
-        return {"providerReference": reference, "state": state, "amount": amount.get("value"),
+        return {"providerReference": reference, "transactionReference": capture.get("id"), "state": state, "amount": amount.get("value"),
                 "currency": amount.get("currency_code"), "failureCode": None}
     if name == "cancel":
         raise ProviderError(409, "PayPal orders cannot be cancelled through this provider contract")
@@ -164,7 +164,7 @@ def operation(configuration, name, payload, envelope):
         amount = capture.get("amount") or {}
         currency = amount.get("currency_code")
         normalized_amount = amount_text(amount.get("value"), currency)
-        return {"result": {"providerReference": reference, "state": "CAPTURED",
+        return {"result": {"providerReference": reference, "transactionReference": capture.get("id"), "state": "CAPTURED",
                             "amount": normalized_amount, "currency": currency, "failureCode": None}}
     if name == "verifyWebhook":
         raw = payload.get("rawBodyBase64", "")
@@ -192,12 +192,15 @@ def operation(configuration, name, payload, envelope):
         state = "PENDING"
         if event_type == "PAYMENT.CAPTURE.COMPLETED":
             state = "CAPTURED"
+        elif event_type in ("PAYMENT.CAPTURE.REVERSED", "CHECKOUT.PAYMENT-APPROVAL.REVERSED"):
+            state = "REVERSED"
         elif event_type in ("PAYMENT.CAPTURE.DENIED", "PAYMENT.CAPTURE.REFUNDED"):
             state = "FAILED" if event_type.endswith("DENIED") else "REFUNDED"
         amount = resource.get("amount") or {}
-        amount_value = amount_text(amount.get("value"), amount.get("currency_code")) if state == "CAPTURED" else None
+        amount_value = amount_text(amount.get("value"), amount.get("currency_code")) if state in ("CAPTURED", "REVERSED") else None
         return {"providerEventId": event.get("id"), "eventType": event_type,
-                "providerReference": order_id, "state": state, "amount": amount_value,
+                "providerReference": order_id, "transactionReference": related.get("capture_id") or resource.get("id"),
+                "state": state, "amount": amount_value,
                 "currency": amount.get("currency_code"), "verified": True}
     raise ProviderError(400, "Unsupported payment operation")
 

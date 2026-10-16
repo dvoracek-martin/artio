@@ -100,12 +100,12 @@ class ReportingApiIntegrationTests {
         var response = get("/api/v1/admin/reports", ownerToken);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         var report = response.getBody();
-        assertThat(report.path("orders").asLong()).isEqualTo(7);
+        assertThat(report.path("orders").asLong()).isEqualTo(8);
         assertThat(report.path("activeCustomers").asLong()).isEqualTo(3);
         assertThat(report.path("salesByCurrency").size()).isEqualTo(2);
         JsonNode chf = currency(report.path("salesByCurrency"), "CHF");
-        assertThat(chf.path("orders").asLong()).isEqualTo(6);
-        money(chf, "capturedAmount", "180"); money(chf, "refundedAmount", "40"); money(chf, "netCapturedAmount", "140");
+        assertThat(chf.path("orders").asLong()).isEqualTo(7);
+        money(chf, "capturedAmount", "210"); money(chf, "refundedAmount", "40"); money(chf, "reversedAmount", "10"); money(chf, "netCapturedAmount", "160");
         money(currency(report.path("salesByCurrency"), "EUR"), "netCapturedAmount", "200");
         assertThat(report.has("revenue")).isFalse();
         assertThat(report.has("topVariants")).isFalse();
@@ -135,8 +135,8 @@ class ReportingApiIntegrationTests {
         money(currency(report.path("topVariants"), "EUR"), "unitsOnCapturedOrders", "4");
         var lifetime = currency(report.path("customerLifetimeValues"), "CHF");
         assertThat(lifetime.path("customers").asLong()).isEqualTo(3);
-        money(lifetime, "capturedAmount", "480"); money(lifetime, "refundedAmount", "140");
-        money(lifetime, "netCapturedAmount", "340"); money(lifetime, "averageNetCapturedValue", "113.33");
+        money(lifetime, "capturedAmount", "510"); money(lifetime, "refundedAmount", "140"); money(lifetime, "reversedAmount", "10");
+        money(lifetime, "netCapturedAmount", "360"); money(lifetime, "averageNetCapturedValue", "120");
         money(currency(report.path("customerLifetimeValues"), "EUR"), "averageNetCapturedValue", "200");
         install(List.of("ADVANCED_REPORTING"), true);
         assertDenied(get("/api/v1/admin/reports/advanced", ownerToken));
@@ -197,6 +197,10 @@ class ReportingApiIntegrationTests {
         UUID partial = order(buyer, "CHF", "80", "PENDING", recent); payment(partial, buyer, "CHF", "10", "0", "CAPTURED"); item(partial, UUID.randomUUID(), "CHF", 8, "10");
         UUID cancelled = order(owner, "CHF", "400", "CANCELLED", recent); payment(cancelled, owner, "CHF", "400", "0", "FAILED");
         UUID returned = order(other, "CHF", "20", "PAID", recent); payment(returned, other, "CHF", "20", "20", "REFUNDED"); item(returned, UUID.randomUUID(), "CHF", 1, "20");
+        UUID reversedOrder = order(other, "CHF", "30", "PAID", recent);
+        UUID reversedPayment = payment(reversedOrder, other, "CHF", "30", "0", "REVERSED");
+        jdbc.update("UPDATE payments SET captured_amount=30,captured_currency='CHF',reversed_amount=10 WHERE id=?",reversedPayment);
+        item(reversedOrder, UUID.randomUUID(), "CHF", 3, "10");
         UUID old = order(owner, "CHF", "300", "PAID", Instant.now().minusSeconds(40 * 86400)); payment(old, owner, "CHF", "300", "100", "PARTIALLY_REFUNDED"); item(old, UUID.randomUUID(), "CHF", 30, "10");
         UUID future = order(owner, "USD", "1000", "PAID", Instant.now().plusSeconds(86400)); payment(future, owner, "USD", "1000", "0", "CAPTURED");
         return variant;
@@ -208,11 +212,12 @@ class ReportingApiIntegrationTests {
                 id, user, status, new BigDecimal(amount), new BigDecimal(amount), currency, Timestamp.from(created), id.toString());
         return id;
     }
-    private void payment(UUID order, UUID user, String currency, String amount, String refunded, String status) {
+    private UUID payment(UUID order, UUID user, String currency, String amount, String refunded, String status) {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,refunded_amount,currency,method,status,provider_reference,created_at,updated_at) VALUES (?,?,?,?,?,?,'EXTENSION',?,?,now(),now())",
                 id, order, user, new BigDecimal(amount), new BigDecimal(refunded), currency, status, "report-fixture:" + id);
         if (new BigDecimal(refunded).signum() > 0) jdbc.update("INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,currency,status) VALUES (?,?,?,?,?,'COMPLETED')", UUID.randomUUID(), id, id.toString(), new BigDecimal(refunded), currency);
+        return id;
     }
     private void item(UUID order, UUID variant, String currency, int quantity, String price) {
         jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency) VALUES (?,?,?,?,?,?)", UUID.randomUUID(), order, variant, quantity, new BigDecimal(price), currency);

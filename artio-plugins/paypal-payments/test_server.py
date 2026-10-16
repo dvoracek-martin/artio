@@ -109,6 +109,27 @@ class PayPalTests(unittest.TestCase):
         self.assertEqual("WH-test123", verification["webhook_id"])
         self.assertEqual("tx", verification["transmission_id"])
 
+    @patch("server.urlopen", side_effect=[
+        FakeResponse({"access_token": "access-token"}),
+        FakeResponse({"verification_status": "SUCCESS"})
+    ])
+    def test_reversed_capture_webhook_carries_order_and_capture_references(self, request):
+        event = {"id": "WH-REVERSED-1", "event_type": "PAYMENT.CAPTURE.REVERSED",
+                 "resource": {"id": "CAPTURE-12345678", "amount": {"value": "42.50", "currency_code": "USD"},
+                              "supplementary_data": {"related_ids": {"order_id": "ORDER-12345678",
+                                                                          "capture_id": "CAPTURE-12345678"}}}}
+        payload = {"headers": {"paypal-transmission-id": "tx", "paypal-transmission-time": "time",
+                    "paypal-transmission-sig": "signature", "paypal-cert-url": "https://api.paypal.com/cert",
+                    "paypal-auth-algo": "SHA256withRSA"},
+                   "rawBodyBase64": base64.b64encode(json.dumps(event).encode()).decode()}
+
+        result = server.operation(self.config, "verifyWebhook", payload, self.envelope)
+
+        self.assertEqual("REVERSED", result["state"])
+        self.assertEqual("ORDER-12345678", result["providerReference"])
+        self.assertEqual("CAPTURE-12345678", result["transactionReference"])
+        self.assertEqual("42.50", result["amount"])
+
 
 if __name__ == "__main__":
     unittest.main()

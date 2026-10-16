@@ -128,8 +128,8 @@ public class PaymentReconciliationWorker {
             if (caseType != null) jdbc.update("INSERT INTO payment_reconciliation_cases(case_id,payment_id,order_id,settlement_id,case_type,expected_amount,captured_amount,expected_currency,captured_currency) VALUES (?,?,?,?,?,?,?,?,?)",
                     UUID.randomUUID(), payment.id(), orderId, settlementId, caseType, payment.amount(), result.amount(), payment.currency(), captureCurrency);
             boolean review = "UNDERPAYMENT".equals(disposition) || "CURRENCY_MISMATCH".equals(disposition);
-            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,status=?,updated_at=now(),reconciliation_claimed_at=NULL WHERE id=? AND status IN ('PENDING','FAILED','CANCELLED')",
-                    result.amount(), captureCurrency, review ? "CAPTURE_REVIEW" : "CAPTURED", payment.id());
+            jdbc.update("UPDATE payments SET captured_amount=?,captured_currency=?,provider_transaction_reference=COALESCE(?,provider_transaction_reference),status=?,updated_at=now(),reconciliation_claimed_at=NULL WHERE id=? AND status IN ('PENDING','FAILED','CANCELLED')",
+                    result.amount(), captureCurrency, result.transactionReference(), review ? "CAPTURE_REVIEW" : "CAPTURED", payment.id());
             jdbc.update("UPDATE payment_attempts SET status='CAPTURED',updated_at=now() WHERE attempt_id=(SELECT payment_attempt_id FROM payments WHERE id=?)", payment.id());
             int paid = review || "LATE_CAPTURE".equals(disposition) ? 0
                     : jdbc.update("UPDATE orders SET status='PAID' WHERE id=? AND status='PENDING'", orderId);
