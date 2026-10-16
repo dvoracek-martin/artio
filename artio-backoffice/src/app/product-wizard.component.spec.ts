@@ -73,7 +73,7 @@ describe('ProductWizardComponent', () => {
     );
     fixture.detectChanges();
 
-    expect(fixture.componentInstance.loading).toBe(false);
+    expect(fixture.componentInstance.optionsLoading).toBe(false);
     expect(fixture.nativeElement.textContent).toContain('Catalog options are unavailable.');
     expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Reload catalog options');

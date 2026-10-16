@@ -4,6 +4,7 @@ plugins {
 }
 
 dependencies {
+    implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("software.amazon.awssdk:s3:2.55.14")
     implementation("software.amazon.awssdk:url-connection-client:2.55.14")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")

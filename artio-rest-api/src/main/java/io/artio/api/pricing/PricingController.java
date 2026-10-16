@@ -14,6 +14,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
     @GetMapping("/tax-rules") public List<PricingApplicationService.TaxView> taxes(){return pricing.taxRules();}
     @GetMapping("/tax-rules/sellables/categories") public List<TaxCategoryView> assignedCategories(){return pricing.assignedTaxCategories().entrySet().stream().map(entry->new TaxCategoryView(entry.getKey(),entry.getValue())).toList();}
     @PostMapping("/tax-rules") public ResponseEntity<PricingApplicationService.TaxView> createTax(@RequestBody PricingApplicationService.TaxRequest request){var t=pricing.createTaxRule(request);return ResponseEntity.created(URI.create("/api/v1/tax-rules/"+t.id())).body(t);}
+    @PutMapping("/tax-rules/{id}") public PricingApplicationService.TaxView updateTax(@PathVariable UUID id,@RequestBody PricingApplicationService.TaxRequest request){return pricing.updateTaxRule(id,request);}
+    @DeleteMapping("/tax-rules/{id}") public ResponseEntity<Void> deleteTax(@PathVariable UUID id){pricing.deleteTaxRule(id);return ResponseEntity.noContent().build();}
     @PutMapping("/tax-rules/{id}/active") public PricingApplicationService.TaxView setTaxActive(@PathVariable UUID id,@RequestBody ActiveRequest request){return pricing.setTaxActive(id,request.active());}
     @PutMapping("/tax-rules/sellables/{sellableId}/category") public TaxCategoryView assignTaxCategory(@PathVariable UUID sellableId,@RequestBody TaxCategoryRequest request){return new TaxCategoryView(sellableId,pricing.assignTaxCategory(sellableId,request.category()));}
     @PostMapping("/pricing/quote") public io.artio.pricing.PricingQuote quote(@RequestBody PricingApplicationService.QuoteRequest request){return pricing.quote(request);}

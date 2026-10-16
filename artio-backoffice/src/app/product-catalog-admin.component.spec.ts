@@ -40,4 +40,15 @@ describe('ProductCatalogAdminComponent', () => {
 
     expect(commands).toEqual(['newProduct']);
   });
+
+  it('keeps search inline and removes CSV actions from the product page', () => {
+    const fixture = TestBed.createComponent(ProductCatalogAdminComponent);
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.catalog-search-icon svg')).not.toBeNull();
+    expect([...root.querySelectorAll('button')].some(button => button.textContent?.trim() === 'Search')).toBe(false);
+    expect(root.querySelector('.catalog-data-actions')).toBeNull();
+    expect([...root.querySelectorAll('button')].some(button => /import csv|export csv/i.test(button.textContent ?? ''))).toBe(false);
+  });
 });

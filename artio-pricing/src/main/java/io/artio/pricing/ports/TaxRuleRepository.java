@@ -5,6 +5,7 @@ public interface TaxRuleRepository {
     Optional<TaxRule> findById(TaxRuleId id);
     List<TaxRule> findAll();
     void save(TaxRule rule);
+    void delete(TaxRuleId id);
     TaxCategory categoryFor(UUID sellableId);
     Map<UUID, TaxCategory> assignedCategories();
     void assignCategory(UUID sellableId, TaxCategory category);

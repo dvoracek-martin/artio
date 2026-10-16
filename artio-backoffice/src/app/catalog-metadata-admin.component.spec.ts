@@ -19,32 +19,63 @@ describe('CatalogMetadataAdminComponent', () => {
   });
 
   it.each([
-    ['en', 'Categories', 'Brands', 'Attribute definitions', 'Category name'],
-    ['de', 'Kategorien', 'Marken', 'Attributdefinitionen', 'Kategoriename'],
-    ['it', 'Categorie', 'Marche', 'Definizioni degli attributi', 'Nome categoria'],
-    ['fr', 'Catégories', 'Marques', 'Définitions des attributs', 'Nom de la catégorie']
-  ] as const)('renders catalog labels and empty states in %s', (locale, categories, brands, attributes, categoryName) => {
+    ['en', 'Categories', 'Category name'],
+    ['de', 'Kategorien', 'Kategoriename'],
+    ['it', 'Categorie', 'Nome categoria'],
+    ['fr', 'Catégories', 'Nom de la catégorie']
+  ] as const)('renders the standalone category screen in %s', (locale, categories, categoryName) => {
     setBackofficeLocale(locale as BackofficeLocale);
     const fixture = TestBed.createComponent(CatalogMetadataAdminComponent);
+    fixture.componentRef.setInput('view','categories');
     fixture.detectChanges();
 
     const http = TestBed.inject(HttpTestingController);
     http.expectOne('/api/v1/categories').flush([]);
-    http.expectOne('/api/v1/brands').flush([]);
-    http.expectOne('/api/v1/attribute-definitions').flush([]);
-    http.expectOne('/api/v1/products').flush([]);
     fixture.detectChanges();
 
     const page = fixture.nativeElement.textContent as string;
     expect(page).toContain(categories);
-    expect(page).toContain(brands);
-    expect(page).toContain(attributes);
+    expect(page).not.toContain('Brands');
+    expect(page).not.toContain('Attribute definitions');
     const categoryInput = fixture.nativeElement.querySelector('#new-category-name') as HTMLInputElement;
     expect(categoryInput.labels?.[0]?.textContent?.trim()).toBe(categoryName);
     expect(page).toContain(locale === 'de' ? 'Es sind keine Kategorien konfiguriert.'
       : locale === 'it' ? 'Non è configurata alcuna categoria.'
       : locale === 'fr' ? 'Aucune catégorie n’est configurée.'
       : 'No categories are configured.');
+  });
+
+  it.each([
+    ['en', 'Brands', 'Brand name'],
+    ['de', 'Marken', 'Markenname'],
+    ['it', 'Marche', 'Nome marca'],
+    ['fr', 'Marques', 'Nom de la marque']
+  ] as const)('renders the standalone brand screen in %s', (locale, brands, brandName) => {
+    setBackofficeLocale(locale as BackofficeLocale);
+    const fixture = TestBed.createComponent(CatalogMetadataAdminComponent);
+    fixture.componentRef.setInput('view','brands');
+    fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne('/api/v1/brands').flush([]);
+    fixture.detectChanges();
+    const page = fixture.nativeElement.textContent as string;
+    expect(page).toContain(brands);
+    expect(fixture.nativeElement.querySelector('#new-brand-name')?.labels?.[0]?.textContent?.trim()).toBe(brandName);
+    expect(page).not.toContain('Categories');
+    expect(page).not.toContain('Attribute definitions');
+  });
+
+  it('loads classification and attribute data only on the catalog data page', () => {
+    const fixture = TestBed.createComponent(CatalogMetadataAdminComponent);
+    fixture.detectChanges();
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne('/api/v1/categories').flush([]);
+    http.expectOne('/api/v1/brands').flush([]);
+    http.expectOne('/api/v1/attribute-definitions').flush([]);
+    http.expectOne('/api/v1/products').flush([]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Attribute definitions');
+    expect(fixture.nativeElement.textContent).not.toContain('Add category');
+    expect(fixture.nativeElement.textContent).not.toContain('Add brand');
   });
 
   it.each([
@@ -55,13 +86,11 @@ describe('CatalogMetadataAdminComponent', () => {
   ] as const)('shows the category load fallback in %s', (locale, message) => {
     setBackofficeLocale(locale as BackofficeLocale);
     const fixture = TestBed.createComponent(CatalogMetadataAdminComponent);
+    fixture.componentRef.setInput('view','categories');
     fixture.detectChanges();
 
     const http = TestBed.inject(HttpTestingController);
     http.expectOne('/api/v1/categories').flush(null, { status: 503, statusText: 'Unavailable' });
-    http.expectOne('/api/v1/brands').flush([]);
-    http.expectOne('/api/v1/attribute-definitions').flush([]);
-    http.expectOne('/api/v1/products').flush([]);
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent?.trim()).toBe(message);
@@ -77,12 +106,10 @@ describe('CatalogMetadataAdminComponent', () => {
     });
     try {
       const fixture = TestBed.createComponent(CatalogMetadataAdminComponent);
+      fixture.componentRef.setInput('view','categories');
       fixture.detectChanges();
       const http = TestBed.inject(HttpTestingController);
       http.expectOne('/api/v1/categories').flush([{ id: 'cat-1', name: 'Hardware', parentId: null, active: true }]);
-      http.expectOne('/api/v1/brands').flush([]);
-      http.expectOne('/api/v1/attribute-definitions').flush([]);
-      http.expectOne('/api/v1/products').flush([]);
       fixture.detectChanges();
 
       fixture.componentInstance.editCategory({ id: 'cat-1', name: 'Hardware', parentId: null, active: true });

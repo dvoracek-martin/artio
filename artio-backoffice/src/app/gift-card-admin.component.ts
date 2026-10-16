@@ -18,7 +18,7 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
     <section>
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">{{gt('eyebrow')}}</p><h2>{{gt('issueTitle')}}</h2></div></div>
-        <form class="create-form" (ngSubmit)="issue()">
+        <form class="create-form gift-card-issue-form" (ngSubmit)="issue()">
           <label>{{gt('initialAmount')}}<input type="number" min="0.01" step="0.01" [(ngModel)]="draft.amount" name="amount" required></label>
           <label>{{gt('currency')}}<artio-search-select [(ngModel)]="draft.currency" name="currency" [label]="gt('currencyLabel')" [options]="currencyOptions"></artio-search-select></label>
           <label>{{gt('expiry')}}<input type="date" [(ngModel)]="draft.expiresAt" name="expiresAt"></label>
@@ -29,9 +29,9 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
         }
       </div>
 
-      <div class="panel table-panel">
+      <div class="panel table-panel gift-card-register">
         <div class="panel-heading"><div><p class="eyebrow">{{gt('register')}}</p><h2>{{gt('cards')}}</h2></div><button class="link-button" (click)="load()">{{gt('refresh')}}</button></div>
-        @if (loading) { <p class="muted" role="status">{{gt('loadingCards')}}</p> }
+        @if (loading) { <p class="muted loading-indicator" role="status" aria-live="polite">{{gt('loadingCards')}}</p> }
         <table><thead><tr><th>{{gt('issued')}}</th><th>{{gt('initial')}}</th><th>{{gt('balance')}}</th><th>{{gt('expiryColumn')}}</th><th>{{gt('status')}}</th><th>{{gt('actions')}}</th></tr></thead>
         <tbody>@for (card of cards; track card) {
           <tr>
@@ -64,9 +64,9 @@ type GiftCardTransaction = { id: string; orderId: string | null; paymentRefundId
     }
 
     @if (selectedCard) {
-      <div class="panel table-panel">
+      <div class="panel table-panel gift-card-register">
         <div class="panel-heading"><div><p class="eyebrow">{{gt('immutableLedger')}}</p><h2>{{gt('transactions')}} · {{selectedCard.id}}</h2></div><button class="link-button" (click)="selectedCard=null">{{gt('close')}}</button></div>
-        @if (transactionsLoading) { <p class="muted" role="status">{{gt('loadingTransactions')}}</p> }
+        @if (transactionsLoading) { <p class="muted loading-indicator" role="status" aria-live="polite">{{gt('loadingTransactions')}}</p> }
         <table><thead><tr><th>{{gt('date')}}</th><th>{{gt('kind')}}</th><th>{{gt('amount')}}</th><th>{{gt('orderRefund')}}</th></tr></thead><tbody>
         @for (entry of transactions; track entry) {
           <tr><td>{{entry.createdAt | date:'medium'}}</td><td>{{entry.kind}}</td><td>{{entry.amount}} {{selectedCard.currency}}</td><td>{{entry.orderId||entry.paymentRefundId||'—'}}</td></tr>

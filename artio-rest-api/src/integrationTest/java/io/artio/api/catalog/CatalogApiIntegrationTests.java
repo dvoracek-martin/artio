@@ -2478,6 +2478,32 @@ class CatalogApiIntegrationTests {
         assertThat(otherCategory.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
+    @Test
+    void taxRulesCanBeEditedAndDeleted() {
+        var jurisdiction = "ZZ-EDIT-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(java.util.Locale.ROOT);
+        var from = java.time.Instant.now().minusSeconds(60);
+        var created = adminExchange("/api/v1/tax-rules", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.TaxRequest(jurisdiction,
+                        new BigDecimal("7.5"), from, null, io.artio.pricing.TaxCategory.STANDARD),
+                io.artio.api.pricing.PricingApplicationService.TaxView.class);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var id = created.getBody().id();
+
+        var updated = adminExchange("/api/v1/tax-rules/{id}", HttpMethod.PUT,
+                new io.artio.api.pricing.PricingApplicationService.TaxRequest(jurisdiction,
+                        new BigDecimal("2.5"), from, null, io.artio.pricing.TaxCategory.REDUCED),
+                io.artio.api.pricing.PricingApplicationService.TaxView.class, id);
+        assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updated.getBody().percentage()).isEqualByComparingTo("2.5");
+        assertThat(updated.getBody().category()).isEqualTo(io.artio.pricing.TaxCategory.REDUCED);
+
+        var deleted = adminExchange("/api/v1/tax-rules/{id}", HttpMethod.DELETE, null, Void.class, id);
+        assertThat(deleted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        var remaining = adminExchange("/api/v1/tax-rules", HttpMethod.GET, null,
+                io.artio.api.pricing.PricingApplicationService.TaxView[].class);
+        assertThat(java.util.Arrays.stream(remaining.getBody()).noneMatch(rule -> rule.id().equals(id))).isTrue();
+    }
+
     private boolean reserveIfAvailable(UUID orderId, UUID warehouseId, UUID sellableId) {
         try {
             inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(

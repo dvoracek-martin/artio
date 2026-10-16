@@ -1,17 +1,13 @@
 <section class="product-wizard">
-  <div class="page-intro"><div><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p>{{t('intro')}}</p></div><button type="button" class="secondary" [disabled]="busy" (click)="cancel.emit()">{{productId?t('returnProducts'):t('cancel')}}</button></div>
+  <div class="page-intro"><div><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p>{{t('intro')}}</p></div><div class="wizard-page-actions">@if(draftRestored&&!productId){<button type="button" class="secondary" [disabled]="busy" (click)="discardDraft()">Discard draft</button>}<button type="button" class="secondary" [disabled]="busy" (click)="cancel.emit()">{{productId?t('returnProducts'):t('cancel')}}</button></div></div>
   <ol class="wizard-steps" [attr.aria-label]="t('progress')">@for (label of steps; track label; let index = $index) {
     <li [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{stepDescription(index)}}</small></div></li>
   }</ol>
-  @if (loading) {
-    <p class="notice loading-indicator" role="status" aria-live="polite">{{t('loading')}}</p>
-  }
   @if (error) {
-    <div class="notice error" role="alert">{{error}} @if (!categories.length && step===0) {
+    <div class="notice error" role="alert">{{error}} @if (step===1 && !optionsLoaded) {
       <button class="link-button" (click)="loadOptions()">{{t('reloadOptions')}}</button>
     }</div>
   }
-  @if (!loading) {
     <div class="wizard-layout">
       <div class="panel wizard-main">
         <p class="eyebrow">{{t('stepOf',{step:step+1})}}</p><h2 id="wizard-heading" tabindex="-1">{{steps[step]}}</h2>
@@ -27,13 +23,10 @@
         }
         @if (step===1) {
           <form #organization="ngForm" (ngSubmit)="organization.valid && next()" class="wizard-form">
-            <fieldset class="category-picker"><legend>{{t('categories')}} <small>{{t('chooseOne')}}</small></legend><artio-search-select [label]="t('productCategories')" name="categories" [options]="categoryOptions" [(ngModel)]="draft.categoryIds" [multiple]="true" [placeholder]="t('chooseCategories')"></artio-search-select>@if (!categories.length) {
-            <p class="muted">{{t('noCategories')}}</p>
-            }@if (!categories.length) {
-            <button type="button" class="secondary" (click)="loadOptions()">{{t('reloadCategories')}}</button>
-          }</fieldset>
-          <details class="new-category"><summary>＋ {{t('createCategory')}}</summary><div><label>{{t('categoryName')}}<input name="newCategory" [(ngModel)]="categoryName" maxlength="120" [placeholder]="t('categoryPlaceholder')"></label><button type="button" class="secondary" [disabled]="!categoryName.trim() || creatingCategory" (click)="createCategory()">@if (creatingCategory) {<span class="button-spinner" aria-hidden="true"></span>}{{creatingCategory?t('creating'):t('createSelect')}}</button></div></details>
-          <div class="setup-field"><span>{{t('brandOptional')}}</span><artio-search-select [label]="t('productBrand')" name="brand" [(ngModel)]="draft.brandId" [options]="brandOptions" [placeholder]="t('noBrand')"></artio-search-select></div>
+          @if(optionsLoading||!optionsLoaded){<p class="muted loading-indicator" role="status" aria-live="polite">{{t('loading')}}</p>}
+          <fieldset class="category-picker"><legend>{{t('categories')}} <small>{{t('chooseOne')}}</small></legend>@if(optionsLoaded){<artio-search-select [label]="t('productCategories')" name="categories" [options]="categoryOptions" [(ngModel)]="draft.categoryIds" [multiple]="true" [placeholder]="t('chooseCategories')"></artio-search-select>}</fieldset>
+          <div class="wizard-create-panel" [class.is-open]="categoryCreateOpen"><button type="button" class="wizard-create-toggle" [attr.aria-expanded]="categoryCreateOpen" (click)="categoryCreateOpen=!categoryCreateOpen"><span class="wizard-create-icon" aria-hidden="true">＋</span><span>{{t('createCategory')}}</span></button><div class="wizard-create-content" [attr.aria-hidden]="!categoryCreateOpen" [attr.inert]="categoryCreateOpen?null:''"><div class="wizard-create-content-inner"><div class="wizard-inline-create"><label>{{t('categoryName')}}<input name="newCategory" [(ngModel)]="categoryName" maxlength="120" [placeholder]="t('categoryPlaceholder')"></label><label>{{t('categoryDescription')}}<textarea name="newCategoryDescription" [(ngModel)]="categoryDescription" maxlength="2000" rows="3" [placeholder]="t('categoryDescription')"></textarea></label><button type="button" class="primary" [disabled]="!categoryName.trim() || creatingCategory" (click)="createCategory()">@if (creatingCategory) {<span class="button-spinner" aria-hidden="true"></span>}{{creatingCategory?t('creating'):t('create')}}</button></div></div></div></div>
+          <fieldset class="brand-picker"><legend>{{t('brandOptional')}}</legend>@if(optionsLoaded){<artio-search-select [label]="t('productBrand')" name="brand" [(ngModel)]="draft.brandId" [options]="brandOptions" [placeholder]="t('noBrand')"></artio-search-select>}<div class="wizard-create-panel" [class.is-open]="brandCreateOpen"><button type="button" class="wizard-create-toggle" [attr.aria-expanded]="brandCreateOpen" (click)="brandCreateOpen=!brandCreateOpen"><span class="wizard-create-icon" aria-hidden="true">＋</span><span>{{t('createBrand')}}</span></button><div class="wizard-create-content" [attr.aria-hidden]="!brandCreateOpen" [attr.inert]="brandCreateOpen?null:''"><div class="wizard-create-content-inner"><div class="wizard-inline-create"><label>{{t('brandName')}}<input name="newBrandName" [(ngModel)]="brandDraft.name" maxlength="160" [placeholder]="t('brandName')"></label><label>{{t('brandDescription')}}<input name="newBrandDescription" [(ngModel)]="brandDraft.description" maxlength="1000" [placeholder]="t('brandDescription')"></label><button type="button" class="primary" [disabled]="!brandDraft.name.trim() || creatingBrand" (click)="createBrand()">@if (creatingBrand) {<span class="button-spinner" aria-hidden="true"></span>}{{creatingBrand?t('creating'):t('create')}}</button></div></div></div></div></fieldset>
           @if (attributes.length) {
             <div class="field-divider"><h3>{{t('productAttributes')}}</h3><p>{{t('attributeHelp')}}</p></div>
           }
@@ -44,14 +37,15 @@
             <input [type]="attribute.type==='NUMBER'?'number':'text'" step="any" [name]="attribute.code" [(ngModel)]="draft.attributes[attribute.code]" [required]="attribute.required">
           }</label>
         }
-        <div class="wizard-footer"><button class="secondary" type="button" (click)="back()">← {{t('back')}}</button><button class="primary">{{t('continue')}} →</button></div>
+        <div class="wizard-footer"><button class="secondary" type="button" (click)="back()">← {{t('back')}}</button><button class="primary" [disabled]="optionsLoading || !optionsLoaded || creatingCategory || creatingBrand">{{t('continue')}} →</button></div>
       </form>
     }
     @if (step===2) {
       <div class="wizard-form">
         <p class="muted">{{t('imageHelp')}}</p>
-        @if (!uploadAvailable) { <div class="notice"><p>{{t('storagePluginRequired')}}</p><button type="button" class="link-button" (click)="installStoragePlugin.emit()">{{t('installStoragePlugin')}}</button></div> }
-        @if (uploadAvailable) {
+        @if (storageLoading) { <p class="muted loading-indicator" role="status" aria-live="polite">{{t('checkingStorage')}}</p> }
+        @if (!storageLoading && !uploadAvailable) { <div class="notice"><p>{{t('storagePluginRequired')}}</p><div class="wizard-page-actions"><button type="button" class="link-button" (click)="installStoragePlugin.emit()">{{t('installStoragePlugin')}} ↗</button><button type="button" class="link-button" [disabled]="storageLoading" (click)="refreshStorageAvailability()">{{t('refreshStorage')}}</button></div></div> }
+        @if (!storageLoading && uploadAvailable) {
         <label class="upload-zone" (dragover)="$event.preventDefault()" (drop)="drop($event)"><span class="upload-symbol">↑</span><strong>{{t('dropImages')}}</strong><span>{{t('or')}} <em>{{t('browseFiles')}}</em></span><small>{{t('imageLimits')}}</small><input type="file" accept="image/jpeg,image/png" multiple (change)="selectImages($event)" [attr.aria-label]="t('chooseImages')"></label>
         }
         <div class="wizard-image-grid">@for (image of images; track image; let index = $index) {
@@ -95,5 +89,4 @@
 <div class="preview-category">{{selectedCategories}}</div>
 }</div><div class="wizard-tip"><span>✧</span><div><strong>{{t('tipTitle')}}</strong><p>{{t('tipHelp')}}</p></div></div></aside>
 </div>
-}
 </section>

@@ -17,6 +17,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final StringRedisTemplate redis;
     private final int limit;
     private final boolean enabled;
+    private final boolean redisEnabled;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
     private final java.util.function.LongSupplier timeSource;
     private final java.util.concurrent.atomic.AtomicLong lastPrunedMinute = new java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE);
@@ -26,15 +27,23 @@ public class RateLimitFilter extends OncePerRequestFilter {
     public RateLimitFilter(StringRedisTemplate redis,
                            @Value("${artio.rate-limit.requests-per-minute:100}") int limit,
                            @Value("${artio.rate-limit.enabled:true}") boolean enabled,
+                           @Value("${artio.cache.redis.enabled:false}") boolean redisEnabled,
                            com.fasterxml.jackson.databind.ObjectMapper mapper) {
-        this(redis, limit, enabled, mapper, System::currentTimeMillis);
+        this(redis, limit, enabled, mapper, System::currentTimeMillis, redisEnabled);
     }
 
     RateLimitFilter(StringRedisTemplate redis, int limit, boolean enabled,
             com.fasterxml.jackson.databind.ObjectMapper mapper, java.util.function.LongSupplier timeSource) {
+        this(redis, limit, enabled, mapper, timeSource, true);
+    }
+
+    RateLimitFilter(StringRedisTemplate redis, int limit, boolean enabled,
+            com.fasterxml.jackson.databind.ObjectMapper mapper, java.util.function.LongSupplier timeSource,
+            boolean redisEnabled) {
         this.redis = redis;
         this.limit = limit;
         this.enabled = enabled;
+        this.redisEnabled = redisEnabled;
         this.mapper = mapper;
         this.timeSource = timeSource;
     }
@@ -65,14 +74,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private boolean consume(String key, int threshold, long minute) {
-        try {
-            Long count = redis.opsForValue().increment(key);
-            if (count != null && count == 1L) redis.expire(key, Duration.ofMinutes(2));
-            return count != null && count <= threshold;
-        } catch (RuntimeException unavailable) {
-            Window current = localWindows.compute(key, (storedKey, value) -> value == null || value.minute() != minute ? new Window(minute, 1) : new Window(minute, value.count() + 1));
-            return current.count() <= threshold;
+        if (redisEnabled) {
+            try {
+                Long count = redis.opsForValue().increment(key);
+                if (count != null && count == 1L) redis.expire(key, Duration.ofMinutes(2));
+                return count != null && count <= threshold;
+            } catch (RuntimeException unavailable) {
+                // Use the local limiter immediately if the optional shared cache is unavailable.
+            }
         }
+        Window current = localWindows.compute(key, (storedKey, value) -> value == null || value.minute() != minute ? new Window(minute, 1) : new Window(minute, value.count() + 1));
+        return current.count() <= threshold;
     }
     private record Window(long minute, long count) { }
 }

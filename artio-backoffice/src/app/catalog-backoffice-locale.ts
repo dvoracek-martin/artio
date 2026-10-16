@@ -2,7 +2,7 @@ import type { BackofficeLocale } from './backoffice-locale';
 
 const CATALOG_COPY = {
   en: {
-    structure: 'CATALOG STRUCTURE', categories: 'Categories', refresh: 'Refresh', categoryName: 'Category name',
+    structure: 'CATALOG STRUCTURE', categories: 'Categories', refresh: 'Refresh', searchCategories: 'Search categories', searchBrands: 'Search brands', noMatchingCategories: 'No matching categories.', noMatchingBrands: 'No matching brands.', categoryName: 'Category name',
     edit: 'Edit', parentCategory: 'Parent category', topLevel: 'Top-level category', addCategory: 'Add category',
     childOf: 'Child of {name}', active: 'Active', inactive: 'Inactive', deactivate: 'Deactivate', activate: 'Activate',
     noCategories: 'No categories are configured.', classification: 'PRODUCT CLASSIFICATION', assignData: 'Assign catalog data',
@@ -21,7 +21,7 @@ const CATALOG_COPY = {
     unknownParent: 'Unknown parent'
   },
   de: {
-    structure: 'KATALOGSTRUKTUR', categories: 'Kategorien', refresh: 'Aktualisieren', categoryName: 'Kategoriename',
+    structure: 'KATALOGSTRUKTUR', categories: 'Kategorien', refresh: 'Aktualisieren', searchCategories: 'Kategorien suchen', searchBrands: 'Marken suchen', noMatchingCategories: 'Keine passenden Kategorien gefunden.', noMatchingBrands: 'Keine passenden Marken gefunden.', categoryName: 'Kategoriename',
     edit: 'Bearbeiten', parentCategory: 'Übergeordnete Kategorie', topLevel: 'Oberste Ebene', addCategory: 'Kategorie hinzufügen',
     childOf: 'Unterkategorie von {name}', active: 'Aktiv', inactive: 'Inaktiv', deactivate: 'Deaktivieren', activate: 'Aktivieren',
     noCategories: 'Es sind keine Kategorien konfiguriert.', classification: 'PRODUKTKLASSIFIZIERUNG', assignData: 'Katalogdaten zuweisen',
@@ -40,7 +40,7 @@ const CATALOG_COPY = {
     unknownParent: 'Unbekannte übergeordnete Kategorie'
   },
   it: {
-    structure: 'STRUTTURA DEL CATALOGO', categories: 'Categorie', refresh: 'Aggiorna', categoryName: 'Nome categoria',
+    structure: 'STRUTTURA DEL CATALOGO', categories: 'Categorie', refresh: 'Aggiorna', searchCategories: 'Cerca categorie', searchBrands: 'Cerca marchi', noMatchingCategories: 'Nessuna categoria corrispondente.', noMatchingBrands: 'Nessun marchio corrispondente.', categoryName: 'Nome categoria',
     edit: 'Modifica', parentCategory: 'Categoria superiore', topLevel: 'Livello principale', addCategory: 'Aggiungi categoria',
     childOf: 'Sottocategoria di {name}', active: 'Attiva', inactive: 'Inattiva', deactivate: 'Disattiva', activate: 'Attiva',
     noCategories: 'Non è configurata alcuna categoria.', classification: 'CLASSIFICAZIONE PRODOTTI', assignData: 'Assegna dati catalogo',
@@ -59,7 +59,7 @@ const CATALOG_COPY = {
     unknownParent: 'Categoria superiore sconosciuta'
   },
   fr: {
-    structure: 'STRUCTURE DU CATALOGUE', categories: 'Catégories', refresh: 'Actualiser', categoryName: 'Nom de la catégorie',
+    structure: 'STRUCTURE DU CATALOGUE', categories: 'Catégories', refresh: 'Actualiser', searchCategories: 'Rechercher des catégories', searchBrands: 'Rechercher des marques', noMatchingCategories: 'Aucune catégorie correspondante.', noMatchingBrands: 'Aucune marque correspondante.', categoryName: 'Nom de la catégorie',
     edit: 'Modifier', parentCategory: 'Catégorie parente', topLevel: 'Niveau supérieur', addCategory: 'Ajouter une catégorie',
     childOf: 'Sous-catégorie de {name}', active: 'Active', inactive: 'Inactive', deactivate: 'Désactiver', activate: 'Activer',
     noCategories: 'Aucune catégorie n’est configurée.', classification: 'CLASSIFICATION DES PRODUITS', assignData: 'Attribuer les données du catalogue',

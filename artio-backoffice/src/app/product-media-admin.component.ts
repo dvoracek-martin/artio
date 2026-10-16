@@ -12,13 +12,14 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
     imports: [FormsModule],
     changeDetection: ChangeDetectionStrategy.Eager,
     template: `
-    <section class="panel" aria-labelledby="product-media-heading">
+    <dialog #mediaDialog class="workspace-dialog media-dialog" aria-labelledby="product-media-heading" (close)="close.emit()"><section class="workspace-dialog-panel" aria-labelledby="product-media-heading">
       <div class="panel-heading">
         <div><p class="eyebrow">{{m('eyebrow')}}</p><h2 id="product-media-heading">{{productName}} {{m('titleSuffix')}}</h2></div>
         <button type="button" class="link-button" (click)="close.emit()">{{m('close')}}</button>
       </div>
-      @if (!uploadAvailable) { <div class="notice"><p>{{m('storagePluginRequired')}}</p><button type="button" class="link-button" (click)="installStoragePlugin.emit()">{{m('installStoragePlugin')}}</button></div> }
-      @if (uploadAvailable) { <form class="create-form" (ngSubmit)="upload(uploadInput)">
+      @if (storageLoading) { <p class="muted loading-indicator" role="status">{{m('loading')}}</p> }
+      @if (!storageLoading && !uploadAvailable) { <div class="notice"><p>{{m('storagePluginRequired')}}</p><button type="button" class="link-button" (click)="installStoragePlugin.emit()">{{m('installStoragePlugin')}}</button></div> }
+      @if (!storageLoading && uploadAvailable) { <form class="create-form" (ngSubmit)="upload(uploadInput)">
         <label>{{m('imageFile')}}<input #uploadInput type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" (change)="selectFile($event)" required></label>
         <label>{{m('alternativeText')}}<input [(ngModel)]="altText" name="altText" maxlength="500" [placeholder]="m('alternativeTextPlaceholder')"></label>
         <button class="primary" [disabled]="!file || busy">{{busy?m('uploading'):m('upload')}}</button>
@@ -62,9 +63,10 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
           </form>
         </dialog>
       }
-    </section>`
+    </section></dialog>`
 })
 export class ProductMediaAdminComponent implements OnChanges {
+  @ViewChild('mediaDialog') private mediaDialogRef?:ElementRef<HTMLDialogElement>;
   @ViewChild('deleteDialog') private deleteDialogRef?:ElementRef<HTMLDialogElement>;
   t(key:BackofficeTextKey):string{return backofficeText(currentBackofficeLocale(),key)}
   m(key:ProductMediaLocaleKey,values:Record<string,string>={}):string{return productMediaText(currentBackofficeLocale(),key,values)}
@@ -78,15 +80,16 @@ export class ProductMediaAdminComponent implements OnChanges {
   altText='';
   error='';
   loading=false;
+  storageLoading=false;
   uploadAvailable=false;
   busy=false;
   deleteTarget:ProductMedia|null=null;
   deleteBusy=false;
   deleteError='';
 
-  ngOnChanges(changes:SimpleChanges):void { if(changes['productId']&&this.productId)this.load(); }
+  ngOnChanges(changes:SimpleChanges):void { if(changes['productId']&&this.productId){this.load();setTimeout(()=>{const dialog=this.mediaDialogRef?.nativeElement;if(dialog&&!dialog.open)dialog.showModal()},0)} }
   selectFile(event:Event):void { const input=event.target as HTMLInputElement; this.file=input.files?.[0]??null; this.error=''; }
-  load():void { this.loading=true;this.error='';this.http.get<{uploadAvailable:boolean}>('/api/v1/admin/catalog/media/storage-status').subscribe({next:status=>this.uploadAvailable=status.uploadAvailable,error:()=>this.uploadAvailable=false});this.http.get<ProductMedia[]>(`/api/v1/products/${this.productId}/media`).subscribe({next:items=>{this.items=items;this.loading=false},error:e=>{this.loading=false;this.error=e.error?.message??e.error?.detail??this.m('loadFailure')}}); }
+  load():void { this.loading=true;this.storageLoading=true;this.error='';this.http.get<{uploadAvailable:boolean}>('/api/v1/admin/catalog/media/storage-status').subscribe({next:status=>{this.uploadAvailable=status.uploadAvailable;this.storageLoading=false},error:()=>{this.uploadAvailable=false;this.storageLoading=false}});this.http.get<ProductMedia[]>(`/api/v1/products/${this.productId}/media`).subscribe({next:items=>{this.items=items;this.loading=false},error:e=>{this.loading=false;this.error=e.error?.message??e.error?.detail??this.m('loadFailure')}}); }
   upload(input:HTMLInputElement):void {
     if(this.busy)return;
     if(!this.uploadAvailable){this.error=this.m('storagePluginRequired');return;}

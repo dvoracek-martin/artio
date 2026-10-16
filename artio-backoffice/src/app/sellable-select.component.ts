@@ -12,11 +12,12 @@ type Variant = { id: string; productId: string; name: string; sku: string; activ
     selector: 'artio-sellable-select', imports: [FormsModule, SearchSelectComponent],
     providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SellableSelectComponent), multi: true }],
     changeDetection: ChangeDetectionStrategy.Eager,
-    template: `<artio-search-select [ngModel]="value" (ngModelChange)="select($event)" [ngModelOptions]="{standalone:true}" [label]="label" [options]="options" [multiple]="multiple" [disabled]="disabled" [loading]="loading" [placeholder]="text('sellableSearchPlaceholder')" (search)="query.next($event)"></artio-search-select>@if (!error) {<small class="picker-help">{{text('sellableSearchHelp')}}</small>}@if (error) {<small class="picker-error" role="alert">{{error}} <button type="button" class="link-button" (click)="reload()">{{text('retry')}}</button></small>}`
+    template: `<artio-search-select [ngModel]="value" (ngModelChange)="select($event)" [ngModelOptions]="{standalone:true}" [label]="label" [options]="options" [multiple]="multiple" [disabled]="disabled" [loading]="loading" [placeholder]="text('sellableSearchPlaceholder')" (search)="query.next($event)"></artio-search-select>@if (showHelp && !error) {<small class="picker-help">{{text('sellableSearchHelp')}}</small>}@if (error) {<small class="picker-error" role="alert">{{error}} <button type="button" class="link-button" (click)="reload()">{{text('retry')}}</button></small>}`
 })
 export class SellableSelectComponent implements ControlValueAccessor {
   @Input() label = 'Product variant';
   @Input() multiple = false;
+  @Input() showHelp = true;
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
   query = new Subject<string>();

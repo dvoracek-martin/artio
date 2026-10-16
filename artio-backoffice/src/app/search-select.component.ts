@@ -24,8 +24,8 @@ let nextSelectId = 0;
         </button>
         <span class="sr-only" [id]="id+'-selection'">{{selectionSummary}}</span>
         @if (open) {
-          <div class="search-select-popover" [style.left.px]="position.left" [style.top.px]="position.top" [style.width.px]="position.width" [style.max-height.px]="position.height">
-            <div class="select-search"><span aria-hidden="true">⌕</span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="text('selectSearch',{label})" [placeholder]="text('selectSearchPlaceholder',{label:label.toLowerCase()})" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
+          <div class="search-select-popover" [class.opens-above]="position.up" [style.max-height.px]="position.height">
+            <div class="select-search"><span class="catalog-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10.8" cy="10.8" r="6.3"></circle><path d="m16 16 4.2 4.2"></path></svg></span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="text('selectSearch',{label})" [placeholder]="text('selectSearchPlaceholder',{label:label.toLowerCase()})" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
             @if (loading) {
               <p class="select-no-results loading-indicator" role="status">{{text('selectLoading')}}</p>
             }
@@ -61,7 +61,7 @@ export class SearchSelectComponent implements ControlValueAccessor {
   open = false;
   disabled = false;
   query = '';
-  position={left:0,top:0,width:260,height:340};
+  position={height:340,up:false};
   values: string[] = [];
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private change: (value: string | string[]) => void = () => {};
@@ -78,7 +78,7 @@ export class SearchSelectComponent implements ControlValueAccessor {
   registerOnTouched(fn: () => void): void { this.touched = fn; }
   setDisabledState(value: boolean): void { this.disabled = value; if (value) this.open = false; }
   toggle(): void { this.open ? this.close() : this.openMenu(); }
-  openMenu(event?: Event): void { event?.preventDefault(); if (this.disabled) return; const rect=this.host.nativeElement.getBoundingClientRect();const width=Math.min(Math.max(rect.width,260),window.innerWidth-24);const below=window.innerHeight-rect.bottom-12;const above=rect.top-12;const up=below<270&&above>below;const height=Math.min(this.multiple?370:310,up?above:below);this.position={left:Math.max(12,Math.min(rect.left,window.innerWidth-width-12)),top:up?rect.top-height-6:rect.bottom+6,width,height:Math.max(150,height)};this.open = true; this.query = ''; this.search.emit(''); setTimeout(() => this.host.nativeElement.querySelector<HTMLInputElement>('input')?.focus()); }
+  openMenu(event?: Event): void { event?.preventDefault(); if (this.disabled) return; const rect=this.host.nativeElement.getBoundingClientRect();const below=window.innerHeight-rect.bottom-12;const above=rect.top-12;const up=below<270&&above>below;const height=Math.max(150,Math.min(this.multiple?370:310,up?above:below));this.position={height,up};this.open = true; this.query = ''; this.search.emit(''); setTimeout(() => this.host.nativeElement.querySelector<HTMLInputElement>('input')?.focus()); }
   close(): void { this.open = false; this.touched(); this.host.nativeElement.querySelector<HTMLButtonElement>('.search-select-trigger')?.focus(); }
   choose(value: string): void {
     if(this.options.find(x=>x.value===value)?.disabled)return;
