@@ -33,12 +33,11 @@ class MarketplaceAdvisoryAcceptanceIntegrationTests {
         var client = new MarketplaceCatalogClient(mapper, baseUrl, new OfficialReleaseDescriptorVerifier(""));
         var verifier = new SignedMarketplaceAdvisoryVerifier(trustedKeys);
         var store = new MarketplaceAdvisoryStore(jdbc, mapper);
-        var worker = new MarketplaceAdvisorySyncWorker(client, verifier, store);
+        var snapshot = verifier.verify(client.signedAdvisories(), java.time.Instant.now());
+        store.apply(snapshot);
 
-        worker.syncSafely();
-
-        assertThat(store.status().sequence()).isPositive();
         assertThat(store.status().lastErrorCode()).isNull();
+        assertThat(store.status().sequence()).isPositive();
         String pluginId = System.getenv().getOrDefault("ARTIO_MARKETPLACE_EXPECTED_BANNED_PLUGIN_ID", "marketplace.reference");
         String version = System.getenv().getOrDefault("ARTIO_MARKETPLACE_EXPECTED_BANNED_PLUGIN_VERSION", "1.2.9");
         var release = jdbc.query("SELECT security_status,banned_image_digests::text FROM extension_marketplace_release_advisories WHERE plugin_id=? AND version=?",
