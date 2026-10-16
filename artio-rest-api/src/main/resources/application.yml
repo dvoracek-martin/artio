@@ -59,6 +59,7 @@ management:
       probes:
         enabled: true
 artio:
+  backoffice-url: ${ARTIO_BACKOFFICE_URL:http://localhost:4201}
   runtime:
     role: ${ARTIO_RUNTIME_ROLE:api}
   workers:

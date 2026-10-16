@@ -41,7 +41,7 @@ export class SetupWizardComponent implements OnInit {
     if (this.developerMode) {
       this.token = 'ArtioLocalDevSetupTokenOnly2026!';
       this.password = this.confirmation = 'ArtioLocalAdmin!2026';
-      this.draft = { ...this.draft, storeName: 'Artio Development Store', email: 'admin@example.test', firstName: 'Alex', lastName: 'Developer' };
+      this.draft = { ...this.draft, storeName: 'Artio Development Store', externalBaseUrl: 'http://localhost:4200', email: 'admin@example.test', firstName: 'Alex', lastName: 'Developer' };
     }
   }
   get progress(): number { return this.step === 5 ? 100 : (this.step + 1) * 20; }

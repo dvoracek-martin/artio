@@ -42,10 +42,10 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             try{if(!Boolean.TRUE.equals(oidc.getEmailVerified())||oidc.getEmail()==null)throw new IllegalArgumentException("The identity provider must return a verified email");email=new Email(oidc.getEmail()).value();}
             catch(IllegalArgumentException invalid){throw new AuthenticationServiceException("A verified email address is required for OIDC login",invalid);}
             UUID userId=transactions.execute(status->resolveOrProvision(provider,subject,email,oidc));
-            UserIdentity user=jdbc.queryForObject("SELECT id,email,role FROM users WHERE id=? AND active",(rs,n)->new UserIdentity(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3)),userId);
+            UserIdentity user=jdbc.queryForObject("SELECT id,email,role,token_version FROM users WHERE id=? AND active",(rs,n)->new UserIdentity(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getLong(4)),userId);
             if(java.util.List.of("ADMIN","SUPERADMIN").contains(user.role()))throw new AuthenticationServiceException("Privileged accounts must use Artio password and authenticator sign-in");
             Instant now=Instant.now();jdbc.update("UPDATE users SET last_login=? WHERE id=?",java.sql.Timestamp.from(now),user.id());
-            String token=encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(),JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email",user.email()).claim("role",user.role()).build())).getTokenValue();
+            String token=encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(),JwtClaimsSet.builder().issuer("artio").issuedAt(now).expiresAt(now.plusSeconds(3600)).subject(user.id().toString()).claim("email",user.email()).claim("role",user.role()).claim("tokenVersion",user.tokenVersion()).build())).getTokenValue();
             response.sendRedirect(storefrontUrl.replaceAll("/$","")+"/shop#access_token="+URLEncoder.encode(token,StandardCharsets.UTF_8));
         }catch(RuntimeException failure){response.sendRedirect(storefrontUrl.replaceAll("/$","")+"/login?oauth_error=verified_identity_required");}
     }
@@ -67,5 +67,5 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private byte[] randomBytes(int n){byte[] result=new byte[n];new java.security.SecureRandom().nextBytes(result);return result;}
     private static String name(String value,String fallback){if(value==null||value.isBlank())return fallback;return value.substring(0,Math.min(value.length(),120));}
     private record ExistingUser(UUID id,boolean emailVerified,boolean active){}
-    private record UserIdentity(UUID id,String email,String role){}
+    private record UserIdentity(UUID id,String email,String role,long tokenVersion){}
 }

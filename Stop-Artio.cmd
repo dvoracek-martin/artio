@@ -9,9 +9,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Stopping all Artio services and removing their containers and network...
-echo Persistent database, installation secrets, and media volumes will be kept.
-docker compose --profile storefront down --remove-orphans
+echo Stopping all Artio services, including optional profiles and extensions...
+docker compose --profile "*" stop
+if errorlevel 1 (
+    echo Artio services could not be stopped. Review the Docker Compose output above.
+    pause
+    exit /b 1
+)
+for /f %%i in ('docker ps -q --filter "label=io.artio.managed=true" --filter "label=io.artio.extension"') do docker stop %%i >nul
+docker compose --profile "*" down --remove-orphans
 if errorlevel 1 (
     echo Artio could not be stopped. Review the Docker Compose output above.
     pause

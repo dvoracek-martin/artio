@@ -25,7 +25,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /** Resolves administrator role and permissions from the current user row for every authenticated request. */
 public final class PersistedPermissionFilter extends OncePerRequestFilter {
-    private static final String USER_ACCESS_SQL = "SELECT role,permissions,active FROM users WHERE id=?";
+    private static final String USER_ACCESS_SQL = "SELECT role,permissions,active,token_version FROM users WHERE id=?";
     private static final Set<String> KNOWN_ROLES = Set.of("CUSTOMER", "ADMIN", "SUPERADMIN");
 
     private final JdbcTemplate jdbc;
@@ -60,6 +60,12 @@ public final class PersistedPermissionFilter extends OncePerRequestFilter {
         }
 
         var user = users.getFirst();
+        Number tokenVersion = (Number) user.get("token_version");
+        Number claimVersion = jwt.getToken().getClaim("tokenVersion");
+        if (claimVersion == null || claimVersion.longValue() != tokenVersion.longValue()) {
+            reject(request, response, HttpStatus.UNAUTHORIZED, "The authenticated session has expired");
+            return;
+        }
         UserAccess access = new UserAccess(String.valueOf(user.get("role")),
                 user.get("permissions") == null ? "" : String.valueOf(user.get("permissions")),
                 Boolean.TRUE.equals(user.get("active")));
