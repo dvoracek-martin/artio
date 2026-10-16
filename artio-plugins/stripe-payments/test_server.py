@@ -4,12 +4,45 @@ import hmac
 import json
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import server
 
 
 class StripeExtensionTests(unittest.TestCase):
+    def test_ambiguous_network_failure_is_redacted_and_caller_retry_reuses_key(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"id":"cs_test_retry"}'
+        idempotency_key = "3b241101-e2bb-4255-8caf-4136c566a962"
+        with patch.object(server, "urlopen", side_effect=[
+            server.URLError("private provider response"), response,
+        ]) as urlopen:
+            with self.assertRaises(server.ProviderError) as raised:
+                server.stripe_request(
+                    {"stripeSecretKey": "sk_test_secret"},
+                    "/v1/checkout/sessions",
+                    "POST",
+                    {"mode": "payment"},
+                    idempotency_key,
+                )
+            self.assertEqual(503, raised.exception.status)
+            self.assertNotIn("private provider response", str(raised.exception))
+
+            result = server.stripe_request(
+                {"stripeSecretKey": "sk_test_secret"},
+                "/v1/checkout/sessions",
+                "POST",
+                {"mode": "payment"},
+                idempotency_key,
+            )
+
+        self.assertEqual("cs_test_retry", result["id"])
+        self.assertEqual(2, urlopen.call_count)
+        requests = [call.args[0] for call in urlopen.call_args_list]
+        self.assertEqual([idempotency_key, idempotency_key], [
+            request.get_header("Idempotency-key") for request in requests
+        ])
+
     def test_cancel_expires_checkout_with_stable_idempotency_key(self):
         response = {"id": "cs_test_123", "status": "expired", "payment_status": "unpaid"}
         with patch.object(server, "stripe_request", return_value=response) as request:

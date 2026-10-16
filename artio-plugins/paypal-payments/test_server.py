@@ -32,6 +32,38 @@ class PayPalTests(unittest.TestCase):
         with self.assertRaises(server.ProviderError):
             server.amount_text("10.001", "CHF")
 
+    def test_transport_outage_is_retryable_and_does_not_leak_provider_details(self):
+        with patch.object(server, "urlopen", side_effect=server.URLError("private provider response")):
+            with self.assertRaises(server.ProviderError) as raised:
+                server.request_json("https://api-m.sandbox.paypal.com/v2/checkout/orders")
+
+        self.assertEqual(503, raised.exception.status)
+        self.assertNotIn("private provider response", str(raised.exception))
+
+    def test_caller_retry_reuses_paypal_request_id_after_ambiguous_failure(self):
+        idempotency_key = "stable-order-key"
+        with patch.object(server, "access_token", return_value="sandbox-access-token"), \
+                patch.object(server, "request_json", side_effect=[
+                    server.ProviderError(503, "temporary outage"),
+                    {"id": "ORDER-12345678"},
+                ]) as request:
+            with self.assertRaises(server.ProviderError) as raised:
+                server.paypal_request(
+                    self.config, "/v2/checkout/orders", "POST", {}, idempotency_key
+                )
+            self.assertEqual(503, raised.exception.status)
+
+            result = server.paypal_request(
+                self.config, "/v2/checkout/orders", "POST", {}, idempotency_key
+            )
+
+        self.assertEqual("ORDER-12345678", result["id"])
+        self.assertEqual(2, request.call_count)
+        self.assertEqual(
+            [idempotency_key, idempotency_key],
+            [call.args[2]["PayPal-Request-Id"] for call in request.call_args_list],
+        )
+
     def test_discovers_paypal_and_rejects_a_different_selected_method(self):
         methods = server.operation(self.config, "listMethods", {"country": "CH", "currency": "CHF"}, self.envelope)
         self.assertEqual("paypal", methods["methods"][0]["methodId"])

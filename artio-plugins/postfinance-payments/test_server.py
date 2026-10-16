@@ -19,6 +19,36 @@ ENVELOPE = {"idempotencyKey": "12345678-1234-4234-8234-123456789abc"}
 
 
 class PostFinanceCheckoutTests(unittest.TestCase):
+    @patch("server.api_services")
+    def test_checkout_retries_ambiguous_creation_by_stable_merchant_reference(self, services):
+        transactions = Mock()
+        transactions.get_payment_transactions_search.side_effect = [
+            SimpleNamespace(data=[]),
+            SimpleNamespace(data=[SimpleNamespace(id=87654)]),
+        ]
+        transactions.post_payment_transactions.side_effect = TimeoutError("private SDK detail")
+        transactions.get_payment_transactions_id_payment_page_url.return_value = "https://checkout.postfinance.ch/pay/87654"
+        services.return_value = (98765, transactions, Mock(), Mock())
+        payload = {
+            "amount": "10.00", "currency": "CHF", "orderId": "order-123",
+            "paymentMethodId": "postfinance_checkout",
+            "successUrl": "https://shop.example.test/success",
+            "cancelUrl": "https://shop.example.test/cancel",
+        }
+
+        with self.assertRaises(server.ProviderError) as raised:
+            server.operation(CONFIG, "createCheckout", payload, ENVELOPE)
+        self.assertEqual(503, raised.exception.status)
+        self.assertNotIn("private SDK detail", str(raised.exception))
+
+        result = server.operation(CONFIG, "createCheckout", payload, ENVELOPE)
+
+        self.assertEqual("87654", result["providerReference"])
+        self.assertEqual(2, transactions.get_payment_transactions_search.call_count)
+        queries = [call.kwargs["query"] for call in transactions.get_payment_transactions_search.call_args_list]
+        self.assertEqual(queries[0], queries[1])
+        self.assertEqual(1, transactions.post_payment_transactions.call_count)
+
     def test_capabilities_and_swiss_method_catalog_are_provider_neutral(self):
         self.assertTrue(server.operation({}, "capabilities", {}, ENVELOPE)["hostedCheckout"])
         result = server.operation(CONFIG, "listMethods", {"country": "CH", "currency": "CHF"}, ENVELOPE)
