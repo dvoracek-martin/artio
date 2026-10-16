@@ -13,6 +13,26 @@ echo Starting a clean Artio developer instance and Backoffice...
 set "ARTIO_API_SPRING_PROFILES_ACTIVE=dev"
 set "ARTIO_SETUP_SKIP=false"
 set "ARTIO_SETUP_TOKEN=ArtioLocalDevSetupTokenOnly2026!"
+set "MARKETPLACE_ROOT=%~dp0..\Artio-Marketplace"
+if not exist "%MARKETPLACE_ROOT%\scripts\start-local-marketplace.ps1" (
+    echo The sibling Artio-Marketplace worktree is required for the development extension catalog.
+    echo Expected: %MARKETPLACE_ROOT%
+    pause
+    exit /b 1
+)
+echo Starting the local Artio Marketplace for extension discovery...
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%MARKETPLACE_ROOT%\scripts\start-local-marketplace.ps1"
+if errorlevel 1 (
+    echo Marketplace could not be started. Artio will not have an extension catalog.
+    pause
+    exit /b 1
+)
+for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\connection.txt'; $line = Get-Content -LiteralPath $path | Where-Object { $_ -like 'Marketplace API:*' } | Select-Object -First 1; if (-not $line) { exit 1 }; $uri = [uri](($line -replace '^Marketplace API:\s*', '').Trim()); if (-not $uri.IsAbsoluteUri -or $uri.Port -lt 1) { exit 1 }; Write-Output ('http://host.docker.internal:' + $uri.Port)"`) do set "ARTIO_MARKETPLACE_BASE_URL=%%A"
+if not defined ARTIO_MARKETPLACE_BASE_URL (
+    echo Could not resolve the local Marketplace API endpoint.
+    pause
+    exit /b 1
+)
 call :stop_artio
 if errorlevel 1 exit /b 1
 docker compose up --build -d --wait --wait-timeout 300
