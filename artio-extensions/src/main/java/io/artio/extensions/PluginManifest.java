@@ -117,7 +117,8 @@ public record PluginManifest(
     public record BundleService(String id, String image, int port, String healthPath,
                                 Map<String, String> configurationBindings, Map<String, String> secretFileBindings,
                                 List<String> dependsOn,
-                                List<String> persistentPaths, List<Integer> internalPorts, Integer memoryLimitMb) {
+                                List<String> persistentPaths, List<Integer> internalPorts, Integer memoryLimitMb,
+                                boolean beforePrimary, boolean runToCompletion) {
         public BundleService {
             configurationBindings = immutableNullableMap(configurationBindings);
             secretFileBindings = immutableNullableMap(secretFileBindings);
@@ -157,6 +158,14 @@ public record PluginManifest(
         public BundleService(String id, String image, int port, String healthPath) {
             this(id, image, port, healthPath, Map.of(), Map.of(), List.of(), List.of(), List.of(), null);
         }
+
+        public BundleService(String id, String image, int port, String healthPath,
+                             Map<String, String> configurationBindings, Map<String, String> secretFileBindings,
+                             List<String> dependsOn, List<String> persistentPaths, List<Integer> internalPorts,
+                             Integer memoryLimitMb) {
+            this(id, image, port, healthPath, configurationBindings, secretFileBindings, dependsOn, persistentPaths,
+                    internalPorts, memoryLimitMb, false, false);
+        }
     }
 
     /** Discovery hint only. It never restricts a merchant from enabling another supported market. */
@@ -177,9 +186,25 @@ public record PluginManifest(
     public record ConfigField(String type, boolean required, boolean secret, String label,
                               String description, String format, List<String> options,
                               Integer minimumLength, Integer maximumLength,
-                              Double minimum, Double maximum) {
+                              Double minimum, Double maximum, boolean generated, Integer generatedLength,
+                              String generatedRotationGroup) {
         public ConfigField {
             options = immutableNullableList(options);
+        }
+
+        public ConfigField(String type, boolean required, boolean secret, String label,
+                           String description, String format, List<String> options,
+                           Integer minimumLength, Integer maximumLength, Double minimum, Double maximum) {
+            this(type, required, secret, label, description, format, options, minimumLength, maximumLength,
+                    minimum, maximum, false, null, null);
+        }
+
+        public ConfigField(String type, boolean required, boolean secret, String label,
+                           String description, String format, List<String> options,
+                           Integer minimumLength, Integer maximumLength, Double minimum, Double maximum,
+                           boolean generated, Integer generatedLength) {
+            this(type, required, secret, label, description, format, options, minimumLength, maximumLength,
+                    minimum, maximum, generated, generatedLength, null);
         }
     }
 }

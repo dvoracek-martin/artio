@@ -197,6 +197,52 @@ class DockerExtensionRuntimeTests {
     }
 
     @Test
+    void injectsSiblingServiceAddressesWithoutOverwritingExistingProxyBypassEntries() {
+        var sidecar = new io.artio.extensions.PluginManifest.BundleService("minio", "ghcr.io/artio/minio@sha256:" + "a".repeat(64),
+                9000, "/minio/health/ready", Map.of(), Map.of(), java.util.List.of(), java.util.List.of("/var/lib/minio/data"),
+                java.util.List.of(), 512, true, false);
+        var job = new io.artio.extensions.PluginManifest.BundleService("provision", "ghcr.io/artio/provision@sha256:" + "b".repeat(64),
+                0, null, Map.of(), Map.of(), java.util.List.of("minio"), java.util.List.of(), java.util.List.of(), 256, true, true);
+        var manifest = new io.artio.extensions.PluginManifest("2", "storage.example", "Storage", "Artio", "1.0.0",
+                "Storage extension", "0.1.0", "9.0.0", "ghcr.io/artio/storage@sha256:" + "c".repeat(64),
+                java.util.List.of(), java.util.List.of(), Map.of(), java.util.List.of(), "/health", "/diagnostics",
+                io.artio.extensions.PluginManifest.GeographicAvailability.global(), java.util.List.of(sidecar, job), java.util.List.of(),
+                Map.of(), Map.of());
+        var credentials = new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes");
+
+        var environment = DockerExtensionRuntime.resolvedEnvironment("storage.instance-a", manifest, false,
+                Map.of("NO_PROXY", "proxyBypass"), 1, Map.of("proxyBypass", "registry.internal"), credentials, null);
+
+        assertThat(environment).contains("ARTIO_EXTENSION_SERVICE_MINIO_HOST="
+                        + DockerExtensionRuntime.serviceName("storage.instance-a", "minio"),
+                "ARTIO_EXTENSION_SERVICE_MINIO_PORT=9000", "NO_PROXY=127.0.0.1,::1,"
+                        + DockerExtensionRuntime.serviceName("storage.instance-a", "minio") + ",localhost,registry.internal");
+        assertThat(environment).noneMatch(value -> value.startsWith("ARTIO_EXTENSION_SERVICE_PROVISION_"));
+    }
+
+    @Test
+    void ordersBootstrapBeforePrimaryAndRotationCleanupAfterHealthyPrimary() {
+        String digest = "sha256:" + "a".repeat(64);
+        var managedServer = new io.artio.extensions.PluginManifest.BundleService("minio", "ghcr.io/artio/minio@" + digest,
+                9000, "/minio/health/ready", Map.of(), Map.of(), java.util.List.of(), java.util.List.of("/data"),
+                java.util.List.of(), 512, true, false);
+        var provisioner = new io.artio.extensions.PluginManifest.BundleService("provision", "ghcr.io/artio/provision@" + digest,
+                0, null, Map.of(), Map.of(), java.util.List.of("minio"), java.util.List.of(), java.util.List.of(), 256, true, true);
+        var rotationCleanup = new io.artio.extensions.PluginManifest.BundleService("finalize-rotation",
+                "ghcr.io/artio/provision-cleanup@" + digest, 0, null, Map.of(), Map.of(), java.util.List.of("main"),
+                java.util.List.of(), java.util.List.of(), 256, false, true);
+        var manifest = new io.artio.extensions.PluginManifest("2", "storage.example", "Storage", "Artio", "1.0.0",
+                "Storage extension", "0.1.0", "9.0.0", "ghcr.io/artio/storage@" + digest, java.util.List.of(),
+                java.util.List.of(), Map.of(), java.util.List.of(), "/health", "/diagnostics",
+                io.artio.extensions.PluginManifest.GeographicAvailability.global(),
+                java.util.List.of(managedServer, provisioner, rotationCleanup), java.util.List.of(), Map.of(), Map.of());
+        var runtime = new DockerExtensionRuntime(null, "artio-extensions", 8080,
+                new io.artio.api.security.ExtensionCredentialService("unit-test-key-material-that-is-at-least-32-bytes"));
+
+        assertThat(runtime.startupServiceIds(manifest)).containsExactly("minio", "provision", "main", "finalize-rotation");
+    }
+
+    @Test
     void enablesBundleOnlyAfterEveryServicePassesItsHealthCheck() throws Exception {
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         var healthCalls = new java.util.concurrent.CopyOnWriteArrayList<String>();

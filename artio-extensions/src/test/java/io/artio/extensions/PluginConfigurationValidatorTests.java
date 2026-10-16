@@ -27,6 +27,20 @@ class PluginConfigurationValidatorTests {
     }
 
     @Test
+    void allowsRequiredServerGeneratedSecretToBeCreatedWithoutUserInput() {
+        var generated = new PluginManifest.ConfigField("secret", true, true, "Runtime key", null,
+                null, List.of(), null, null, null, null, true, 24);
+        var generatedManifest = new PluginManifest("1", "storage.generated", "Generated storage", "Artio", "1.0.0",
+                "Generated secret contract", "0.1.0", "9.0.0", "ghcr.io/artio/plugin@sha256:" + "a".repeat(64),
+                List.of(), List.of(), Map.of("runtimeKey", generated), List.of(), "/health", "/diagnostics");
+
+        var result = validator.validate(generatedManifest, Map.of(), Set.of());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.newSecrets()).isEmpty();
+    }
+
+    @Test
     void rejectsMissingRequiredValuesUnknownFieldsInvalidEnumsAndUnsafeUrls() {
         var result = validator.validate(manifest, Map.of("endpoint", "javascript:alert(1)", "mode", "admin", "unexpected", true), Set.of());
         assertThat(result.valid()).isFalse();

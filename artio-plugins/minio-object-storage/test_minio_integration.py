@@ -21,14 +21,15 @@ REQUIRED_ENV = (
     "ARTIO_MINIO_INTEGRATION_CREDENTIALS_FILE",
 )
 ENABLED = all(os.environ.get(key) for key in REQUIRED_ENV)
+MANAGED = os.environ.get("ARTIO_MINIO_INTEGRATION_MANAGED", "false").lower() == "true"
 
 
 @unittest.skipUnless(ENABLED, "set ARTIO_MINIO_INTEGRATION_* to run against real MinIO")
 class MinioProviderIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.bucket = "artio-test-" + uuid.uuid4().hex
-        cls.prefix = "acceptance/" + uuid.uuid4().hex
+        cls.bucket = "artio-objects" if MANAGED else "artio-test-" + uuid.uuid4().hex
+        cls.prefix = "objects/acceptance/" + uuid.uuid4().hex if MANAGED else "acceptance/" + uuid.uuid4().hex
         cls.endpoint = os.environ["ARTIO_MINIO_INTEGRATION_ENDPOINT"]
         credentials = json.loads(
             Path(os.environ["ARTIO_MINIO_INTEGRATION_CREDENTIALS_FILE"]).read_text(
@@ -49,10 +50,11 @@ class MinioProviderIntegrationTests(unittest.TestCase):
                 retries={"mode": "standard", "max_attempts": 1},
             ),
         )
-        cls.client.create_bucket(Bucket=cls.bucket)
-        cls.client.put_bucket_versioning(
-            Bucket=cls.bucket, VersioningConfiguration={"Status": "Enabled"}
-        )
+        if not MANAGED:
+            cls.client.create_bucket(Bucket=cls.bucket)
+            cls.client.put_bucket_versioning(
+                Bucket=cls.bucket, VersioningConfiguration={"Status": "Enabled"}
+            )
 
     @classmethod
     def tearDownClass(cls):
@@ -70,7 +72,8 @@ class MinioProviderIntegrationTests(unittest.TestCase):
             if not response.get("IsTruncated"):
                 break
             continuation = response["NextContinuationToken"]
-        cls.client.delete_bucket(Bucket=cls.bucket)
+        if not MANAGED:
+            cls.client.delete_bucket(Bucket=cls.bucket)
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

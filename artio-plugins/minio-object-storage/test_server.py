@@ -28,6 +28,9 @@ class FakeS3:
         self.objects = {}
 
     def put_object(self, Bucket, Key, Body, ContentLength, Metadata):
+        if Key.startswith(".artio-diagnostics-negative/"):
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "AccessDenied"}, "ResponseMetadata": {"HTTPStatusCode": 403}}, "PutObject")
         content = Body.read() if hasattr(Body, "read") else Body
         if len(content) != ContentLength:
             raise AssertionError("unexpected content length")
@@ -63,7 +66,7 @@ class MinioAdapterTests(unittest.TestCase):
         self.content = b"binary\x00media\xff"
         self.checksum = hashlib.sha256(self.content).hexdigest()
         self.settings = patch.dict(os.environ, {"ARTIO_S3_ENDPOINT": "https://minio.internal", "ARTIO_S3_BUCKET": "artio-media",
-                                                "ARTIO_S3_PREFIX": "products/media"})
+                                                "ARTIO_S3_PREFIX": "products/media", "ARTIO_STORAGE_MODE": "external"})
         self.settings.start()
 
     def tearDown(self):
@@ -158,6 +161,29 @@ class MinioAdapterTests(unittest.TestCase):
                     with self.assertRaises(server.StorageError) as failure:
                         server._client()
                 self.assertEqual("invalid_endpoint", failure.exception.code)
+
+    def test_managed_mode_uses_only_the_injected_private_service_and_secret_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            access_path = Path(directory) / "runtime-access-key"
+            secret_path = Path(directory) / "runtime-secret-key"
+            access_path.write_text("managed-access-key", encoding="utf-8")
+            secret_path.write_text("managed-secret-key", encoding="utf-8")
+            with patch.object(server, "MANAGED_ACCESS_KEY_FILE", access_path), \
+                    patch.object(server, "MANAGED_SECRET_KEY_FILE", secret_path), \
+                    patch.dict(os.environ, {"ARTIO_STORAGE_MODE": "managed",
+                                            "ARTIO_EXTENSION_SERVICE_MINIO_HOST": "artio-minio-test",
+                                            "ARTIO_EXTENSION_SERVICE_MINIO_PORT": "9000"}, clear=False):
+                client = server._client()
+                self.assertEqual("http://artio-minio-test:9000", client._endpoint.host)
+                self.assertEqual((server.MANAGED_BUCKET, server.MANAGED_PREFIX), server._bucket())
+
+    def test_managed_mode_rejects_uninjected_endpoints(self):
+        with patch.dict(os.environ, {"ARTIO_STORAGE_MODE": "managed",
+                                    "ARTIO_EXTENSION_SERVICE_MINIO_HOST": "127.0.0.1",
+                                    "ARTIO_EXTENSION_SERVICE_MINIO_PORT": "9001"}, clear=False):
+            with self.assertRaises(server.StorageError) as failure:
+                server._client()
+        self.assertEqual("managed_storage_unavailable", failure.exception.code)
 
     def test_maps_provider_authorization_status_to_denial_without_exposing_provider_errors(self):
         from botocore.exceptions import ClientError

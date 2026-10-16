@@ -15,10 +15,12 @@ import io.artio.extensions.PluginManifestValidator;
 import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.PluginDependencyPolicy;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.security.SecureRandom;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
@@ -45,6 +47,8 @@ import org.springframework.web.server.ResponseStatusException;
 public class ExtensionManagementController {
     private static final TypeReference<Map<String, Object>> OBJECT_MAP = new TypeReference<>() { };
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() { };
+    private static final SecureRandom GENERATED_SECRET_RANDOM = new SecureRandom();
+    private static final char[] GENERATED_SECRET_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray();
     private final PluginManifestValidator manifestValidator;
     private final PluginConfigurationValidator configurationValidator;
     private final EncryptionService encryption;
@@ -322,12 +326,14 @@ public class ExtensionManagementController {
     public List<PluginInstanceView> instances(@PathVariable String pluginId) {
         findPlugin(pluginId);
         return jdbc.query("SELECT instance_id,instance_key,release_id,compatibility_mode,lifecycle_state,configuration_generation,"
-                        + "runtime_identity,(SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(public_configuration) AS keys(k)) AS public_keys,"
+                        + "runtime_identity,public_configuration::text AS public_configuration,"
+                        + "(SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(public_configuration) AS keys(k)) AS public_keys,"
                         + "(SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(encrypted_secrets) AS keys(k)) AS secret_keys "
                         + "FROM extension_plugin_instances WHERE plugin_id=? ORDER BY created_at,instance_key",
                 (rs, row) -> new PluginInstanceView(rs.getObject("instance_id", UUID.class), rs.getString("instance_key"),
                         rs.getLong("release_id"), rs.getString("compatibility_mode"), rs.getString("lifecycle_state"),
                         rs.getInt("configuration_generation"), rs.getString("runtime_identity"),
+                        read(rs.getString("public_configuration"), OBJECT_MAP),
                         arraySet(rs.getArray("public_keys")), arraySet(rs.getArray("secret_keys"))), pluginId);
     }
 
@@ -407,7 +413,8 @@ public class ExtensionManagementController {
         } catch (org.springframework.dao.EmptyResultDataAccessException notV2) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Only a v2 package release can create isolated instances"));
         }
-        var validation = configurationValidator.validate(plugin.manifest(), request.configuration(), Set.of());
+        Map<String, Object> submitted = withGeneratedSecrets(plugin.manifest(), request.configuration(), Set.of());
+        var validation = configurationValidator.validate(plugin.manifest(), submitted, Set.of());
         if (!validation.valid()) return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(validation.errors()));
         String publicJson = write(validation.publicValues());
         Map<String, String> encryptedSecrets = encryptSecrets(validation.newSecrets());
@@ -574,13 +581,15 @@ public class ExtensionManagementController {
     }
 
     @PutMapping("/{pluginId}/instances/{instanceId}/configuration")
+    @Transactional
     public ResponseEntity<?> configureInstance(@PathVariable String pluginId, @PathVariable UUID instanceId,
             @RequestBody Map<String, Object> submitted, JwtAuthenticationToken actor) {
-        InstanceRow instance = findInstance(pluginId, instanceId);
+        InstanceRow instance = lockInstance(pluginId, instanceId);
         if ("ENABLED".equals(instance.lifecycleState())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the instance before changing its configuration"));
         }
-        var validation = configurationValidator.validate(instance.manifest(), submitted, instance.encryptedSecrets().keySet());
+        Map<String, Object> resolved = withGeneratedSecrets(instance.manifest(), submitted, instance.encryptedSecrets().keySet());
+        var validation = configurationValidator.validate(instance.manifest(), resolved, instance.encryptedSecrets().keySet());
         if (!validation.valid()) return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(validation.errors()));
         Map<String, String> encryptedSecrets = new HashMap<>(instance.encryptedSecrets());
         encryptedSecrets.putAll(encryptSecrets(validation.newSecrets()));
@@ -598,6 +607,46 @@ public class ExtensionManagementController {
                 "configuredSecretFields", encryptedSecrets.keySet().stream().sorted().toList()));
         return ResponseEntity.ok(Map.of("instanceId", instanceId, "configurationGeneration", generation,
                 "publicConfiguration", validation.publicValues(), "configuredSecrets", encryptedSecrets.keySet()));
+    }
+
+    @PostMapping("/{pluginId}/instances/{instanceId}/configuration/rotation/{group}")
+    @Transactional
+    public ResponseEntity<?> rotateGeneratedInstanceSecrets(@PathVariable String pluginId, @PathVariable UUID instanceId,
+            @PathVariable String group, JwtAuthenticationToken actor) {
+        if (group == null || !group.matches("[a-z][a-z0-9._-]{0,31}")) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Rotation group must be a lowercase identifier"));
+        }
+        InstanceRow instance = lockInstance(pluginId, instanceId);
+        if ("ENABLED".equals(instance.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("message", "Disable the instance before rotating generated credentials"));
+        }
+        List<Map.Entry<String, PluginManifest.ConfigField>> fields = instance.manifest().configuration().entrySet().stream()
+                .filter(entry -> entry.getValue() != null && group.equals(entry.getValue().generatedRotationGroup()))
+                .toList();
+        if (fields.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Generated credential rotation group was not found"));
+        }
+        Map<String, Object> submitted = new LinkedHashMap<>(instance.publicConfiguration());
+        instance.encryptedSecrets().forEach((key, ciphertext) -> submitted.put(key, encryption.decrypt(ciphertext)));
+        fields.forEach(entry -> submitted.put(entry.getKey(), generateSecret(entry.getValue().generatedLength())));
+        var validation = configurationValidator.validate(instance.manifest(), submitted, Set.of());
+        if (!validation.valid()) return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(validation.errors()));
+        Map<String, String> encryptedSecrets = encryptSecrets(validation.newSecrets());
+        try {
+            validateBoundConfigurationSize(instance.manifest(), validation.publicValues(), validation.newSecrets(), encryptedSecrets);
+        } catch (IllegalArgumentException tooLarge) {
+            return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(List.of(tooLarge.getMessage())));
+        }
+        int generation = jdbc.queryForObject("UPDATE extension_plugin_instances SET public_configuration=?::jsonb,encrypted_secrets=?::jsonb,"
+                        + "configuration_generation=configuration_generation+1,lifecycle_state='CONFIGURED',updated_at=now() "
+                        + "WHERE instance_id=? AND plugin_id=? AND lifecycle_state<>'ENABLED' RETURNING configuration_generation",
+                Integer.class, write(validation.publicValues()), write(encryptedSecrets), instanceId, pluginId);
+        audit(pluginId, actor, "ROTATE_INSTANCE_SECRETS", Map.of("instanceId", instanceId.toString(),
+                "rotationGroup", group, "fields", fields.stream().map(Map.Entry::getKey).sorted().toList(),
+                "configurationGeneration", generation));
+        return ResponseEntity.ok(Map.of("instanceId", instanceId, "configurationGeneration", generation,
+                "lifecycleState", "CONFIGURED", "rotatedFields", fields.stream().map(Map.Entry::getKey).sorted().toList()));
     }
 
     @DeleteMapping("/{pluginId}/instances/{instanceId}")
@@ -1378,7 +1427,8 @@ public class ExtensionManagementController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the plugin before changing its configuration"));
         }
         Map<String, String> encrypted = row.encryptedSecrets();
-        var validation = configurationValidator.validate(row.manifest(), submitted, encrypted.keySet());
+        Map<String, Object> resolved = withGeneratedSecrets(row.manifest(), submitted, encrypted.keySet());
+        var validation = configurationValidator.validate(row.manifest(), resolved, encrypted.keySet());
         if (!validation.valid()) return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(validation.errors()));
 
         Map<String, String> updatedSecrets = new HashMap<>(encrypted);
@@ -1591,10 +1641,19 @@ public class ExtensionManagementController {
     }
 
     private InstanceRow findInstance(String pluginId, UUID instanceId) {
-        return jdbc.query("SELECT i.instance_id,i.instance_key,i.release_id,i.compatibility_mode,i.lifecycle_state,i.configuration_generation,"
-                        + "i.runtime_identity,i.public_configuration::text AS public_configuration,i.encrypted_secrets::text AS encrypted_secrets,"
-                        + "r.manifest FROM extension_plugin_instances i JOIN extension_plugin_releases r ON r.release_id=i.release_id "
-                        + "WHERE i.plugin_id=? AND i.instance_id=?",
+        return queryInstance(pluginId, instanceId, false);
+    }
+
+    private InstanceRow lockInstance(String pluginId, UUID instanceId) {
+        return queryInstance(pluginId, instanceId, true);
+    }
+
+    private InstanceRow queryInstance(String pluginId, UUID instanceId, boolean lock) {
+        String query = "SELECT i.instance_id,i.instance_key,i.release_id,i.compatibility_mode,i.lifecycle_state,i.configuration_generation,"
+                + "i.runtime_identity,i.public_configuration::text AS public_configuration,i.encrypted_secrets::text AS encrypted_secrets,"
+                + "r.manifest FROM extension_plugin_instances i JOIN extension_plugin_releases r ON r.release_id=i.release_id "
+                + "WHERE i.plugin_id=? AND i.instance_id=?" + (lock ? " FOR UPDATE OF i" : "");
+        return jdbc.query(query,
                 (rs, row) -> new InstanceRow(rs.getObject("instance_id", UUID.class), rs.getString("instance_key"),
                         rs.getLong("release_id"), rs.getString("compatibility_mode"), rs.getString("lifecycle_state"),
                         rs.getInt("configuration_generation"), rs.getString("runtime_identity"),
@@ -1606,12 +1665,14 @@ public class ExtensionManagementController {
 
     private PluginInstanceView instanceView(UUID instanceId) {
         return jdbc.query("SELECT instance_id,instance_key,release_id,compatibility_mode,lifecycle_state,configuration_generation,"
-                        + "runtime_identity,(SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(public_configuration) AS keys(k)) AS public_keys,"
+                        + "runtime_identity,public_configuration::text AS public_configuration,"
+                        + "(SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(public_configuration) AS keys(k)) AS public_keys,"
                         + "(SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(encrypted_secrets) AS keys(k)) AS secret_keys "
                         + "FROM extension_plugin_instances WHERE instance_id=?",
                 (rs, row) -> new PluginInstanceView(rs.getObject("instance_id", UUID.class), rs.getString("instance_key"),
                         rs.getLong("release_id"), rs.getString("compatibility_mode"), rs.getString("lifecycle_state"),
                         rs.getInt("configuration_generation"), rs.getString("runtime_identity"),
+                        read(rs.getString("public_configuration"), OBJECT_MAP),
                         arraySet(rs.getArray("public_keys")), arraySet(rs.getArray("secret_keys"))), instanceId)
                 .stream().findFirst().orElseThrow();
     }
@@ -1630,6 +1691,31 @@ public class ExtensionManagementController {
         Map<String, String> encrypted = new HashMap<>();
         submitted.forEach((key, value) -> encrypted.put(key, encryption.encrypt(value)));
         return Map.copyOf(encrypted);
+    }
+
+    private Map<String, Object> withGeneratedSecrets(PluginManifest manifest, Map<String, Object> submitted,
+            Set<String> alreadyConfiguredSecrets) {
+        Map<String, Object> result = new LinkedHashMap<>(submitted == null ? Map.of() : submitted);
+        Set<String> existing = alreadyConfiguredSecrets == null ? Set.of() : alreadyConfiguredSecrets;
+        manifest.configuration().forEach((key, field) -> {
+            if (field != null && field.generated()) result.remove(key);
+            Object value = result.get(key);
+            if (field != null && field.generated() && !existing.contains(key)
+                    && (value == null || value instanceof String text && text.isEmpty())) {
+                int length = field.generatedLength() == null ? 32 : field.generatedLength();
+                result.put(key, generateSecret(length));
+            }
+        });
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private static String generateSecret(Integer requestedLength) {
+        int length = requestedLength == null ? 32 : requestedLength;
+        StringBuilder secret = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            secret.append(GENERATED_SECRET_ALPHABET[GENERATED_SECRET_RANDOM.nextInt(GENERATED_SECRET_ALPHABET.length)]);
+        }
+        return secret.toString();
     }
 
     private PluginView view(PluginRow row) {
@@ -1776,7 +1862,7 @@ public class ExtensionManagementController {
     public record InstanceCreateRequest(String instanceKey, Map<String, Object> configuration) { }
     public record PluginInstanceView(UUID instanceId, String instanceKey, long releaseId, String compatibilityMode,
             String lifecycleState, int configurationGeneration, String runtimeIdentity,
-            Set<String> publicConfigurationKeys, Set<String> configuredSecrets) { }
+            Map<String, Object> publicConfiguration, Set<String> publicConfigurationKeys, Set<String> configuredSecrets) { }
     public record InstanceObligationsView(UUID instanceId, long operations, long deliveries, long media,
             long pendingPayments, long activeShipments, long processingRefunds, long total) { }
     public record SubscriptionStateRequest(String state) { }

@@ -131,6 +131,36 @@ describe('ExtensionAdminComponent', () => {
     expect(page).toContain('Create binding');
   });
 
+  it('renders manifest-driven storage fields, hides generated credentials and emits grouped rotation', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentRef.setInput('selectedExtension', {
+      id: 'storage.artio-minio', compatibilityModes: 'CAPABILITY_V2', lifecycleState: 'CONFIGURED',
+      manifest: { id: 'storage.artio-minio', name: 'MinIO', configuration: {
+        mode: { type: 'enum', label: 'Storage mode', required: true, options: ['managed', 'external'] },
+        endpoint: { type: 'url', label: 'External endpoint', required: false },
+        runtimeAccessKey: { type: 'secret', label: 'Runtime access key', generated: true, generatedRotationGroup: 'runtime' }
+      } }
+    });
+    fixture.componentRef.setInput('extensionInstances', [{ instanceId: 'minio-1', instanceKey: 'primary', releaseId: 4,
+      configurationGeneration: 2, lifecycleState: 'DISABLED', configuredSecrets: ['runtimeAccessKey'],
+      publicConfiguration: { mode: 'managed' } }]);
+    const actions: any[] = [];
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+
+    const page = fixture.nativeElement.textContent as string;
+    expect(page).toContain('Storage mode');
+    expect(page).toContain('External endpoint');
+    expect(fixture.nativeElement.querySelector('input[name="instance-minio-1-runtimeAccessKey"]')).toBeNull();
+    const rotation = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Rotate generated credentials')) as HTMLButtonElement;
+    expect(rotation.textContent).toContain('runtime');
+    rotation.click();
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ type: 'rotateInstanceSecrets', group: 'runtime', instance: { instanceId: 'minio-1' } });
+  });
+
   it('exposes per-instance health, drain and outstanding obligation controls', () => {
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
     fixture.componentInstance.selectedExtension = {

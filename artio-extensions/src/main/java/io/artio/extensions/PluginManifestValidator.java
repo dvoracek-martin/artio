@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -29,8 +30,15 @@ public final class PluginManifestValidator {
     }
 
     public List<String> validate(PluginManifest manifest, String coreVersion, Set<String> installedPluginIds) {
+        return validate(manifest, coreVersion, installedPluginIds, false);
+    }
+
+    private List<String> validate(PluginManifest manifest, String coreVersion, Set<String> installedPluginIds,
+            boolean allowV2Properties) {
         List<String> errors = new ArrayList<>();
-        if (!"1".equals(manifest.manifestVersion())) errors.add("manifestVersion must be 1");
+        if (!(allowV2Properties ? "2" : "1").equals(manifest.manifestVersion())) {
+            errors.add(allowV2Properties ? "manifestVersion must be 2" : "manifestVersion must be 1");
+        }
         if (!ID.matcher(manifest.id()).matches()) errors.add("id must be a lowercase reverse-DNS style identifier");
         if (manifest.name().isBlank() || manifest.name().length() > 120) errors.add("name must contain 1 to 120 characters");
         if (manifest.vendor().isBlank() || manifest.vendor().length() > 120) errors.add("vendor must contain 1 to 120 characters");
@@ -67,6 +75,11 @@ public final class PluginManifestValidator {
         }
         if (manifest.configuration().size() > 100) errors.add("configuration schema exceeds 100 fields");
         manifest.configuration().forEach((key, field) -> validateField(key, field, errors));
+        if (!allowV2Properties && manifest.configuration().values().stream()
+                .anyMatch(field -> field != null && (field.generated() || field.generatedLength() != null
+                        || field.generatedRotationGroup() != null))) {
+            errors.add("generated configuration secrets require manifest v2");
+        }
         validateConfigurationBindings(manifest.configurationBindings(), manifest.configuration(), "primary service", errors);
         validateSecretFileBindings(manifest.secretFileBindings(), manifest.configuration(), "primary service", errors);
         validatePath(manifest.healthPath(), "healthPath", errors);
@@ -82,11 +95,21 @@ public final class PluginManifestValidator {
                 if (!serviceIds.add(service.id())) errors.add("duplicate bundle service id: " + service.id());
             }
             validateImage(service.image(), "bundle service image", errors);
-            if (service.port() < 1 || service.port() > 65535) errors.add("bundle service port must be between 1 and 65535");
+            if (!allowV2Properties && (service.beforePrimary() || service.runToCompletion())) {
+                errors.add("bundle service lifecycle options require manifest v2");
+            }
+            if (service.runToCompletion()) {
+                if (service.port() != 0 || service.healthPath() != null || !service.persistentPaths().isEmpty()
+                        || !service.internalPorts().isEmpty()) {
+                    errors.add("one-shot bundle services must not declare ports, health probes or persistent volumes");
+                }
+            } else {
+                if (service.port() < 1 || service.port() > 65535) errors.add("bundle service port must be between 1 and 65535");
+                validatePath(service.healthPath(), "bundle service healthPath", errors);
+            }
             if (service.memoryLimitMb() != null && (service.memoryLimitMb() < 128 || service.memoryLimitMb() > 2048)) {
                 errors.add("bundle service memoryLimitMb must be between 128 and 2048");
             }
-            validatePath(service.healthPath(), "bundle service healthPath", errors);
             validateConfigurationBindings(service.configurationBindings(), manifest.configuration(),
                     "bundle service " + service.id(), errors);
             validateSecretFileBindings(service.secretFileBindings(), manifest.configuration(),
@@ -118,6 +141,7 @@ public final class PluginManifestValidator {
             }
         }
         if (hasServiceDependencyCycle(manifest.services())) errors.add("bundle service startup dependencies contain a cycle");
+        if (hasPrimaryDependencyCycle(manifest.services())) errors.add("bundle service dependencies on the primary contain a cycle");
         return List.copyOf(errors);
     }
 
@@ -125,16 +149,53 @@ public final class PluginManifestValidator {
     public List<String> validate(PluginManifestV2 manifest, String coreVersion, Set<String> installedPluginIds) {
         if (manifest == null) return List.of("manifest is required");
         PluginManifest source = manifest.packageManifest();
-        PluginManifest packageMetadata = new PluginManifest("1", source.id(), source.name(), source.vendor(),
+        PluginManifest packageMetadata = new PluginManifest("2", source.id(), source.name(), source.vendor(),
                 source.version(), source.description(), source.minimumCoreVersion(), source.maximumCoreVersion(),
                 source.image(), source.dependencies(), List.of(), source.configuration(), List.of(), source.healthPath(),
                 source.diagnosticsPath(), source.geographicAvailability(), source.services(), source.persistentPaths(),
                 source.configurationBindings(), source.secretFileBindings());
-        List<String> errors = new ArrayList<>(validate(packageMetadata, coreVersion, installedPluginIds));
+        List<String> errors = new ArrayList<>(validate(packageMetadata, coreVersion, installedPluginIds, true));
         if (!source.extensionPoints().isEmpty()) errors.add("v2 manifests must declare capabilities instead of legacy extensionPoints");
         if (!source.permissions().isEmpty()) errors.add("v2 manifests must declare permissions on capability operations");
         errors.addAll(new PluginManifestV2Validator().validate(manifest));
+        source.configuration().forEach((key, field) -> {
+            if (field != null && field.generated() && (!field.secret() || !"secret".equals(field.type())
+                    || !field.required() || field.generatedLength() == null
+                    || field.generatedLength() < 16 || field.generatedLength() > 64)) {
+                errors.add("generated configuration secrets must be required secrets with a generated length from 16 to 64: " + key);
+            }
+            if (field != null && !field.generated() && field.generatedLength() != null) {
+                errors.add("generatedLength requires a generated secret field: " + key);
+            }
+            if (field != null && field.generatedRotationGroup() != null
+                    && (!field.generated() || !field.secret() || !field.generatedRotationGroup().matches("[a-z][a-z0-9._-]{0,31}"))) {
+                errors.add("generatedRotationGroup requires a generated secret and a valid group name: " + key);
+            }
+        });
         return List.copyOf(errors);
+    }
+
+    private static boolean hasPrimaryDependencyCycle(List<PluginManifest.BundleService> services) {
+        var nonNullServices = services.stream().filter(java.util.Objects::nonNull).toList();
+        var dependencies = new java.util.HashMap<String, Set<String>>();
+        dependencies.put("main", nonNullServices.stream().filter(PluginManifest.BundleService::beforePrimary)
+                .map(PluginManifest.BundleService::id).collect(java.util.stream.Collectors.toSet()));
+        nonNullServices.forEach(service -> dependencies.put(service.id(), new java.util.HashSet<>(service.dependsOn())));
+        var visited = new java.util.HashSet<String>();
+        var visiting = new java.util.HashSet<String>();
+        return dependencyCycle("main", dependencies, visited, visiting);
+    }
+
+    private static boolean dependencyCycle(String id, Map<String, Set<String>> dependencies,
+            Set<String> visited, Set<String> visiting) {
+        if (visited.contains(id)) return false;
+        if (!visiting.add(id)) return true;
+        for (String dependency : dependencies.getOrDefault(id, Set.of())) {
+            if (dependencies.containsKey(dependency) && dependencyCycle(dependency, dependencies, visited, visiting)) return true;
+        }
+        visiting.remove(id);
+        visited.add(id);
+        return false;
     }
 
     private static void validatePersistentPaths(List<String> paths, String owner, List<String> errors) {
@@ -228,6 +289,9 @@ public final class PluginManifestValidator {
         if (field.minimum() != null && field.maximum() != null && field.minimum() > field.maximum()) errors.add("inverted numeric range for configuration field: " + key);
         if ("enum".equals(field.type()) && (field.options().isEmpty() || field.options().size() > 100 || field.options().stream().anyMatch(option -> option == null || option.isBlank()))) errors.add("enum requires 1 to 100 non-empty options: " + key);
         if (field.format() != null && !Set.of("email", "uri", "hostname").contains(field.format())) errors.add("unsupported format for configuration field: " + key);
+        if (field.generatedLength() != null && (field.generatedLength() < 16 || field.generatedLength() > 64)) {
+            errors.add("generated secret length must be between 16 and 64: " + key);
+        }
     }
 
     private static boolean isSemver(String version) {
@@ -239,6 +303,8 @@ public final class PluginManifestValidator {
         bindings.forEach((environmentName, configurationKey) -> {
             if (environmentName == null || !environmentName.matches("[A-Z_][A-Z0-9_]{0,127}")) {
                 errors.add(service + " has an invalid environment variable name");
+            } else if (environmentName.startsWith("ARTIO_EXTENSION_SERVICE_")) {
+                errors.add(service + " cannot override the reserved sibling service address variables");
             }
             if (configurationKey == null || !schema.containsKey(configurationKey)) {
                 errors.add(service + " environment binding references an unknown configuration field");

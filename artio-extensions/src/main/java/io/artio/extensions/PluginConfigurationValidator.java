@@ -25,7 +25,7 @@ public final class PluginConfigurationValidator {
             Object value = values.get(key);
             if ("secret".equals(field.type())) {
                 if (value == null || value instanceof String text && text.isEmpty()) {
-                    if (field.required() && !existing.contains(key)) errors.add("required secret is not configured: " + key);
+                    if (field.required() && !field.generated() && !existing.contains(key)) errors.add("required secret is not configured: " + key);
                     return;
                 }
                 if (!(value instanceof String text)) {

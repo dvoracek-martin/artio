@@ -201,7 +201,9 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         try {
             for (RuntimeService service : servicesInStartupOrder(manifest)) {
                 startService(runtimeIdentity, manifest, service, credentialGeneration, configuration);
-                awaitReady(runtimeIdentity, manifest.id(), service.id(), service.port(), service.healthPath());
+                if (!service.runToCompletion()) {
+                    awaitReady(runtimeIdentity, manifest.id(), service.id(), service.port(), service.healthPath());
+                }
             }
         } catch (RuntimeException failure) {
             disableInstance(runtimeIdentity, manifest.id());
@@ -216,9 +218,12 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         try {
             InspectContainerResponse current = docker.inspectContainerCmd(name).exec();
             requireManaged(current, manifest.id(), runtimeIdentity);
-            if (Boolean.TRUE.equals(current.getState().getRunning())) return;
+            if (Boolean.TRUE.equals(current.getState().getRunning())) {
+                if (service.runToCompletion()) throw new IllegalStateException("A plugin lifecycle job is already running");
+                return;
+            }
             var existingEnvironment = current.getConfig() == null ? null : current.getConfig().getEnv();
-            if (service.secretFileBindings().isEmpty() && existingEnvironment != null
+            if (!service.runToCompletion() && service.secretFileBindings().isEmpty() && existingEnvironment != null
                     && java.util.Arrays.equals(existingEnvironment, environment.toArray(String[]::new))) {
                 docker.startContainerCmd(name).exec();
                 return;
@@ -231,7 +236,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         var serviceBinds = new java.util.ArrayList<Bind>();
         if (!service.persistentPaths().isEmpty()) serviceBinds.addAll(persistentBinds(manifest.id(), runtimeIdentity, service));
         SecretVolumeMount secretVolume = null;
-        if (hostLoopbackTestAccess) {
+        boolean jobCompleted = false;
+        if (hostLoopbackTestAccess && !service.runToCompletion()) {
             var bindings = new com.github.dockerjava.api.model.Ports();
             bindings.bind(ExposedPort.tcp(service.port()), com.github.dockerjava.api.model.Ports.Binding.bindIp("127.0.0.1"));
             host.withPortBindings(bindings);
@@ -241,7 +247,11 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         labels.put("io.artio.extension.service", service.id());
         labels.put("io.artio.extension.runtime", runtimeIdentity);
         labels.put("io.artio.extension.startup-order", Integer.toString(service.startupOrder()));
-        labels.put("io.artio.extension.ports", service.internalPorts().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+        if (!service.runToCompletion()) {
+            labels.put("io.artio.extension.ports", java.util.stream.Stream.concat(
+                    java.util.stream.Stream.of(service.port()), service.internalPorts().stream())
+                    .map(String::valueOf).collect(java.util.stream.Collectors.joining(",")));
+        }
         labels.put("io.artio.managed", "true");
         if (testRunId != null && !testRunId.isBlank()) labels.put("io.artio.test.run", testRunId);
         try {
@@ -253,18 +263,61 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             var create = docker.createContainerCmd(resolveImage(service.image())).withName(name).withHostConfig(host)
                     .withUser("10001:10001")
                     .withLabels(labels);
-            var exposedPorts = new java.util.ArrayList<ExposedPort>();
-            exposedPorts.add(ExposedPort.tcp(service.port()));
-            service.internalPorts().forEach(additional -> exposedPorts.add(ExposedPort.tcp(additional)));
-            create.withExposedPorts(exposedPorts);
+            if (!service.runToCompletion()) {
+                var exposedPorts = new java.util.ArrayList<ExposedPort>();
+                exposedPorts.add(ExposedPort.tcp(service.port()));
+                service.internalPorts().forEach(additional -> exposedPorts.add(ExposedPort.tcp(additional)));
+                create.withExposedPorts(exposedPorts);
+            }
             create.withEnv(environment);
             create.exec();
             docker.startContainerCmd(name).exec();
+            if (service.runToCompletion()) {
+                awaitJobCompletion(name, service.id());
+                jobCompleted = true;
+            }
         } finally {
             // Keep the tmpfs mounted by the helper until Docker has attached the plugin container.
             // Removing the helper earlier unmounts a local tmpfs volume and discards its contents.
             if (secretVolume != null) removeSecretVolumeHelper(secretVolume.helperContainerId());
+            if (service.runToCompletion() && !jobCompleted) removeContainerIfPresent(name);
         }
+    }
+
+    private void removeContainerIfPresent(String name) {
+        try {
+            docker.removeContainerCmd(name).withForce(true).exec();
+        } catch (NotFoundException ignored) {
+            // Successful and failed completed jobs are already removed by awaitJobCompletion.
+        }
+    }
+
+    private void awaitJobCompletion(String containerName, String serviceId) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
+        try {
+            while (System.nanoTime() < deadline) {
+                InspectContainerResponse current = docker.inspectContainerCmd(containerName).exec();
+                var state = current.getState();
+                if (!Boolean.TRUE.equals(state.getRunning())) {
+                    long exitCode = state.getExitCodeLong() == null ? -1 : state.getExitCodeLong();
+                    docker.removeContainerCmd(current.getId()).withForce(false).exec();
+                    if (exitCode != 0) {
+                        throw new IllegalStateException("Plugin lifecycle job failed: " + serviceId);
+                    }
+                    return;
+                }
+                Thread.sleep(250);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Plugin lifecycle job was interrupted: " + serviceId, interrupted);
+        } catch (NotFoundException disappeared) {
+            throw new IllegalStateException("Plugin lifecycle job disappeared before completion: " + serviceId, disappeared);
+        }
+        try {
+            docker.removeContainerCmd(containerName).withForce(true).exec();
+        } catch (NotFoundException ignored) { }
+        throw new IllegalStateException("Plugin lifecycle job timed out: " + serviceId);
     }
 
     private SecretVolumeMount populateSecretFileVolume(PluginManifest manifest, String runtimeIdentity, RuntimeService service,
@@ -450,6 +503,25 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             }
             if (value.length() > 10_000) throw new IllegalArgumentException("Plugin configuration value is too large for a container environment");
             values.put(binding.getKey(), value);
+        }
+        if (!manifest.services().isEmpty()) {
+            var proxyBypass = new java.util.TreeSet<String>(java.util.List.of("localhost", "127.0.0.1", "::1"));
+            for (String variable : java.util.List.of("NO_PROXY", "no_proxy")) {
+                String existing = values.get(variable);
+                if (existing != null) for (String entry : existing.split(",")) {
+                    if (!entry.isBlank()) proxyBypass.add(entry.trim());
+                }
+            }
+            for (var service : manifest.services()) {
+                if (service == null || service.runToCompletion()) continue;
+                String serviceHost = serviceName(runtimeIdentity, service.id());
+                String serviceVariable = service.id().toUpperCase(java.util.Locale.ROOT).replace('-', '_');
+                values.put("ARTIO_EXTENSION_SERVICE_" + serviceVariable + "_HOST", serviceHost);
+                values.put("ARTIO_EXTENSION_SERVICE_" + serviceVariable + "_PORT", Integer.toString(service.port()));
+                proxyBypass.add(serviceHost);
+            }
+            if (values.containsKey("NO_PROXY")) values.put("NO_PROXY", String.join(",", proxyBypass));
+            if (values.containsKey("no_proxy")) values.put("no_proxy", String.join(",", proxyBypass));
         }
         if (values.size() > 100) throw new IllegalArgumentException("Plugin container environment exceeds its limit");
         long environmentBytes = values.entrySet().stream().mapToLong(entry -> entry.getKey().getBytes(StandardCharsets.UTF_8).length
@@ -923,10 +995,11 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private java.util.List<RuntimeService> services(PluginManifest manifest) {
         var result = new java.util.ArrayList<RuntimeService>();
         result.add(new RuntimeService("main", manifest.image(), port, manifest.healthPath(), true,
-                manifest.configurationBindings(), manifest.secretFileBindings(), manifest.persistentPaths(), List.of(), 0, 268_435_456L));
+                manifest.configurationBindings(), manifest.secretFileBindings(), manifest.persistentPaths(), List.of(), 0, 268_435_456L, false, false));
         for (var service : manifest.services()) result.add(new RuntimeService(service.id(), service.image(), service.port(),
                 service.healthPath(), false, service.configurationBindings(), service.secretFileBindings(), service.persistentPaths(), service.internalPorts(), 0,
-                (service.memoryLimitMb() == null ? 256L : service.memoryLimitMb().longValue()) * 1_048_576L));
+                (service.memoryLimitMb() == null ? 256L : service.memoryLimitMb().longValue()) * 1_048_576L,
+                service.beforePrimary(), service.runToCompletion()));
         return java.util.List.copyOf(result);
     }
 
@@ -934,7 +1007,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         var byId = new java.util.LinkedHashMap<String, RuntimeService>();
         for (RuntimeService service : services(manifest)) byId.put(service.id(), service);
         var dependencies = new java.util.LinkedHashMap<String, java.util.Set<String>>();
-        dependencies.put("main", java.util.Set.of());
+        dependencies.put("main", manifest.services().stream().filter(PluginManifest.BundleService::beforePrimary)
+                .map(PluginManifest.BundleService::id).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new)));
         manifest.services().forEach(service -> dependencies.put(service.id(), new java.util.LinkedHashSet<>(service.dependsOn())));
         var ordered = new java.util.ArrayList<RuntimeService>();
         var visited = new java.util.HashSet<String>();
@@ -945,9 +1019,13 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
             RuntimeService service = ordered.get(index);
             indexed.add(new RuntimeService(service.id(), service.image(), service.port(), service.healthPath(),
                     service.primary(), service.configurationBindings(), service.secretFileBindings(), service.persistentPaths(), service.internalPorts(), index,
-                    service.memoryBytes()));
+                    service.memoryBytes(), service.beforePrimary(), service.runToCompletion()));
         }
         return java.util.List.copyOf(indexed);
+    }
+
+    java.util.List<String> startupServiceIds(PluginManifest manifest) {
+        return servicesInStartupOrder(manifest).stream().map(RuntimeService::id).toList();
     }
 
     private static int startupOrder(InspectContainerResponse container) {
@@ -980,7 +1058,8 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
     private record RuntimeService(String id, String image, int port, String healthPath, boolean primary,
                                   Map<String, String> configurationBindings, Map<String, String> secretFileBindings,
                                   java.util.List<String> persistentPaths,
-                                  java.util.List<Integer> internalPorts, int startupOrder, long memoryBytes) { }
+                                  java.util.List<Integer> internalPorts, int startupOrder, long memoryBytes,
+                                  boolean beforePrimary, boolean runToCompletion) { }
 
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");

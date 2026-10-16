@@ -4,54 +4,180 @@
     "id": "storage.artio-minio",
     "name": "Artio MinIO Object Storage",
     "vendor": "Artio",
-    "version": "1.0.0",
-    "description": "Private S3-compatible object storage backed by an administrator-approved MinIO endpoint.",
+    "version": "1.1.0",
+    "description": "Private S3-compatible object storage with managed MinIO or an approved external endpoint.",
     "minimumCoreVersion": "0.1.0",
     "maximumCoreVersion": "9.0.0",
     "image": "ghcr.io/artio-plugins/minio-object-storage@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
     "extensionPoints": [],
     "healthPath": "/health",
     "diagnosticsPath": "/diagnostics",
-    "persistentPaths": ["/data"],
+    "persistentPaths": [
+      "/data"
+    ],
     "configuration": {
+      "mode": {
+        "type": "enum",
+        "required": true,
+        "secret": false,
+        "label": "Storage mode",
+        "description": "Managed starts an isolated MinIO server and provisions credentials automatically. External uses an administrator-approved HTTPS endpoint.",
+        "format": null,
+        "options": [
+          "managed",
+          "external"
+        ],
+        "minimumLength": null,
+        "maximumLength": null,
+        "minimum": null,
+        "maximum": null
+      },
       "endpoint": {
-        "type": "url", "required": true, "secret": false,
-        "label": "MinIO endpoint", "description": "HTTPS S3 API endpoint approved by the administrator.",
-        "format": "uri", "options": [], "minimumLength": 8, "maximumLength": 512,
-        "minimum": null, "maximum": null
+        "type": "url",
+        "required": false,
+        "secret": false,
+        "label": "External MinIO endpoint",
+        "description": "Required only for external mode. Use an administrator-approved HTTPS S3 API endpoint.",
+        "format": "uri",
+        "options": [],
+        "minimumLength": 8,
+        "maximumLength": 512,
+        "minimum": null,
+        "maximum": null
       },
       "bucket": {
-        "type": "text", "required": true, "secret": false,
-        "label": "Bucket", "description": "Pre-provisioned private bucket.",
-        "format": null, "options": [], "minimumLength": 3, "maximumLength": 63,
-        "minimum": null, "maximum": null
+        "type": "text",
+        "required": false,
+        "secret": false,
+        "label": "External bucket",
+        "description": "Required only for external mode. The bucket must already exist and be private.",
+        "format": null,
+        "options": [],
+        "minimumLength": 3,
+        "maximumLength": 63,
+        "minimum": null,
+        "maximum": null
       },
       "prefix": {
-        "type": "text", "required": true, "secret": false,
-        "label": "Object prefix", "description": "Dedicated namespace assigned to this plugin instance.",
-        "format": null, "options": [], "minimumLength": 1, "maximumLength": 512,
-        "minimum": null, "maximum": null
+        "type": "text",
+        "required": false,
+        "secret": false,
+        "label": "External object prefix",
+        "description": "Required only for external mode. Use a namespace assigned exclusively to this plugin instance.",
+        "format": null,
+        "options": [],
+        "minimumLength": 1,
+        "maximumLength": 512,
+        "minimum": null,
+        "maximum": null
       },
       "region": {
-        "type": "text", "required": true, "secret": false,
-        "label": "Signing region", "description": "S3 signing region, commonly us-east-1 for MinIO.",
-        "format": null, "options": [], "minimumLength": 1, "maximumLength": 64,
-        "minimum": null, "maximum": null
+        "type": "text",
+        "required": false,
+        "secret": false,
+        "label": "Signing region",
+        "description": "S3 signing region for an external endpoint. Defaults to us-east-1.",
+        "format": null,
+        "options": [],
+        "minimumLength": 1,
+        "maximumLength": 64,
+        "minimum": null,
+        "maximum": null
       },
       "addressingStyle": {
-        "type": "enum", "required": true, "secret": false,
-        "label": "Addressing style", "description": "Use path style for most MinIO installations.",
-        "format": null, "options": ["path", "virtual"], "minimumLength": null, "maximumLength": null,
-        "minimum": null, "maximum": null
+        "type": "enum",
+        "required": false,
+        "secret": false,
+        "label": "Addressing style",
+        "description": "Use path style for most MinIO installations.",
+        "format": null,
+        "options": [
+          "path",
+          "virtual"
+        ],
+        "minimumLength": null,
+        "maximumLength": null,
+        "minimum": null,
+        "maximum": null
       },
       "s3CredentialsJson": {
-        "type": "secret", "required": true, "secret": true,
-        "label": "Scoped S3 credentials", "description": "Write-only JSON with accessKeyId and secretAccessKey for this bucket prefix.",
-        "format": null, "options": [], "minimumLength": 2, "maximumLength": 10000,
-        "minimum": null, "maximum": null
+        "type": "secret",
+        "required": false,
+        "secret": true,
+        "label": "External scoped S3 credentials",
+        "description": "Required only for external mode. Write-only JSON with accessKeyId and secretAccessKey, scoped to the configured prefix.",
+        "format": null,
+        "options": [],
+        "minimumLength": 2,
+        "maximumLength": 10000,
+        "minimum": null,
+        "maximum": null
+      },
+      "managedRootUser": {
+        "type": "secret",
+        "required": true,
+        "secret": true,
+        "generated": true,
+        "generatedLength": 20,
+        "label": "Managed MinIO root user",
+        "description": "Generated by Artio and delivered only to the isolated MinIO server and provisioning job.",
+        "format": null,
+        "options": [],
+        "minimumLength": 20,
+        "maximumLength": 20,
+        "minimum": null,
+        "maximum": null
+      },
+      "managedRootPassword": {
+        "type": "secret",
+        "required": true,
+        "secret": true,
+        "generated": true,
+        "generatedLength": 48,
+        "label": "Managed MinIO root password",
+        "description": "Generated by Artio; never returned in configuration readback.",
+        "format": null,
+        "options": [],
+        "minimumLength": 48,
+        "maximumLength": 48,
+        "minimum": null,
+        "maximum": null
+      },
+      "runtimeAccessKey": {
+        "type": "secret",
+        "required": true,
+        "secret": true,
+        "generated": true,
+        "generatedLength": 20,
+        "generatedRotationGroup": "runtime",
+        "label": "Managed runtime access key",
+        "description": "Generated by Artio and scoped by MinIO to this plugin's object prefix.",
+        "format": null,
+        "options": [],
+        "minimumLength": 20,
+        "maximumLength": 20,
+        "minimum": null,
+        "maximum": null
+      },
+      "runtimeSecretKey": {
+        "type": "secret",
+        "required": true,
+        "secret": true,
+        "generated": true,
+        "generatedLength": 40,
+        "generatedRotationGroup": "runtime",
+        "label": "Managed runtime secret key",
+        "description": "Generated by Artio and delivered to the adapter only through a protected secret file.",
+        "format": null,
+        "options": [],
+        "minimumLength": 40,
+        "maximumLength": 40,
+        "minimum": null,
+        "maximum": null
       }
     },
     "configurationBindings": {
+      "ARTIO_STORAGE_MODE": "mode",
       "ARTIO_S3_ENDPOINT": "endpoint",
       "ARTIO_S3_BUCKET": "bucket",
       "ARTIO_S3_PREFIX": "prefix",
@@ -59,14 +185,91 @@
       "ARTIO_S3_ADDRESSING_STYLE": "addressingStyle"
     },
     "secretFileBindings": {
-      "/run/secrets/s3-credentials.json": "s3CredentialsJson"
+      "/run/secrets/s3-credentials.json": "s3CredentialsJson",
+      "/run/secrets/runtime-access-key": "runtimeAccessKey",
+      "/run/secrets/runtime-secret-key": "runtimeSecretKey"
     },
-    "geographicAvailability": {"scope": "GLOBAL", "countries": []}
+    "geographicAvailability": {
+      "scope": "GLOBAL",
+      "countries": []
+    },
+    "services": [
+      {
+        "id": "minio",
+        "image": "ghcr.io/artio-plugins/minio-server@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+        "port": 9000,
+        "healthPath": "/minio/health/ready",
+        "beforePrimary": true,
+        "runToCompletion": false,
+        "configurationBindings": {},
+        "secretFileBindings": {
+          "/run/secrets/minio-root-user": "managedRootUser",
+          "/run/secrets/minio-root-password": "managedRootPassword"
+        },
+        "dependsOn": [],
+        "persistentPaths": [
+          "/data"
+        ],
+        "internalPorts": [],
+        "memoryLimitMb": 512
+      },
+      {
+        "id": "provision",
+        "image": "ghcr.io/artio-plugins/minio-provisioner@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+        "port": 0,
+        "healthPath": null,
+        "beforePrimary": true,
+        "runToCompletion": true,
+        "configurationBindings": {},
+        "secretFileBindings": {
+          "/run/secrets/minio-root-user": "managedRootUser",
+          "/run/secrets/minio-root-password": "managedRootPassword",
+          "/run/secrets/runtime-access-key": "runtimeAccessKey",
+          "/run/secrets/runtime-secret-key": "runtimeSecretKey"
+        },
+        "dependsOn": [
+          "minio"
+        ],
+        "persistentPaths": [],
+        "internalPorts": [],
+        "memoryLimitMb": 256
+      },
+      {
+        "id": "finalize-rotation",
+        "image": "ghcr.io/artio-plugins/minio-provisioner-cleanup@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+        "port": 0,
+        "healthPath": null,
+        "beforePrimary": false,
+        "runToCompletion": true,
+        "configurationBindings": {},
+        "secretFileBindings": {
+          "/run/secrets/minio-root-user": "managedRootUser",
+          "/run/secrets/minio-root-password": "managedRootPassword",
+          "/run/secrets/runtime-access-key": "runtimeAccessKey",
+          "/run/secrets/runtime-secret-key": "runtimeSecretKey"
+        },
+        "dependsOn": ["main"],
+        "persistentPaths": [],
+        "internalPorts": [],
+        "memoryLimitMb": 256
+      }
+    ]
   },
-  "capabilities": [{
-    "capabilityId": "storage.object.v1",
-    "operations": ["put", "get", "head", "delete"],
-    "permissions": ["storage.object.write", "storage.object.read", "storage.object.delete"]
-  }],
+  "capabilities": [
+    {
+      "capabilityId": "storage.object.v1",
+      "operations": [
+        "put",
+        "get",
+        "head",
+        "delete"
+      ],
+      "permissions": [
+        "storage.object.write",
+        "storage.object.read",
+        "storage.object.delete"
+      ]
+    }
+  ],
   "subscriptions": []
 }

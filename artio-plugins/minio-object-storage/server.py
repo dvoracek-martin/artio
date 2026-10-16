@@ -23,6 +23,10 @@ MAX_OBJECT_BYTES = CHUNK_BYTES * MAX_CHUNKS
 KEY = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 LOCK = threading.RLock()
+MANAGED_BUCKET = "artio-objects"
+MANAGED_PREFIX = "objects"
+MANAGED_ACCESS_KEY_FILE = Path("/run/secrets/runtime-access-key")
+MANAGED_SECRET_KEY_FILE = Path("/run/secrets/runtime-secret-key")
 
 
 class StorageError(Exception):
@@ -76,20 +80,35 @@ def _placement_role(payload):
 
 
 def _client():
-    secret_path = Path(os.environ.get("ARTIO_S3_CREDENTIALS_FILE", "/run/secrets/s3-credentials.json"))
-    try:
-        credentials = json.loads(secret_path.read_text(encoding="utf-8"))
-        access_key = credentials["accessKeyId"]
-        secret_key = credentials["secretAccessKey"]
-    except (OSError, ValueError, KeyError, TypeError):
-        raise StorageError(503, "credentials_unavailable") from None
+    mode = os.environ.get("ARTIO_STORAGE_MODE", "external").strip().lower()
+    if mode == "managed":
+        host = os.environ.get("ARTIO_EXTENSION_SERVICE_MINIO_HOST", "")
+        port = os.environ.get("ARTIO_EXTENSION_SERVICE_MINIO_PORT", "")
+        if not host or port != "9000" or any(char in host for char in "/:@"):
+            raise StorageError(503, "managed_storage_unavailable")
+        endpoint = f"http://{host}:{port}"
+        try:
+            access_key = MANAGED_ACCESS_KEY_FILE.read_text(encoding="utf-8").strip()
+            secret_key = MANAGED_SECRET_KEY_FILE.read_text(encoding="utf-8").strip()
+        except OSError:
+            raise StorageError(503, "credentials_unavailable") from None
+    elif mode == "external":
+        secret_path = Path(os.environ.get("ARTIO_S3_CREDENTIALS_FILE", "/run/secrets/s3-credentials.json"))
+        try:
+            credentials = json.loads(secret_path.read_text(encoding="utf-8"))
+            access_key = credentials["accessKeyId"]
+            secret_key = credentials["secretAccessKey"]
+        except (OSError, ValueError, KeyError, TypeError):
+            raise StorageError(503, "credentials_unavailable") from None
+        endpoint = os.environ.get("ARTIO_S3_ENDPOINT", "").strip()
+        parsed_endpoint = urlsplit(endpoint)
+        if (parsed_endpoint.scheme != "https" or not parsed_endpoint.hostname or parsed_endpoint.username
+                or parsed_endpoint.password or parsed_endpoint.query or parsed_endpoint.fragment):
+            raise StorageError(400, "invalid_endpoint")
+    else:
+        raise StorageError(400, "invalid_storage_mode")
     if not isinstance(access_key, str) or not isinstance(secret_key, str) or not access_key or not secret_key:
         raise StorageError(503, "credentials_unavailable")
-    endpoint = os.environ.get("ARTIO_S3_ENDPOINT", "").strip()
-    parsed_endpoint = urlsplit(endpoint)
-    if (parsed_endpoint.scheme != "https" or not parsed_endpoint.hostname or parsed_endpoint.username
-            or parsed_endpoint.password or parsed_endpoint.query or parsed_endpoint.fragment):
-        raise StorageError(400, "invalid_endpoint")
     path_style = os.environ.get("ARTIO_S3_ADDRESSING_STYLE", "path")
     if path_style not in ("path", "virtual"):
         raise StorageError(400, "invalid_addressing_style")
@@ -109,8 +128,11 @@ def _client():
 
 
 def _bucket():
-    bucket = os.environ.get("ARTIO_S3_BUCKET", "")
-    prefix = os.environ.get("ARTIO_S3_PREFIX", "artio").strip("/")
+    if os.environ.get("ARTIO_STORAGE_MODE", "external").strip().lower() == "managed":
+        bucket, prefix = MANAGED_BUCKET, MANAGED_PREFIX
+    else:
+        bucket = os.environ.get("ARTIO_S3_BUCKET", "")
+        prefix = os.environ.get("ARTIO_S3_PREFIX", "artio").strip("/")
     if not bucket or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
         raise StorageError(400, "invalid_bucket")
     if not prefix or any(part in ("", ".", "..") for part in prefix.split("/")):
@@ -367,6 +389,32 @@ def diagnose(client=None):
             result["Body"].close()
         if not hmac.compare_digest(hashlib.sha256(received).hexdigest(), checksum):
             raise StorageError(422, "object_integrity_failure")
+
+        # A random write outside the assigned prefix must be rejected, then is removed if
+        # an external credential was accidentally granted broad access.
+        denied_key = ".artio-diagnostics-negative/" + str(uuid.uuid4())
+        negative_version = None
+        negative_written = False
+        try:
+            negative = _s3_call(lambda: s3.put_object(Bucket=bucket, Key=denied_key, Body=body,
+                                                       ContentLength=len(body), Metadata={"artio-sha256": checksum}))
+            negative_written = True
+            negative_version = negative.get("VersionId")
+            raise StorageError(403, "provider_scope_too_broad")
+        except StorageError as error:
+            if error.code == "provider_scope_too_broad":
+                raise
+            if error.status not in (401, 403):
+                raise StorageError(403, "provider_scope_not_verified") from None
+        finally:
+            if negative_written:
+                try:
+                    cleanup = {"Bucket": bucket, "Key": denied_key}
+                    if negative_version:
+                        cleanup["VersionId"] = negative_version
+                    _s3_call(lambda: s3.delete_object(**cleanup))
+                except StorageError:
+                    pass
         return {"status": "ready", "provider": "artio-minio-object-storage"}
     finally:
         try:
