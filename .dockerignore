@@ -1,5 +1,11 @@
 .gradle
 .gradle-home
+**/.gradle
+**/.gradle/**
+**/.gradle-home
+**/.gradle-home/**
+**/.kotlin
+**/.kotlin/**
 .git
 **/build
 **/node_modules
