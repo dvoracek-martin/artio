@@ -3,8 +3,11 @@ package io.artio.api.extensions;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.extensions.ReleaseDescriptorCanonicalizer;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.Signature;
@@ -45,6 +48,43 @@ class OfficialReleaseDescriptorVerifierTests {
   }
 
   @Test
+  void keyRotationAcceptsTheOverlapAndRejectsTheRetiredReleaseKey() throws Exception {
+    var oldKey = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    var newKey = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    String descriptor = descriptorJson();
+    String oldEnvelope = signedEnvelope(descriptor, "release-old", oldKey);
+    String newEnvelope = signedEnvelope(descriptor, "release-new", newKey);
+    String overlappingTrust =
+        trustedKey("release-old", oldKey.getPublic().getEncoded())
+            + ","
+            + trustedKey("release-new", newKey.getPublic().getEncoded());
+
+    var overlapVerifier = new OfficialReleaseDescriptorVerifier(overlappingTrust);
+    assertThat(
+            verify(overlapVerifier, oldEnvelope, "shipping.demo", "1.2.3")
+                .path("version")
+                .asText())
+        .isEqualTo("1.2.3");
+    assertThat(
+            verify(overlapVerifier, newEnvelope, "shipping.demo", "1.2.3")
+                .path("version")
+                .asText())
+        .isEqualTo("1.2.3");
+
+    var afterRetirement =
+        new OfficialReleaseDescriptorVerifier(
+            trustedKey("release-new", newKey.getPublic().getEncoded()));
+    assertThat(
+            verify(afterRetirement, newEnvelope, "shipping.demo", "1.2.3")
+                .path("pluginId")
+                .asText())
+        .isEqualTo("shipping.demo");
+    assertThatThrownBy(() -> verify(afterRetirement, oldEnvelope, "shipping.demo", "1.2.3"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("signer is not trusted");
+  }
+
+  @Test
   void rejectsChangedIdentityTamperingUnknownSignerAndDuplicateFields() throws Exception {
     var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
     var verifier = new OfficialReleaseDescriptorVerifier(trustedKey(keys.getPublic().getEncoded()));
@@ -82,12 +122,30 @@ class OfficialReleaseDescriptorVerifierTests {
   }
 
   private static String trustedKey(byte[] encoded) {
-    return "test-root=" + Base64.getUrlEncoder().withoutPadding().encodeToString(encoded);
+    return trustedKey("test-root", encoded);
   }
 
-  private static void verify(
+  private static String trustedKey(String keyId, byte[] encoded) {
+    return keyId + "=" + Base64.getUrlEncoder().withoutPadding().encodeToString(encoded);
+  }
+
+  private static JsonNode verify(
       OfficialReleaseDescriptorVerifier verifier, String envelope, String id, String version) {
-    verifier.verify(envelope.getBytes(java.nio.charset.StandardCharsets.UTF_8), id, version);
+    return verifier.verify(envelope.getBytes(StandardCharsets.UTF_8), id, version);
+  }
+
+  private static String signedEnvelope(String descriptorJson, String keyId, KeyPair keys)
+      throws Exception {
+    Signature signer = Signature.getInstance("Ed25519");
+    signer.initSign(keys.getPrivate());
+    signer.update(ReleaseDescriptorCanonicalizer.canonicalBytes(descriptorJson));
+    return "{\"descriptor\":"
+        + new ObjectMapper().readTree(descriptorJson)
+        + ",\"signature\":{\"algorithm\":\"Ed25519\",\"keyId\":\""
+        + keyId
+        + "\",\"value\":\""
+        + Base64.getUrlEncoder().withoutPadding().encodeToString(signer.sign())
+        + "\"}}";
   }
 
   private static String descriptorJson() throws Exception {
