@@ -99,9 +99,10 @@ class MarketplaceCatalogClientTests {
         var client = new MarketplaceCatalogClient(mapper,
                 "http://127.0.0.1:" + server.getAddress().getPort(), verifier);
 
-        var result = (java.util.Map<?, ?>) client.releaseDescriptor("shipping.demo", "1.2.3");
+        var result = client.verifiedReleaseDescriptor("shipping.demo", "1.2.3");
 
-        assertThat(result.get("pluginId")).isEqualTo("shipping.demo");
+        assertThat(result.descriptor().path("pluginId").asText()).isEqualTo("shipping.demo");
+        assertThat(result.digest()).isEqualTo(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical)));
         assertThat(requestUri.get()).isEqualTo("/api/v1/marketplace/plugins/shipping.demo/releases/1.2.3/descriptor");
     }
 

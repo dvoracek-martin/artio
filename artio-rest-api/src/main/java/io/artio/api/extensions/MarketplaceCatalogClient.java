@@ -1,6 +1,7 @@
 package io.artio.api.extensions;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.artio.extensions.ReleaseDescriptorCanonicalizer;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -78,6 +79,16 @@ public final class MarketplaceCatalogClient {
 
     /** Fetch and locally verify the signed, immutable official release descriptor. */
     public Object releaseDescriptor(String pluginId, String version) {
+        var verified = verifiedReleaseDescriptor(pluginId, version);
+        try {
+            return mapper.readValue(mapper.writeValueAsBytes(verified.descriptor()), Object.class);
+        } catch (Exception failure) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Verified Marketplace descriptor could not be decoded");
+        }
+    }
+
+    /** Returns the verified descriptor and its canonical content digest for durable provenance. */
+    public VerifiedReleaseDescriptor verifiedReleaseDescriptor(String pluginId, String version) {
         if (pluginId == null || !pluginId.matches("[a-z0-9][a-z0-9._-]{0,127}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pluginId is invalid");
         if (version == null || !version.matches("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?"))
@@ -86,11 +97,15 @@ public final class MarketplaceCatalogClient {
                 + pathSegment(version) + "/descriptor");
         var descriptor = descriptorVerifier.verify(bytes, pluginId, version);
         try {
-            return mapper.readValue(mapper.writeValueAsBytes(descriptor), Object.class);
+            byte[] canonical = ReleaseDescriptorCanonicalizer.canonicalBytes(mapper.writeValueAsString(descriptor));
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(canonical);
+            return new VerifiedReleaseDescriptor(descriptor, java.util.HexFormat.of().formatHex(digest));
         } catch (Exception failure) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Verified Marketplace descriptor could not be decoded");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Verified Marketplace descriptor could not be fingerprinted");
         }
     }
+
+    public record VerifiedReleaseDescriptor(com.fasterxml.jackson.databind.JsonNode descriptor, String digest) { }
 
     /** Fetch the signed policy snapshot as bytes; the security worker verifies before parsing it. */
     public byte[] signedAdvisories() {

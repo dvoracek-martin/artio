@@ -57,6 +57,7 @@ public class ExtensionManagementController {
     private final PluginEventDeliveryOperations eventDeliveryOperations;
     private final PluginEventBackfillOperations eventBackfillOperations;
     private final ExtensionInstallationJobOperations installationJobs;
+    private final OfficialMarketplaceReleaseRegistration officialMarketplaceReleaseRegistration;
 
     public ExtensionManagementController(PluginManifestValidator manifestValidator,
             PluginConfigurationValidator configurationValidator, EncryptionService encryption,
@@ -65,7 +66,8 @@ public class ExtensionManagementController {
             ObjectProvider<ExtensionRuntimePort> dockerRuntime, DistributionPluginProvisioningService provisioning,
             MarketplaceCatalogClient marketplace,
             PluginEventDeliveryOperations eventDeliveryOperations, PluginEventBackfillOperations eventBackfillOperations,
-            ExtensionInstallationJobOperations installationJobs) {
+            ExtensionInstallationJobOperations installationJobs,
+            OfficialMarketplaceReleaseRegistration officialMarketplaceReleaseRegistration) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
         this.encryption = encryption;
@@ -78,6 +80,7 @@ public class ExtensionManagementController {
         this.eventDeliveryOperations = eventDeliveryOperations;
         this.eventBackfillOperations = eventBackfillOperations;
         this.installationJobs = installationJobs;
+        this.officialMarketplaceReleaseRegistration = officialMarketplaceReleaseRegistration;
     }
 
     @PostMapping("/validate")
@@ -198,6 +201,18 @@ public class ExtensionManagementController {
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public Object marketplaceReleaseDescriptor(@PathVariable String pluginId, @PathVariable String version) {
         return marketplace.releaseDescriptor(pluginId, version);
+    }
+
+    @PostMapping("/marketplace/plugins/{pluginId}/releases/{version}/installations")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> installOfficialMarketplaceRelease(@PathVariable String pluginId,
+            @PathVariable String version, @RequestBody MarketplaceInstallationRequest request,
+            JwtAuthenticationToken actor) {
+        UUID actorId = UUID.fromString(actor.getToken().getSubject());
+        OfficialMarketplaceReleaseRegistration.Installation installation =
+                officialMarketplaceReleaseRegistration.install(pluginId, version, actorId,
+                        request == null ? null : request.idempotencyKey());
+        return ResponseEntity.accepted().body(installation);
     }
 
     @PostMapping("/register")
@@ -465,7 +480,7 @@ public class ExtensionManagementController {
         UUID instanceId = request.instanceId();
         if (instanceId == null) {
             PluginRow row = findPlugin(request.pluginId());
-            if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(row.lifecycleState())) {
+            if (!Set.of("VALIDATED", "CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(row.lifecycleState())) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Plugin must be configured or stopped before installation");
             }
             List<String> errors = new java.util.ArrayList<>(manifestValidator.validate(row.manifest(), coreVersion, registeredPluginIds()));
@@ -473,6 +488,7 @@ public class ExtensionManagementController {
             if (!errors.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", errors));
             manifest = row.manifest();
             runtimeIdentity = "legacy:" + request.pluginId();
+            releaseId = releaseId(request.pluginId(), manifest.version());
         } else {
             InstanceRow instance = findInstance(request.pluginId(), instanceId);
             if (!Set.of("CONFIGURED", "INSTALLED", "DISABLED", "FAILED").contains(instance.lifecycleState())) {
@@ -482,8 +498,12 @@ public class ExtensionManagementController {
             runtimeIdentity = instance.runtimeIdentity();
             releaseId = instance.releaseId();
         }
-        var job = installationJobs.request(request.pluginId(), instanceId, runtimeIdentity, releaseId, manifest, actorId,
-                request.idempotencyKey());
+        MarketplaceProvenance provenance = releaseProvenance(releaseId);
+        var job = provenance == null
+                ? installationJobs.request(request.pluginId(), instanceId, runtimeIdentity, releaseId, manifest, actorId,
+                        request.idempotencyKey())
+                : installationJobs.requestMarketplace(request.pluginId(), instanceId, runtimeIdentity, releaseId, manifest,
+                        actorId, request.idempotencyKey(), provenance.descriptorDigest());
         audit(request.pluginId(), actor, "INSTALLATION_REQUESTED", Map.of("jobId", job.jobId().toString(),
                 "instanceId", instanceId == null ? "legacy" : instanceId.toString()));
         return ResponseEntity.accepted().body(job);
@@ -1549,6 +1569,19 @@ public class ExtensionManagementController {
         return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM extension_plugin_releases WHERE plugin_id=? AND version=?)", Boolean.class, pluginId, version));
     }
 
+    private long releaseId(String pluginId, String version) {
+        Long releaseId = jdbc.queryForObject("SELECT release_id FROM extension_plugin_releases WHERE plugin_id=? AND version=?",
+                Long.class, pluginId, version);
+        return releaseId == null ? 0 : releaseId;
+    }
+
+    private MarketplaceProvenance releaseProvenance(long releaseId) {
+        if (releaseId <= 0) return null;
+        return jdbc.query("SELECT provenance,descriptor_digest FROM extension_plugin_release_provenance "
+                        + "WHERE release_id=? AND provenance='OFFICIAL_MARKETPLACE'",
+                rs -> rs.next() ? new MarketplaceProvenance(rs.getString(1), rs.getString(2)) : null, releaseId);
+    }
+
     private PluginRow findPlugin(String id) {
         return jdbc.query("SELECT manifest,public_configuration,encrypted_secrets,lifecycle_state,configuration_version,credential_generation,rotation_was_enabled,rotation_previous_state FROM extension_plugins WHERE plugin_id=?",
                 (rs, row) -> new PluginRow(read(rs.getString("manifest"), PluginManifest.class),
@@ -1718,6 +1751,8 @@ public class ExtensionManagementController {
     public record InvocationRequest(String extensionPoint, String operation, String idempotencyKey,
                                     Object payload, long deadlineMillis) { }
     public record InstallationRequest(String pluginId, UUID instanceId, String idempotencyKey) { }
+    public record MarketplaceInstallationRequest(String idempotencyKey) { }
+    private record MarketplaceProvenance(String provenance, String descriptorDigest) { }
     public record InvocationResponse(int statusCode, Object payload) { }
     public record BindingRequest(String capabilityId, String operationName, Map<String, String> scope, int priority,
             UUID instanceId) { }

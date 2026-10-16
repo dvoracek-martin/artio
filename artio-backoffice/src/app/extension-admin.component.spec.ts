@@ -66,7 +66,7 @@ describe('ExtensionAdminComponent', () => {
     expect(page).toContain('Compatibility: CAPABILITY_V2 · 2 instance(s) · 3 binding(s) · 1 subscription(s)');
   });
 
-  it('renders a compatible marketplace release and emits an explicit registration action', () => {
+  it('renders a compatible marketplace release and emits an installation action', () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
     fixture.componentInstance.marketplacePlugins = [{ pluginId: 'shipping.demo', version: '1.2.3', vendor: 'Demo',
@@ -77,9 +77,9 @@ describe('ExtensionAdminComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Demo Shipping');
     const button = [...fixture.nativeElement.querySelectorAll('button')]
-      .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Review and register')) as HTMLButtonElement;
+      .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Install from Marketplace')) as HTMLButtonElement;
     button.click();
-    expect(actions).toEqual([{ type: 'marketplaceRegister', item: fixture.componentInstance.marketplacePlugins[0], country: 'CH' }]);
+    expect(actions).toEqual([{ type: 'marketplaceInstall', item: fixture.componentInstance.marketplacePlugins[0], country: 'CH' }]);
   });
 
   it('blocks a revoked Marketplace release while preserving uninstall', () => {
@@ -98,7 +98,7 @@ describe('ExtensionAdminComponent', () => {
     expect(actions.map(action => action.type)).toEqual(['uninstall']);
   });
 
-  it('does not offer registration for a release banned by Marketplace', () => {
+  it('does not offer Marketplace installation for a banned release', () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
     fixture.componentInstance.extensionsLoading = false;
@@ -106,7 +106,7 @@ describe('ExtensionAdminComponent', () => {
     fixture.componentInstance.securityAdvisories = { releases: [{ pluginId: 'shipping.demo', version: '1.2.3', securityStatus: 'BANNED' }] };
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Blocked by security advisory');
-    expect([...fixture.nativeElement.querySelectorAll('button')].some((button: HTMLButtonElement) => button.textContent?.includes('Review and register'))).toBe(false);
+    expect([...fixture.nativeElement.querySelectorAll('button')].some((button: HTMLButtonElement) => button.textContent?.includes('Install from Marketplace'))).toBe(false);
   });
 
   it('renders instance lifecycle, configuration, capability binding and subscription controls for v2 plugins', () => {

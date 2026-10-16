@@ -80,6 +80,32 @@ class ExtensionInstallationJobIntegrationTests {
     }
 
     @Test
+    void bindsMarketplaceJobsToTheVerifiedImmutableReleaseDescriptor() throws Exception {
+        String pluginId = "marketplace.installation";
+        PluginManifest manifest = manifest(pluginId);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, mapper.writeValueAsString(manifest), manifest.image());
+        jdbc.update("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) VALUES (?,?,?,?::jsonb)",
+                pluginId, manifest.version(), manifest.image(), mapper.writeValueAsString(manifest));
+        Long releaseId = jdbc.queryForObject("SELECT release_id FROM extension_plugin_releases WHERE plugin_id=? AND version=?",
+                Long.class, pluginId, manifest.version());
+        String descriptorDigest = "a".repeat(64);
+        jdbc.update("INSERT INTO extension_plugin_release_provenance(release_id,provenance,descriptor_digest,descriptor_snapshot) "
+                        + "VALUES (?,'OFFICIAL_MARKETPLACE',?,?::jsonb)", releaseId, descriptorDigest, "{}");
+        UUID actorId = UUID.randomUUID();
+
+        var job = jobs.requestMarketplace(pluginId, null, "legacy:" + pluginId, releaseId, manifest,
+                actorId, "marketplace-job-0001", descriptorDigest);
+
+        assertThat(job.sourceKind()).isEqualTo("MARKETPLACE");
+        assertThat(job.releaseId()).isEqualTo(releaseId);
+        assertThat(job.releaseDigest()).isEqualTo(descriptorDigest);
+        assertThatThrownBy(() -> jobs.requestMarketplace(pluginId, null, "legacy:" + pluginId, releaseId,
+                manifest, actorId, "marketplace-job-0001", "b".repeat(64)))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+
+    @Test
     void allowsOnlySafeCancellationAndExplicitRetryOfFailedJobs() throws Exception {
         String pluginId = "installation.controls";
         PluginManifest manifest = manifest(pluginId);

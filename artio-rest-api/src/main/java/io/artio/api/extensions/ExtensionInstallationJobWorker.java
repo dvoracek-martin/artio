@@ -109,7 +109,7 @@ public class ExtensionInstallationJobWorker {
             if (job.instanceId() == null) {
                 jdbc.update("UPDATE extension_plugins SET lifecycle_state='INSTALLED',updated_at=now() WHERE plugin_id=?", job.pluginId());
                 jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
-                        + "WHERE plugin_id=? AND compatibility_mode='LEGACY_V1' AND lifecycle_state IN ('CONFIGURED','FAILED')", job.pluginId());
+                        + "WHERE plugin_id=? AND compatibility_mode='LEGACY_V1' AND lifecycle_state IN ('VALIDATED','CONFIGURED','FAILED')", job.pluginId());
             } else {
                 jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
                         + "WHERE instance_id=? AND lifecycle_state IN ('CONFIGURED','FAILED')", job.instanceId());

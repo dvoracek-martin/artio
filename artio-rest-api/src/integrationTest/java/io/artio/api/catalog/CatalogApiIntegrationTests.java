@@ -66,6 +66,15 @@ class CatalogApiIntegrationTests {
     private JdbcTemplate jdbc;
 
     @Autowired
+    private io.artio.api.extensions.ExtensionRegistryCredentialService extensionRegistryCredentials;
+
+    @Autowired
+    private io.artio.api.extensions.OciArchiveInspector ociArchiveInspector;
+
+    @Autowired
+    private io.artio.api.extensions.OciArchiveQuarantineStore archiveQuarantineStore;
+
+    @Autowired
     private ObjectMapper mapper;
 
     @Autowired
@@ -589,51 +598,72 @@ class CatalogApiIntegrationTests {
         assertThat(listing.getBody()).isNotNull();
         assertThat(listing.getBody().get("content").toString()).contains(marketplacePluginId);
 
-        var fetched = adminExchange("/api/v1/admin/extensions/marketplace/plugins/{id}/releases/{version}/descriptor",
-                HttpMethod.GET, null, Map.class, marketplacePluginId, marketplaceVersion);
-        assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(fetched.getBody()).isNotNull();
-        var descriptorJson = mapper.valueToTree(fetched.getBody());
-        assertThat(descriptorJson.path("pluginId").asText()).isEqualTo(marketplacePluginId);
-        assertThat(descriptorJson.path("version").asText()).isEqualTo(marketplaceVersion);
-        assertThat(descriptorJson.path("images").size()).isGreaterThanOrEqualTo(1);
-        var manifestJson = descriptorJson.path("manifest");
-        String pluginId;
-        if (manifestJson.has("packageManifest")) {
-            var manifest = mapper.treeToValue(manifestJson, io.artio.extensions.PluginManifestV2.class);
-            var packageManifest = manifest.packageManifest();
-            pluginId = packageManifest.id();
-            assertThat(pluginId).isEqualTo(marketplacePluginId);
-            assertThat(packageManifest.version()).isEqualTo(marketplaceVersion);
-            assertThat(packageManifest.image()).contains("@sha256:");
+        String idempotencyKey = "marketplace-" + UUID.randomUUID();
+        var requested = adminExchange("/api/v1/admin/extensions/marketplace/plugins/{id}/releases/{version}/installations",
+                HttpMethod.POST, Map.of("idempotencyKey", idempotencyKey), Map.class, marketplacePluginId, marketplaceVersion);
+        assertThat(requested.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(requested.getBody()).isNotNull();
+        assertThat(requested.getBody()).containsEntry("pluginId", marketplacePluginId)
+                .containsEntry("version", marketplaceVersion);
+        String descriptorDigest = (String) requested.getBody().get("descriptorDigest");
+        assertThat(descriptorDigest).matches("[a-f0-9]{64}");
+        @SuppressWarnings("unchecked") Map<String, Object> job = (Map<String, Object>) requested.getBody().get("job");
+        assertThat(job).containsEntry("pluginId", marketplacePluginId)
+                .containsEntry("sourceKind", "MARKETPLACE")
+                .containsEntry("releaseDigest", descriptorDigest);
+        String jobId = String.valueOf(job.get("jobId"));
+        var replay = adminExchange("/api/v1/admin/extensions/marketplace/plugins/{id}/releases/{version}/installations",
+                HttpMethod.POST, Map.of("idempotencyKey", idempotencyKey), Map.class, marketplacePluginId, marketplaceVersion);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        @SuppressWarnings("unchecked") Map<String, Object> replayJob = (Map<String, Object>) replay.getBody().get("job");
+        assertThat(replayJob.get("jobId")).isEqualTo(jobId);
 
-            var registered = adminExchange("/api/v1/admin/extensions/register-v2", HttpMethod.POST, manifest, Map.class);
-            assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-            assertThat(registered.getBody()).containsEntry("compatibilityMode", "CAPABILITY_V2");
-        } else {
-            var manifest = mapper.treeToValue(manifestJson, io.artio.extensions.PluginManifest.class);
-            pluginId = manifest.id();
-            assertThat(pluginId).isEqualTo(marketplacePluginId);
-            assertThat(manifest.version()).isEqualTo(marketplaceVersion);
-            assertThat(manifest.image()).contains("@sha256:");
-
-            var validation = adminExchange("/api/v1/admin/extensions/validate", HttpMethod.POST, manifest,
-                    io.artio.api.extensions.ExtensionManagementController.ManifestValidationResponse.class);
-            assertThat(validation.getStatusCode()).isEqualTo(HttpStatus.OK);
-            assertThat(validation.getBody()).isNotNull();
-            assertThat(validation.getBody().valid()).as("Imported Marketplace manifest validation errors: %s", validation.getBody().errors())
-                    .isTrue();
-
-            var registered = adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, manifest,
-                    io.artio.api.extensions.ExtensionManagementController.PluginView.class);
-            assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-            assertThat(registered.getBody()).isNotNull();
-            assertThat(registered.getBody().manifest().image()).isEqualTo(manifest.image());
+        List<String> downloadedImages = new java.util.ArrayList<>();
+        downloadedImages.add(jdbc.queryForObject("SELECT image_reference FROM extension_plugin_releases WHERE plugin_id=? AND version=?",
+                String.class, marketplacePluginId, marketplaceVersion));
+        downloadedImages.addAll(jdbc.queryForList("SELECT service->>'image' FROM extension_plugin_releases r "
+                + "CROSS JOIN LATERAL jsonb_array_elements(r.manifest->'services') service WHERE r.plugin_id=? AND r.version=?",
+                String.class, marketplacePluginId, marketplaceVersion));
+        var dockerConfig = com.github.dockerjava.core.DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        var dockerTransport = new com.github.dockerjava.httpclient5.ApacheDockerHttpClient.Builder()
+                .dockerHost(dockerConfig.getDockerHost()).sslConfig(dockerConfig.getSSLConfig()).maxConnections(6)
+                .connectionTimeout(Duration.ofSeconds(5)).responseTimeout(Duration.ofSeconds(120)).build();
+        com.github.dockerjava.api.DockerClient docker = null;
+        try {
+            docker = com.github.dockerjava.core.DockerClientImpl.getInstance(dockerConfig, dockerTransport);
+            var runtime = new io.artio.api.extensions.DockerExtensionRuntime(docker, "artio-extensions", 8080,
+                    new io.artio.api.security.ExtensionCredentialService(ACTIVE_TEST_ENCRYPTION_KEY),
+                    "http://extension-egress:3128");
+            @SuppressWarnings("unchecked") org.springframework.beans.factory.ObjectProvider<io.artio.extensions.ExtensionRuntimePort>
+                    runtimeProvider = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+            org.mockito.Mockito.when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+            var worker = new io.artio.api.extensions.ExtensionInstallationJobWorker(jdbc,
+                    new com.fasterxml.jackson.databind.ObjectMapper(), runtimeProvider, extensionRegistryCredentials,
+                    ociArchiveInspector, archiveQuarantineStore);
+            worker.runPending();
+            var completed = adminExchange("/api/v1/admin/extensions/installations/{jobId}", HttpMethod.GET,
+                    null, io.artio.api.extensions.ExtensionInstallationJobOperations.JobView.class, jobId);
+            assertThat(completed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(completed.getBody()).isNotNull();
+            assertThat(completed.getBody().state()).isEqualTo("INSTALLED");
+        } finally {
+            try {
+                var removed = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, marketplacePluginId);
+                assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
+                assertThat(removed.getBody()).containsEntry("lifecycleState", "UNINSTALLED");
+            } finally {
+                if (docker != null) {
+                    try {
+                        for (String image : downloadedImages) {
+                            try { docker.removeImageCmd(image).exec(); }
+                            catch (com.github.dockerjava.api.exception.NotFoundException alreadyMissing) { }
+                        }
+                    } finally {
+                        docker.close();
+                    }
+                }
+            }
         }
-
-        var removed = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, pluginId);
-        assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(removed.getBody()).containsEntry("lifecycleState", "UNINSTALLED");
     }
 
     @Test

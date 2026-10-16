@@ -858,6 +858,16 @@ CREATE TABLE extension_plugin_releases (
     UNIQUE (plugin_id, version)
 );
 
+CREATE TABLE extension_plugin_release_provenance (
+    release_id BIGINT PRIMARY KEY REFERENCES extension_plugin_releases(release_id),
+    provenance VARCHAR(32) NOT NULL CHECK (provenance IN ('OFFICIAL_MARKETPLACE','CUSTOM_REGISTRY','CUSTOM_LOCAL_ARCHIVE')),
+    descriptor_digest CHAR(64),
+    descriptor_snapshot JSONB CHECK (descriptor_snapshot IS NULL OR jsonb_typeof(descriptor_snapshot)='object'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((provenance='OFFICIAL_MARKETPLACE' AND descriptor_digest ~ '^[a-f0-9]{64}$' AND descriptor_snapshot IS NOT NULL)
+        OR (provenance<>'OFFICIAL_MARKETPLACE' AND descriptor_digest IS NULL))
+);
+
 INSERT INTO extension_plugin_releases(plugin_id, version, image_reference, manifest)
 SELECT plugin_id, manifest->>'version', image_reference, manifest
 FROM extension_plugins

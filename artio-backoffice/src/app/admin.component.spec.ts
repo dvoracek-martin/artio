@@ -68,46 +68,30 @@ describe('AdminComponent setup detection', () => {
     http.expectNone('/api/v1/admin/orders?page=0&size=1&sort=createdAt&direction=desc');
   });
 
-  it('registers a Marketplace v1 release through the legacy manifest endpoint', () => {
+  it('asks Core to verify and queue a Marketplace v1 release without relaying its manifest', () => {
     const fixture = TestBed.createComponent(AdminComponent);
     fixture.detectChanges();
     http.expectOne('/api/v1/setup/status').flush({ required: false, developerMode: false });
     fixture.detectChanges();
 
-    fixture.componentInstance.registerMarketplaceRelease({ pluginId: 'legacy.plugin', version: '1.0.0' }, 'CH');
-    const manifestRequest = http.expectOne((request) =>
-      request.url.endsWith('/legacy.plugin/releases/1.0.0/manifest')
-        && request.params.get('country') === 'CH');
-    const manifest = { manifestVersion: '1', id: 'legacy.plugin' };
-    manifestRequest.flush(manifest);
-
-    const registration = http.expectOne('/api/v1/admin/extensions/register');
-    expect(registration.request.body).toEqual(manifest);
-    registration.flush({});
+    fixture.componentInstance.installMarketplaceRelease({ pluginId: 'legacy.plugin', version: '1.0.0' });
+    const installation = http.expectOne('/api/v1/admin/extensions/marketplace/plugins/legacy.plugin/releases/1.0.0/installations');
+    expect(installation.request.body.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    installation.flush({ job: { jobId: 'job-123' } });
     http.expectOne('/api/v1/admin/extensions').flush([]);
     http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
   });
 
-  it('registers a Marketplace capability manifest through the v2-contract endpoint on the v1 API', () => {
+  it('queues a Marketplace capability release through the same server-verified v1 API route', () => {
     const fixture = TestBed.createComponent(AdminComponent);
     fixture.detectChanges();
     http.expectOne('/api/v1/setup/status').flush({ required: false, developerMode: false });
     fixture.detectChanges();
 
-    fixture.componentInstance.registerMarketplaceRelease({ pluginId: 'capability.plugin', version: '1.0.0' }, 'CH');
-    const manifestRequest = http.expectOne((request) =>
-      request.url.endsWith('/capability.plugin/releases/1.0.0/manifest')
-        && request.params.get('country') === 'CH');
-    const manifest = {
-      packageManifest: { manifestVersion: '2', id: 'capability.plugin' },
-      capabilities: [],
-      subscriptions: [],
-    };
-    manifestRequest.flush(manifest);
-
-    const registration = http.expectOne('/api/v1/admin/extensions/register-v2');
-    expect(registration.request.body).toEqual(manifest);
-    registration.flush({});
+    fixture.componentInstance.installMarketplaceRelease({ pluginId: 'capability.plugin', version: '1.0.0' });
+    const installation = http.expectOne('/api/v1/admin/extensions/marketplace/plugins/capability.plugin/releases/1.0.0/installations');
+    expect(installation.request.body.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    installation.flush({ job: { jobId: 'job-456' } });
     http.expectOne('/api/v1/admin/extensions').flush([]);
     http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
   });
