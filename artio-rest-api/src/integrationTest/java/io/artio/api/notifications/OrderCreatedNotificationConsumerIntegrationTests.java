@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.artio.extensions.commerce.NotificationTransport.DeliveryResult;
 import io.artio.extensions.commerce.NotificationTransport.OutboundMessage;
 import io.artio.api.extensions.PluginEventDeliveryWorker;
+import io.artio.api.extensions.PluginEventBackfillOperations;
 import io.artio.api.security.EncryptionService;
 import io.artio.extensions.ExtensionRuntimePort;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,6 +64,7 @@ class OrderCreatedNotificationConsumerIntegrationTests {
     @Autowired KafkaProperties kafkaProperties;
     @Autowired KafkaListenerEndpointRegistry listenerRegistry;
     @Autowired EncryptionService encryption;
+    @Autowired PluginEventBackfillOperations eventBackfillOperations;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -215,6 +217,85 @@ class OrderCreatedNotificationConsumerIntegrationTests {
         Thread.sleep(500);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=?", Integer.class, eventId))
                 .isEqualTo(2);
+    }
+
+    @Test
+    void previewsAndQueuesAuditedSubscriptionScopedBackfillAtABoundedRate() throws Exception {
+        UUID actorId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        UUID instanceId = UUID.randomUUID();
+        UUID subscriptionId = UUID.randomUUID();
+        String pluginId = "backfill." + UUID.randomUUID().toString().replace("-", "").substring(0, 18);
+        String image = "ghcr.io/example/events@sha256:" + "b".repeat(64);
+        Instant occurredAt = Instant.now().minusSeconds(60);
+        jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
+                actorId, "event-backfill-" + actorId + "@example.test", "unused-test-hash", "Backfill", "Operator");
+        String outboxPayload = mapper.writeValueAsString(Map.of("schemaVersion", 1, "eventId", eventId,
+                "type", "ORDER_CREATED", "occurredAt", occurredAt, "orderId", orderId,
+                "userId", actorId, "locale", "en"));
+        jdbc.update("INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,payload,status,published_at,created_at) "
+                        + "VALUES (?,'ORDER_CREATED','ORDER',?,?::jsonb,'PUBLISHED',?,?)",
+                eventId, orderId.toString(), outboxPayload, java.sql.Timestamp.from(occurredAt), java.sql.Timestamp.from(occurredAt));
+        String manifest = "{\"id\":\"" + pluginId + "\",\"version\":\"2.0.0\"}";
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,public_configuration) "
+                        + "VALUES (?,?::jsonb,?,'ENABLED','{}'::jsonb)", pluginId, manifest, image);
+        long releaseId = jdbc.queryForObject("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) "
+                        + "VALUES (?,'2.0.0',?,?::jsonb) RETURNING release_id", Long.class, pluginId, image, manifest);
+        jdbc.update("INSERT INTO extension_plugin_v2_releases(release_id,plugin_id,manifest) VALUES (?, ?, ?::jsonb)",
+                releaseId, pluginId, "{\"packageManifest\":{\"manifestVersion\":\"2\",\"id\":\"" + pluginId
+                        + "\",\"version\":\"2.0.0\"},\"subscriptions\":[{\"eventType\":\"order.created\","
+                        + "\"schemaVersion\":1,\"permissions\":[]}],\"capabilities\":[]}");
+        jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
+                        + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
+                        + "VALUES (?,?,'default',?,'CAPABILITY_V2','ENABLED',?,2,'{\"region\":\"eu\"}'::jsonb,?::jsonb)",
+                instanceId, pluginId, releaseId, pluginId, "{\"token\":\"" + encryption.encrypt("backfill-secret") + "\"}");
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
+                + "VALUES (?,?,'order.created',1)", subscriptionId, instanceId);
+
+        var preview = eventBackfillOperations.preview(subscriptionId, occurredAt.minusSeconds(30), occurredAt.plusSeconds(30),
+                20, 2, actorId);
+        assertThat(preview.eventCount()).isEqualTo(1);
+        var queued = eventBackfillOperations.execute(preview.runId(), actorId);
+        assertThat(queued.state()).isEqualTo("QUEUED");
+        assertThat(queued.eventCount()).isEqualTo(1);
+        assertThat(eventBackfillOperations.execute(preview.runId(), actorId)).isEqualTo(queued);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE backfill_run_id=? "
+                        + "AND inbox_event_id=? AND subscription_id=? AND delivery_generation>0", Integer.class,
+                preview.runId(), eventId, subscriptionId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT event_type FROM extension_event_deliveries WHERE backfill_run_id=?",
+                String.class, preview.runId())).isEqualTo("order.created");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_audit_events WHERE plugin_id=? "
+                        + "AND action IN ('PREVIEW_EVENT_BACKFILL','EXECUTE_EVENT_BACKFILL') "
+                        + "AND details->>'runId'=?", Integer.class, pluginId, preview.runId().toString())).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_inbox WHERE consumer_name=? AND event_id=?",
+                Integer.class, "plugin-backfill-" + preview.runId(), eventId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT state FROM extension_event_deliveries WHERE backfill_run_id=?",
+                String.class, preview.runId())).isEqualTo("PENDING");
+        AtomicInteger backfillCalls = new AtomicInteger();
+        ExtensionRuntimePort runtime = new ExtensionRuntimePort() {
+            @Override public void install(io.artio.extensions.PluginManifest value) { }
+            @Override public void enable(io.artio.extensions.PluginManifest value) { }
+            @Override public void disable(String value) { }
+            @Override public RuntimeHealth health(String value, String path) { return new RuntimeHealth(true, "OK"); }
+            @Override public InvocationResult invoke(String value, String point, String operation, String key,
+                    String configuration, String request, Duration deadline) {
+                backfillCalls.incrementAndGet();
+                assertThat(value).isEqualTo(pluginId);
+                assertThat(request).contains(eventId.toString(), "order.created", orderId.toString());
+                return new InvocationResult(200, "{\"accepted\":true,\"deliveryId\":\"" + key + "\"}");
+            }
+        };
+        var runtimeFactory = new StaticListableBeanFactory(Map.of("runtime", runtime));
+        new PluginEventDeliveryWorker(jdbc, mapper, encryption,
+                runtimeFactory.getBeanProvider(ExtensionRuntimePort.class)).deliverPending();
+        assertThat(backfillCalls).hasValue(1);
+        assertThat(jdbc.queryForObject("SELECT state FROM extension_event_deliveries WHERE backfill_run_id=?",
+                String.class, preview.runId())).isEqualTo("DELIVERED");
+        assertThat(jdbc.queryForObject("SELECT status FROM extension_event_backfill_runs WHERE run_id=?",
+                String.class, preview.runId())).isEqualTo("COMPLETE");
+        jdbc.update("UPDATE extension_event_subscriptions SET subscription_state='DISABLED' WHERE subscription_id=?",
+                subscriptionId);
     }
 
     @Test

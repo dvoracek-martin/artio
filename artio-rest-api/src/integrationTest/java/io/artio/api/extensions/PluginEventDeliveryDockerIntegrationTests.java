@@ -16,12 +16,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
@@ -53,6 +56,7 @@ class PluginEventDeliveryDockerIntegrationTests {
 
     @Autowired JdbcTemplate jdbc;
     @Autowired KafkaTemplate<String, String> kafka;
+    @Autowired KafkaProperties kafkaProperties;
     @Autowired ObjectMapper mapper;
     @Autowired EncryptionService encryption;
     @Autowired KafkaListenerEndpointRegistry listenerRegistry;
@@ -68,6 +72,7 @@ class PluginEventDeliveryDockerIntegrationTests {
         registry.add("artio.security.encryption-key", () -> "integration-test-encryption-key-value-32-bytes-minimum");
         registry.add("artio.setup.token", () -> "integration-test-setup-token-value-32-bytes-minimum");
         registry.add("artio.events.kafka.consumer-enabled", () -> "true");
+        registry.add("artio.events.kafka.consumer-concurrency", () -> "1");
         registry.add("artio.events.kafka.enabled", () -> "false");
         registry.add("artio.workers.enabled", () -> "false");
     }
@@ -75,7 +80,7 @@ class PluginEventDeliveryDockerIntegrationTests {
     @BeforeAll
     static void createTopics() throws Exception {
         try (var admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-            admin.createTopics(List.of(new NewTopic(TOPIC, 1, (short) 1), new NewTopic(DLQ, 1, (short) 1)))
+            admin.createTopics(List.of(new NewTopic(TOPIC, 3, (short) 1), new NewTopic(DLQ, 1, (short) 1)))
                     .all().get(10, TimeUnit.SECONDS);
         }
     }
@@ -155,12 +160,34 @@ class PluginEventDeliveryDockerIntegrationTests {
                 var listener = listenerRegistry.getListenerContainers().stream().findFirst()
                         .orElseThrow(() -> new AssertionError("Order event dispatcher listener was not registered"));
                 listener.stop();
+                // Make a real group reassignment: a temporary Core consumer first owns all partitions,
+                // then the application listener joins and splits the assignments, and finally takes
+                // the partitions back when the temporary member leaves.
+                var consumerProperties = new Properties();
+                consumerProperties.put("bootstrap.servers", KAFKA.getBootstrapServers());
+                consumerProperties.put("group.id", "artio-notification-worker");
+                consumerProperties.put("key.deserializer", StringDeserializer.class.getName());
+                consumerProperties.put("value.deserializer", StringDeserializer.class.getName());
+                consumerProperties.put("auto.offset.reset", "earliest");
+                consumerProperties.put("enable.auto.commit", "false");
+                try (KafkaConsumer<String, String> rebalanceMember = new KafkaConsumer<>(consumerProperties)) {
+                    rebalanceMember.subscribe(List.of(TOPIC));
+                    awaitAssignment(rebalanceMember, 3);
+                    listener.start();
+                    Instant rebalanceDeadline = Instant.now().plusSeconds(20);
+                    while (rebalanceMember.assignment().size() == 3 && Instant.now().isBefore(rebalanceDeadline)) {
+                        rebalanceMember.poll(Duration.ofMillis(100));
+                    }
+                    assertThat(rebalanceMember.assignment()).hasSizeBetween(1, 2);
+                    rebalanceMember.poll(Duration.ofMillis(100));
+                    listener.stop();
+                    rebalanceMember.poll(Duration.ofMillis(100));
+                }
+                // The application listener rejoins as the sole member; publish after its reassignment.
+                listener.start();
                 kafka.send(record).get(10, TimeUnit.SECONDS);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_inbox WHERE consumer_name='order-notification-v1' AND event_id=?",
                         Integer.class, eventId)).isZero();
-                // Rejoining the consumer group after the event is published forces a partition reassignment;
-                // the Core inbox transaction must still freeze exactly one set of plugin targets.
-                listener.start();
                 awaitDeliveries(eventId);
                 Map<String, UUID> deliveryIds = jdbc.query("SELECT delivery_id,runtime_identity FROM extension_event_deliveries WHERE inbox_event_id=?",
                         rs -> {
@@ -173,6 +200,24 @@ class PluginEventDeliveryDockerIntegrationTests {
                 assertThat(deliveryIds).containsOnlyKeys(firstIdentity, secondIdentity);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=? AND state='PENDING'",
                         Integer.class, eventId)).isEqualTo(2);
+
+                // A subscription enabled after this event's inbox transaction cannot join its frozen fan-out.
+                UUID lateInstance = UUID.randomUUID();
+                UUID lateSubscription = UUID.randomUUID();
+                String lateIdentity = "late-instance-" + UUID.randomUUID().toString().replace("-", "");
+                jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
+                                + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
+                                + "VALUES (?,?,'late',?,'CAPABILITY_V2','ENABLED',?,1,'{\"region\":\"eu\"}'::jsonb,?::jsonb)",
+                        lateInstance, pluginId, jdbc.queryForObject("SELECT release_id FROM extension_plugin_releases WHERE plugin_id=?",
+                                Long.class, pluginId), lateIdentity, "{\"apiKey\":\"" + firstSecret + "\"}");
+                jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
+                        + "VALUES (?,?,'order.created',1)", lateSubscription, lateInstance);
+                kafka.send(record).get(10, TimeUnit.SECONDS);
+                awaitConsumerLagZero();
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=?",
+                        Integer.class, eventId)).isEqualTo(2);
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE subscription_id=?",
+                        Integer.class, lateSubscription)).isZero();
 
                 ExtensionRuntimePort router = new ExtensionRuntimePort() {
                     @Override public void install(PluginManifest release) { throw new UnsupportedOperationException(); }
@@ -279,5 +324,29 @@ class PluginEventDeliveryDockerIntegrationTests {
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=?",
                 Integer.class, eventId)).isEqualTo(2);
+    }
+
+    private static void awaitAssignment(KafkaConsumer<String, String> consumer, int expectedPartitions)
+            throws InterruptedException {
+        Instant deadline = Instant.now().plusSeconds(20);
+        while (consumer.assignment().size() != expectedPartitions && Instant.now().isBefore(deadline)) {
+            consumer.poll(Duration.ofMillis(100));
+        }
+        assertThat(consumer.assignment()).hasSize(expectedPartitions);
+    }
+
+    private void awaitConsumerLagZero() throws InterruptedException {
+        var lagController = new io.artio.api.notifications.KafkaConsumerLagController(
+                kafkaProperties, TOPIC, "artio-notification-worker");
+        Instant deadline = Instant.now().plusSeconds(20);
+        while (Instant.now().isBefore(deadline)) {
+            try {
+                if (lagController.consumerLag().totalLag() == 0) return;
+            } catch (RuntimeException unavailable) {
+                // The admin client may observe the rejoin before it observes the committed offset.
+            }
+            Thread.sleep(100);
+        }
+        assertThat(lagController.consumerLag().totalLag()).isZero();
     }
 }

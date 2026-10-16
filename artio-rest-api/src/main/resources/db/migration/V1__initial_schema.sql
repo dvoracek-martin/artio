@@ -1130,6 +1130,8 @@ CREATE TABLE extension_event_subscriptions (
 );
 CREATE TABLE extension_event_deliveries (
     delivery_id UUID PRIMARY KEY,
+    delivery_generation INTEGER NOT NULL DEFAULT 0 CHECK (delivery_generation >= 0),
+    backfill_run_id UUID,
     inbox_consumer_name VARCHAR(120) NOT NULL,
     inbox_event_id UUID NOT NULL,
     subscription_id UUID NOT NULL REFERENCES extension_event_subscriptions(subscription_id),
@@ -1152,7 +1154,7 @@ CREATE TABLE extension_event_deliveries (
     last_error_code VARCHAR(64),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (inbox_consumer_name, inbox_event_id, subscription_id),
+    UNIQUE (inbox_consumer_name, inbox_event_id, subscription_id, delivery_generation),
     FOREIGN KEY (inbox_consumer_name, inbox_event_id) REFERENCES event_inbox(consumer_name, event_id),
     FOREIGN KEY (subscription_id, instance_id) REFERENCES extension_event_subscriptions(subscription_id, instance_id),
     FOREIGN KEY (instance_id, plugin_id) REFERENCES extension_plugin_instances(instance_id, plugin_id),
@@ -1163,6 +1165,27 @@ CREATE INDEX extension_event_deliveries_claim_idx ON extension_event_deliveries(
 CREATE INDEX extension_event_deliveries_expired_lease_idx ON extension_event_deliveries(lease_until, created_at)
     WHERE state='IN_PROGRESS';
 CREATE INDEX extension_event_deliveries_instance_idx ON extension_event_deliveries(instance_id, state, created_at DESC);
+CREATE INDEX event_outbox_backfill_idx ON event_outbox(event_type, created_at, id) WHERE status='PUBLISHED';
+CREATE TABLE extension_event_backfill_runs (
+    run_id UUID PRIMARY KEY,
+    plugin_id VARCHAR(128) NOT NULL REFERENCES extension_plugins(plugin_id),
+    subscription_id UUID NOT NULL REFERENCES extension_event_subscriptions(subscription_id),
+    from_at TIMESTAMPTZ NOT NULL,
+    to_at TIMESTAMPTZ NOT NULL,
+    max_events INTEGER NOT NULL CHECK (max_events BETWEEN 1 AND 500),
+    rate_per_minute INTEGER NOT NULL CHECK (rate_per_minute BETWEEN 1 AND 60),
+    event_ids JSONB NOT NULL CHECK (jsonb_typeof(event_ids)='array'),
+    status VARCHAR(16) NOT NULL DEFAULT 'PREVIEWED'
+        CHECK (status IN ('PREVIEWED','QUEUED','COMPLETE','PARTIAL_FAILURE','EXPIRED')),
+    requested_by UUID NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    executed_at TIMESTAMPTZ,
+    CHECK (from_at < to_at)
+);
+ALTER TABLE extension_event_deliveries ADD CONSTRAINT extension_event_deliveries_backfill_run_fk
+    FOREIGN KEY (backfill_run_id) REFERENCES extension_event_backfill_runs(run_id);
+CREATE INDEX extension_event_backfill_runs_plugin_idx ON extension_event_backfill_runs(plugin_id, created_at DESC);
 
 COMMENT ON TABLE extension_plugin_instances IS 'v5.1 runtime identity; v1 registrations use an explicit legacy compatibility instance';
 COMMENT ON TABLE extension_capability_bindings IS 'Core-authorized scoped capability-to-instance bindings';
@@ -1187,11 +1210,13 @@ CREATE TRIGGER extension_operation_plan_immutable BEFORE UPDATE ON extension_ope
 
 CREATE FUNCTION extension_event_delivery_snapshot_is_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF ROW(OLD.inbox_consumer_name,OLD.inbox_event_id,OLD.subscription_id,OLD.instance_id,OLD.plugin_id,OLD.runtime_identity,OLD.release_id,
+    IF ROW(OLD.delivery_generation,OLD.backfill_run_id,OLD.inbox_consumer_name,OLD.inbox_event_id,OLD.subscription_id,
+           OLD.instance_id,OLD.plugin_id,OLD.runtime_identity,OLD.release_id,
            OLD.configuration_generation,OLD.runtime_credential_generation,OLD.public_configuration_snapshot,OLD.encrypted_secrets_snapshot,
            OLD.event_type,OLD.schema_version,OLD.payload_snapshot)
        IS DISTINCT FROM
-       ROW(NEW.inbox_consumer_name,NEW.inbox_event_id,NEW.subscription_id,NEW.instance_id,NEW.plugin_id,NEW.runtime_identity,NEW.release_id,
+       ROW(NEW.delivery_generation,NEW.backfill_run_id,NEW.inbox_consumer_name,NEW.inbox_event_id,NEW.subscription_id,
+           NEW.instance_id,NEW.plugin_id,NEW.runtime_identity,NEW.release_id,
            NEW.configuration_generation,NEW.runtime_credential_generation,NEW.public_configuration_snapshot,NEW.encrypted_secrets_snapshot,
            NEW.event_type,NEW.schema_version,NEW.payload_snapshot) THEN
         RAISE EXCEPTION 'extension event delivery snapshots are immutable';
@@ -1200,3 +1225,23 @@ BEGIN
 END $$;
 CREATE TRIGGER extension_event_delivery_snapshot_immutable BEFORE UPDATE ON extension_event_deliveries
     FOR EACH ROW EXECUTE FUNCTION extension_event_delivery_snapshot_is_immutable();
+
+CREATE FUNCTION extension_event_backfill_plan_is_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(OLD.plugin_id,OLD.subscription_id,OLD.from_at,OLD.to_at,OLD.max_events,OLD.rate_per_minute,
+           OLD.event_ids,OLD.requested_by,OLD.created_at,OLD.expires_at)
+       IS DISTINCT FROM
+       ROW(NEW.plugin_id,NEW.subscription_id,NEW.from_at,NEW.to_at,NEW.max_events,NEW.rate_per_minute,
+           NEW.event_ids,NEW.requested_by,NEW.created_at,NEW.expires_at) THEN
+        RAISE EXCEPTION 'extension event backfill preview is immutable';
+    END IF;
+    IF OLD.status <> NEW.status AND NOT (
+            (OLD.status='PREVIEWED' AND NEW.status IN ('QUEUED','EXPIRED'))
+            OR (OLD.status='QUEUED' AND NEW.status IN ('COMPLETE','PARTIAL_FAILURE'))
+            OR (OLD.status='PARTIAL_FAILURE' AND NEW.status IN ('QUEUED','COMPLETE'))) THEN
+        RAISE EXCEPTION 'extension event backfill status transition is invalid';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER extension_event_backfill_plan_immutable BEFORE UPDATE ON extension_event_backfill_runs
+    FOR EACH ROW EXECUTE FUNCTION extension_event_backfill_plan_is_immutable();

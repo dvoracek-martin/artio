@@ -55,13 +55,14 @@ public class ExtensionManagementController {
     private final ObjectProvider<ExtensionRuntimePort> dockerRuntime;
     private final DistributionPluginProvisioningService provisioning;
     private final PluginEventDeliveryOperations eventDeliveryOperations;
+    private final PluginEventBackfillOperations eventBackfillOperations;
 
     public ExtensionManagementController(PluginManifestValidator manifestValidator,
             PluginConfigurationValidator configurationValidator, EncryptionService encryption,
             JdbcTemplate jdbc, ObjectMapper mapper,
             @Value("${artio.extensions.core-version:0.1.0}") String coreVersion,
             ObjectProvider<ExtensionRuntimePort> dockerRuntime, DistributionPluginProvisioningService provisioning,
-            PluginEventDeliveryOperations eventDeliveryOperations) {
+            PluginEventDeliveryOperations eventDeliveryOperations, PluginEventBackfillOperations eventBackfillOperations) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
         this.encryption = encryption;
@@ -71,6 +72,7 @@ public class ExtensionManagementController {
         this.dockerRuntime = dockerRuntime;
         this.provisioning = provisioning;
         this.eventDeliveryOperations = eventDeliveryOperations;
+        this.eventBackfillOperations = eventBackfillOperations;
     }
 
     @PostMapping("/validate")
@@ -407,6 +409,47 @@ public class ExtensionManagementController {
         if (result == PluginEventDeliveryOperations.ReplayResult.CHANGED) return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("message", "Event delivery changed before replay"));
         return ResponseEntity.accepted().body(Map.of("deliveryId", deliveryId, "state", "PENDING"));
+    }
+
+    @PostMapping("/events/backfill/preview")
+    public ResponseEntity<?> previewEventBackfill(@RequestBody BackfillPreviewRequest request, JwtAuthenticationToken actor) {
+        if (request == null || request.subscriptionId() == null || request.from() == null || request.to() == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "subscriptionId, from and to are required"));
+        }
+        try {
+            var result = eventBackfillOperations.preview(request.subscriptionId(), request.from(), request.to(),
+                    request.maxEvents(), request.ratePerMinute(), UUID.fromString(actor.getToken().getSubject()));
+            return ResponseEntity.ok(result);
+        } catch (PluginEventBackfillOperations.BackfillRejectedException invalid) {
+            return ResponseEntity.unprocessableEntity().body(Map.of("message", invalid.getMessage()));
+        }
+    }
+
+    @PostMapping("/events/backfill/{runId}/execute")
+    public ResponseEntity<?> executeEventBackfill(@PathVariable UUID runId, JwtAuthenticationToken actor) {
+        try {
+            var result = eventBackfillOperations.execute(runId, UUID.fromString(actor.getToken().getSubject()));
+            if ("EXPIRED".equals(result.state())) return ResponseEntity.status(HttpStatus.GONE).body(result);
+            if ("PARTIAL_FAILURE".equals(result.state())) return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
+            if ("COMPLETE".equals(result.state())) return ResponseEntity.ok(result);
+            return ResponseEntity.accepted().body(result);
+        } catch (PluginEventBackfillOperations.BackfillRejectedException invalid) {
+            return ResponseEntity.unprocessableEntity().body(Map.of("message", invalid.getMessage()));
+        }
+    }
+
+    @GetMapping("/events/backfill/{runId}")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> eventBackfillStatus(@PathVariable UUID runId) {
+        return jdbc.query("SELECT run_id,plugin_id,subscription_id,from_at,to_at,rate_per_minute,"
+                        + "CASE WHEN status='PREVIEWED' AND expires_at<=now() THEN 'EXPIRED' ELSE status END AS status,created_at,"
+                        + "executed_at,jsonb_array_length(event_ids) AS event_count FROM extension_event_backfill_runs WHERE run_id=?",
+                rs -> rs.next() ? ResponseEntity.ok(new BackfillRunView(rs.getObject("run_id", UUID.class),
+                        rs.getString("plugin_id"), rs.getObject("subscription_id", UUID.class),
+                        rs.getTimestamp("from_at").toInstant(), rs.getTimestamp("to_at").toInstant(),
+                        rs.getInt("rate_per_minute"), rs.getString("status"), rs.getInt("event_count"),
+                        rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("executed_at") == null ? null
+                        : rs.getTimestamp("executed_at").toInstant())) : ResponseEntity.notFound().build(), runId);
     }
 
     @PostMapping("/{pluginId}/bindings")
@@ -1451,6 +1494,11 @@ public class ExtensionManagementController {
                                    String subscriptionState) { }
     public record DeadEventDeliveryView(UUID deliveryId, String pluginId, String eventType, int attempts,
             String lastErrorCode, java.time.Instant createdAt) { }
+    public record BackfillPreviewRequest(UUID subscriptionId, java.time.Instant from, java.time.Instant to,
+            int maxEvents, int ratePerMinute) { }
+    public record BackfillRunView(UUID runId, String pluginId, UUID subscriptionId, java.time.Instant from,
+            java.time.Instant to, int ratePerMinute, String state, int eventCount, java.time.Instant createdAt,
+            java.time.Instant executedAt) { }
     public record InstanceCreateRequest(String instanceKey, Map<String, Object> configuration) { }
     public record PluginInstanceView(UUID instanceId, String instanceKey, long releaseId, String compatibilityMode,
             String lifecycleState, int configurationGeneration, String runtimeIdentity,

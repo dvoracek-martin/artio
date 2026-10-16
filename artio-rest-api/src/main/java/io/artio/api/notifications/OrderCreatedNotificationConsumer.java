@@ -93,7 +93,7 @@ public class OrderCreatedNotificationConsumer {
                         JOIN extension_plugins p ON p.plugin_id=i.plugin_id
                         WHERE s.event_type=? AND s.schema_version=? AND s.subscription_state='ACTIVE'
                           AND i.compatibility_mode='CAPABILITY_V2' AND i.lifecycle_state='ENABLED'
-                        ON CONFLICT (inbox_consumer_name,inbox_event_id,subscription_id) DO NOTHING
+                        ON CONFLICT (inbox_consumer_name,inbox_event_id,subscription_id,delivery_generation) DO NOTHING
                         """, eventId.toString(), CONSUMER_NAME, eventId, payload, publicEventType, schemaVersion);
             }
 

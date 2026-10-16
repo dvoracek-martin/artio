@@ -38,6 +38,11 @@ public class PluginEventDeliveryWorker {
 
     @Scheduled(fixedDelayString = "${artio.extensions.events.poll-interval-ms:1000}")
     public void deliverPending() {
+        // Repair the visible batch status if the process stopped between a delivery update and run update.
+        jdbc.update("UPDATE extension_event_backfill_runs r SET status='PARTIAL_FAILURE' WHERE r.status='QUEUED' "
+                + "AND EXISTS (SELECT 1 FROM extension_event_deliveries d WHERE d.backfill_run_id=r.run_id AND d.state='DEAD_LETTER')");
+        jdbc.update("UPDATE extension_event_backfill_runs r SET status='COMPLETE' WHERE r.status IN ('QUEUED','PARTIAL_FAILURE') "
+                + "AND NOT EXISTS (SELECT 1 FROM extension_event_deliveries d WHERE d.backfill_run_id=r.run_id AND d.state<>'DELIVERED')");
         List<Delivery> deliveries = jdbc.query("""
                 UPDATE extension_event_deliveries SET state='IN_PROGRESS', attempt_count=attempt_count+1,
                     lease_token=md5(delivery_id::text || clock_timestamp()::text || random()::text)::uuid,
@@ -48,10 +53,11 @@ public class PluginEventDeliveryWorker {
                        OR (state='IN_PROGRESS' AND lease_until<now())
                     ORDER BY available_at,created_at LIMIT ? FOR UPDATE SKIP LOCKED
                 )
-                RETURNING delivery_id,plugin_id,runtime_identity,configuration_generation,runtime_credential_generation,
+                RETURNING delivery_id,backfill_run_id,plugin_id,runtime_identity,configuration_generation,runtime_credential_generation,
                     public_configuration_snapshot::text,encrypted_secrets_snapshot::text,payload_snapshot::text,
                     attempt_count,lease_token
-                """, (rs, row) -> new Delivery(rs.getObject("delivery_id", UUID.class), rs.getString("plugin_id"),
+                """, (rs, row) -> new Delivery(rs.getObject("delivery_id", UUID.class),
+                rs.getObject("backfill_run_id", UUID.class), rs.getString("plugin_id"),
                 rs.getString("runtime_identity"), rs.getInt("configuration_generation"), rs.getInt("runtime_credential_generation"),
                 rs.getString("public_configuration_snapshot"), rs.getString("encrypted_secrets_snapshot"),
                 rs.getString("payload_snapshot"), rs.getInt("attempt_count"), rs.getObject("lease_token", UUID.class)), BATCH_SIZE);
@@ -80,6 +86,12 @@ public class PluginEventDeliveryWorker {
             jdbc.update("UPDATE extension_event_deliveries SET state='DELIVERED',lease_token=NULL,lease_until=NULL,"
                     + "last_error_code=NULL,updated_at=now() WHERE delivery_id=? AND state='IN_PROGRESS' AND lease_token=?",
                     delivery.deliveryId(), delivery.leaseToken());
+            if (delivery.backfillRunId() != null) {
+                jdbc.update("UPDATE extension_event_backfill_runs SET status='COMPLETE' WHERE run_id=? "
+                                + "AND status IN ('QUEUED','PARTIAL_FAILURE') AND NOT EXISTS ("
+                                + "SELECT 1 FROM extension_event_deliveries WHERE backfill_run_id=? AND state<>'DELIVERED')",
+                        delivery.backfillRunId(), delivery.backfillRunId());
+            }
         } catch (Exception failure) {
             String errorCode = failure.getClass().getSimpleName().replaceAll("[^A-Za-z0-9_]", "");
             if (errorCode.length() > 64) errorCode = errorCode.substring(0, 64);
@@ -89,10 +101,14 @@ public class PluginEventDeliveryWorker {
                     + "lease_token=NULL,lease_until=NULL,last_error_code=?,updated_at=now() "
                     + "WHERE delivery_id=? AND state='IN_PROGRESS' AND lease_token=?",
                     dead ? "DEAD_LETTER" : "RETRY", dead ? 0 : delay, errorCode, delivery.deliveryId(), delivery.leaseToken());
+            if (dead && delivery.backfillRunId() != null) {
+                jdbc.update("UPDATE extension_event_backfill_runs SET status='PARTIAL_FAILURE' WHERE run_id=? "
+                        + "AND status='QUEUED'", delivery.backfillRunId());
+            }
         }
     }
 
-    private record Delivery(UUID deliveryId, String pluginId, String runtimeIdentity, int configurationGeneration,
+    private record Delivery(UUID deliveryId, UUID backfillRunId, String pluginId, String runtimeIdentity, int configurationGeneration,
             int runtimeCredentialGeneration,
             String publicConfiguration, String encryptedSecrets, String payload, int attemptCount, UUID leaseToken) { }
 }
