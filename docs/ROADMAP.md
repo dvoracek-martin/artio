@@ -6,6 +6,8 @@ The signed release descriptor path is implemented across Core and Marketplace: s
 
 - **Installation pull completion check (2026-10-16):** `DockerExtensionRuntime.install()` now treats a Docker pull callback timeout (`awaitCompletion == false`) as a hard per-image failure and closes the callback on all outcomes. `:artio-rest-api:test --tests io.artio.api.extensions.DockerExtensionRuntimeTests --no-daemon` passed all 16 runtime unit tests, including the timeout/failure regression. This closes the false-success defect only; durable jobs, leases/resume, controller job protocol, source policies and local archive import remain open.
 
+- **First-run setup and dev login (2026-10-16):** `/api/v1/setup/status` is checked before restoring any saved administrator token; when the database reports an incomplete installation, Backoffice clears stale stored session data and renders the setup wizard. Backoffice and API password validation now agree on the owner-selected 8–72 character range; the end-to-end setup scenario tested a rejected shorter password and successful setup/login at exactly eight characters. `:artio-rest-api:integrationTest --tests io.artio.api.users.FirstRunSetupIntegrationTests --no-daemon` passed (1 PostgreSQL case, 0 skipped); its dependent REST API unit suite passed 166/166. Backoffice `admin.component.spec.ts` passed 4/4, including clean database with stale token. Testcontainers removed its own containers; no test volumes remained. Dev demo credentials are a dedicated local-only administrator, separate from Storefront customer credentials.
+
 See [official Marketplace release trust v1](extensions/official-marketplace-release-trust.md) for the contract and key operations.
 
 ## Master Plan v5.1 implementation block

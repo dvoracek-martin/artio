@@ -76,9 +76,9 @@ class FirstRunSetupIntegrationTests {
         var statusWithToken = postWithToken("/api/v1/setup/resume", SETUP_TOKEN, Map.of());
         assertThat(statusWithToken.getBody()).contains("owner@example.test");
 
-        var weakPassword = postWithToken("/api/v1/setup/complete", SETUP_TOKEN, Map.of("password", "too-short"));
+        var weakPassword = postWithToken("/api/v1/setup/complete", SETUP_TOKEN, Map.of("password", "short"));
         assertThat(weakPassword.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        var completed = postWithToken("/api/v1/setup/complete", SETUP_TOKEN, Map.of("password", "an-extremely-strong-admin-password"));
+        var completed = postWithToken("/api/v1/setup/complete", SETUP_TOKEN, Map.of("password", "Artio123"));
         assertThat(completed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(completed.getBody()).contains("SUPERADMIN", "CH", "CHF", "de-CH");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE role='SUPERADMIN' AND email='owner@example.test'", Integer.class)).isEqualTo(1);
@@ -89,7 +89,7 @@ class FirstRunSetupIntegrationTests {
         assertThat(jdbc.queryForList("SELECT plugin_id FROM artio_distribution_plugin_provisioning WHERE distribution_id='switzerland-v1'", String.class))
                 .containsExactlyInAnyOrder("payments.stripe", "payments.postfinance-checkout", "payments.twint", "shipping.swiss-post", "catalog.opensearch");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM artio_distribution_plugin_provisioning WHERE provisioning_status='WAITING_FOR_RELEASE'", Integer.class)).isEqualTo(5);
-        var ownerLogin=http.postForObject("/api/v1/auth/login",Map.of("email","owner@example.test","password","an-extremely-strong-admin-password"),AuthController.LoginResponse.class);
+        var ownerLogin=http.postForObject("/api/v1/auth/login",Map.of("email","owner@example.test","password","Artio123"),AuthController.LoginResponse.class);
         assertThat(ownerLogin.mfaEnrollmentRequired()).isTrue();
         HttpHeaders ownerHeaders=new HttpHeaders();ownerHeaders.setBearerAuth(ownerLogin.accessToken());
         assertThat(http.exchange("/api/v1/admin/system/distribution/plugins",HttpMethod.GET,new HttpEntity<>(ownerHeaders),String.class).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
@@ -98,7 +98,7 @@ class FirstRunSetupIntegrationTests {
         String totp=io.artio.api.TestTotp.codeFromBase32(enrollment.getBody().base32Secret(),java.time.Instant.now());
         var verified=http.exchange("/api/v1/auth/mfa/totp/verify",HttpMethod.POST,new HttpEntity<>(new MfaController.CodeRequest(totp),ownerHeaders),Map.class);
         assertThat(verified.getStatusCode()).isEqualTo(HttpStatus.OK);
-        ownerLogin=http.postForObject("/api/v1/auth/login",Map.of("email","owner@example.test","password","an-extremely-strong-admin-password","mfaCode",io.artio.api.TestTotp.codeFromBase32(enrollment.getBody().base32Secret(),java.time.Instant.now())),AuthController.LoginResponse.class);
+        ownerLogin=http.postForObject("/api/v1/auth/login",Map.of("email","owner@example.test","password","Artio123","mfaCode",io.artio.api.TestTotp.codeFromBase32(enrollment.getBody().base32Secret(),java.time.Instant.now())),AuthController.LoginResponse.class);
         assertThat(ownerLogin.mfaEnrollmentRequired()).isFalse();
         ownerHeaders.setBearerAuth(ownerLogin.accessToken());
         var disabled=http.exchange("/api/v1/auth/mfa/totp",HttpMethod.DELETE,new HttpEntity<>(new MfaController.CodeRequest(io.artio.api.TestTotp.codeFromBase32(enrollment.getBody().base32Secret(),java.time.Instant.now())),ownerHeaders),String.class);
@@ -111,7 +111,7 @@ class FirstRunSetupIntegrationTests {
         assertThat(refreshed.getBody()).hasSize(5);
         assertThat(jdbc.queryForObject("SELECT draft::text FROM artio_first_run_setup WHERE singleton_id=true", String.class)).isEqualTo("{}");
         assertThat(http.getForObject("/api/v1/setup/status", String.class)).contains("\"complete\":true");
-        assertThat(postWithToken("/api/v1/setup/complete", SETUP_TOKEN, Map.of("password", "an-extremely-strong-admin-password")).getStatusCode())
+        assertThat(postWithToken("/api/v1/setup/complete", SETUP_TOKEN, Map.of("password", "Artio123")).getStatusCode())
                 .isEqualTo(HttpStatus.CONFLICT);
 
         var customerRegistration = http.postForEntity("/api/v1/auth/register", Map.of(
