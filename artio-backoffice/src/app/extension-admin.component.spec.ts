@@ -37,6 +37,20 @@ describe('ExtensionAdminComponent', () => {
     expect(actions).toEqual(['toggleRegistration']);
   });
 
+  it('includes the entered Marketplace query and country in the search action', () => {
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const actions: any[] = [];
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+    fixture.componentInstance.marketplaceQuery = 'Artio Reference';
+    fixture.componentInstance.marketplaceCountry = 'CH';
+    fixture.detectChanges();
+    const button = [...fixture.nativeElement.querySelectorAll('form button')]
+      .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Search marketplace')) as HTMLButtonElement;
+    button.click();
+    expect(actions).toEqual([{ type: 'marketplaceSearch', query: 'Artio Reference', country: 'CH' }]);
+  });
+
   it('shows runtime compatibility and persisted composition counts', () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
