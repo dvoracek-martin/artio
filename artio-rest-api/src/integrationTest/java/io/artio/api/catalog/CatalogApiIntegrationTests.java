@@ -1090,6 +1090,50 @@ class CatalogApiIntegrationTests {
                 UUID.fromString(binding.getBody().get("bindingId").toString()))).isEqualTo("DRAINING");
         assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class,
                 subscriptionId)).isEqualTo("DRAINING");
+
+        var obligationInstance = adminExchange("/api/v1/admin/extensions/{id}/instances", HttpMethod.POST,
+                Map.of("instanceKey", "uninstall-obligation", "configuration", Map.of("account", "CH", "apiKey", "obligation-key")),
+                Map.class, pluginId);
+        UUID obligationInstanceId = UUID.fromString(obligationInstance.getBody().get("instanceId").toString());
+        UUID obligationOrderId = UUID.randomUUID();
+        UUID obligationPaymentId = UUID.randomUUID();
+        UUID obligationRefundId = UUID.randomUUID();
+        UUID obligationShipmentId = UUID.randomUUID();
+        try {
+            jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,"
+                            + "shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                            + "VALUES (?,?,'PENDING',10,0,0,10,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
+                    obligationOrderId, adminUserId, "uninstall-obligation-" + obligationOrderId);
+            jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,provider_instance_id,"
+                            + "provider_release_id,provider_configuration_generation,created_at,updated_at) "
+                            + "VALUES (?,?,?,10,'CHF','EXTENSION','PENDING',?,?,?,0,now(),now())",
+                    obligationPaymentId, obligationOrderId, adminUserId, "uninstall-obligation-" + obligationPaymentId,
+                    obligationInstanceId, pluginReleaseId);
+            assertThat(adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}", HttpMethod.DELETE,
+                    null, Map.class, pluginId, obligationInstanceId).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+            jdbc.update("UPDATE payments SET status='CAPTURED' WHERE id=?", obligationPaymentId);
+            jdbc.update("INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,currency,status,created_at,updated_at) "
+                            + "VALUES (?,?,?,10,'CHF','PROCESSING',now(),now())",
+                    obligationRefundId, obligationPaymentId, "uninstall-refund-" + obligationRefundId);
+            assertThat(adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}", HttpMethod.DELETE,
+                    null, Map.class, pluginId, obligationInstanceId).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+            jdbc.update("UPDATE payment_refunds SET status='FAILED' WHERE id=?", obligationRefundId);
+            jdbc.update("UPDATE orders SET status='PAID' WHERE id=?", obligationOrderId);
+            jdbc.update("INSERT INTO order_shipments(id,order_id,tracking_number,provider_instance_id,provider_release_id,"
+                            + "provider_configuration_generation) VALUES (?,?,?, ?,?,0)",
+                    obligationShipmentId, obligationOrderId, "tracking-" + obligationShipmentId, obligationInstanceId, pluginReleaseId);
+            assertThat(adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}", HttpMethod.DELETE,
+                    null, Map.class, pluginId, obligationInstanceId).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugin_instances WHERE instance_id=?", String.class,
+                    obligationInstanceId)).isEqualTo("CONFIGURED");
+        } finally {
+            jdbc.update("DELETE FROM order_shipments WHERE id=?", obligationShipmentId);
+            jdbc.update("DELETE FROM payment_refunds WHERE id=?", obligationRefundId);
+            jdbc.update("DELETE FROM payments WHERE id=?", obligationPaymentId);
+            jdbc.update("DELETE FROM orders WHERE id=?", obligationOrderId);
+        }
     }
 
     @Test
