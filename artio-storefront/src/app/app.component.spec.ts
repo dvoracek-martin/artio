@@ -4,11 +4,11 @@ import { of } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app.component';
 
-function createComponent(orderStatus: string | undefined, authenticated = true): ComponentFixture<AppComponent> {
+function createComponent(orderStatus: string | undefined, authenticated = true, route = '/checkout?success=true&orderId=order-1'): ComponentFixture<AppComponent> {
   localStorage.removeItem('artio-token');
   localStorage.setItem('artio-locale', 'en');
   if (authenticated) localStorage.setItem('artio-token', 'test-token');
-  history.replaceState({}, '', '/checkout?success=true&orderId=order-1');
+  history.replaceState({}, '', route);
   const orders = orderStatus ? [{ orderId: 'order-1', status: orderStatus }] : [];
   const http = {
     get: vi.fn((url: string) => of(
@@ -20,7 +20,9 @@ function createComponent(orderStatus: string | undefined, authenticated = true):
             ? orders
             : []
     )),
-    post: vi.fn((url: string) => of(url === '/api/v1/payments/methods' ? { methods: [], partialFailure: false } : {}))
+    post: vi.fn((url: string) => of(url === '/api/v1/payments/methods'
+      ? { methods: [{ reference: 'card-ref', displayName: 'Card' }, { reference: 'paypal-ref', displayName: 'PayPal' }], partialFailure: false }
+      : {}))
   };
   TestBed.configureTestingModule({ imports: [AppComponent], providers: [{ provide: HttpClient, useValue: http }] });
   const fixture = TestBed.createComponent(AppComponent);
@@ -59,5 +61,16 @@ describe('Storefront payment return', () => {
     expect(fixture.componentInstance.paymentReturnConfirmed).toBe(false);
     expect(fixture.nativeElement.textContent).not.toContain('Thank you for your order.');
     expect(fixture.nativeElement.textContent).toContain('We could not check the payment just now. Your order status remains unchanged.');
+  });
+
+  it('gives checkout address and payment controls visible accessible labels', () => {
+    const fixture = createComponent(undefined, true, '/checkout');
+    const labels = Array.from(fixture.nativeElement.querySelectorAll('label')) as HTMLLabelElement[];
+
+    for (const text of ['Recipient name', 'Street and house number', 'Postal code', 'City', 'Billing address (optional)', 'Country', 'Parcel weight (kg)', 'Delivery method', 'Payment method']) {
+      const label = labels.find(candidate => candidate.textContent?.trim().startsWith(text));
+      expect(label, `expected a visible label for ${text}`).toBeDefined();
+      expect(label?.querySelector('input,select')).toBeTruthy();
+    }
   });
 });
