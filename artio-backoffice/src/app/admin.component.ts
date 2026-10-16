@@ -70,7 +70,7 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
   @if (tab==='reports') {
     @defer (when tab==='reports') {
     <artio-reports-admin></artio-reports-admin>
-    } @placeholder { <p class="muted" role="status">{{t('loadingReports')}}</p> }
+    } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingReports')}}</p> }
     }@if (tab==='overview') {
     <section><div class="welcome"><div><p class="eyebrow">{{t('dashboardEyebrow')}}</p><h2>{{t('dashboardTitle')}}</h2><p>{{t('dashboardIntro')}}</p></div><div class="welcome-mark">✳</div></div><div class="metrics"><article><span>{{t('dashboardProducts')}}</span><strong>{{overviewProductTotal}}</strong><small>{{t('dashboardCatalogue')}}</small></article><article><span>{{t('dashboardBundles')}}</span><strong>{{bundles.length}}</strong><small>{{t('dashboardCollection')}}</small></article><article><span>{{t('dashboardOrders')}}</span><strong>{{overviewOrderTotal}}</strong><small>{{t('dashboardStore')}}</small></article><article><span>{{t('dashboardPrices')}}</span><strong>{{prices.length}}</strong><small>{{t('dashboardMarkets')}}</small></article></div><div class="panel"><div class="panel-heading"><div><p class="eyebrow">{{t('dashboardRecent')}}</p><h2>{{t('dashboardCatalogueTitle')}}</h2></div><button class="link-button" (click)="navigateTo('products')">{{t('dashboardViewAll')}} →</button></div>@for (product of overviewProducts; track product) {
     <div class="row"><span class="dot-icon">{{product.name.charAt(0)}}</span><div class="row-main"><strong>{{product.name}}</strong><small>{{product.sku}}</small></div><span class="pill" [class.inactive]="!product.active">{{product.active?t('dashboardActive'):t('dashboardInactive')}}</span></div>
@@ -81,18 +81,18 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
 @if (tab==='productNew') {
   @defer (when tab==='productNew') {
   <artio-product-wizard (cancel)="navigateTo('products')" (created)="productCreated($event)"></artio-product-wizard>
-  } @placeholder { <p class="muted" role="status">{{t('loadingProductEditor')}}</p> }
+  } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingProductEditor')}}</p> }
 }
 @if (tab==='products') {
   <ng-container #productCatalogHost></ng-container>
-  @if (productCatalogLoading) { <p class="muted" role="status">{{t('loadingProductEditor')}}</p> }
+  @if (productCatalogLoading) { <p class="muted loading-indicator" role="status">{{t('loadingProductEditor')}}</p> }
 }@if (tab==='bundles') {
   <ng-container #bundleAdminHost></ng-container>
-  @if (bundleAdminLoading) { <p class="muted" role="status">{{t('loadingProductEditor')}}</p> }
+  @if (bundleAdminLoading) { <p class="muted loading-indicator" role="status">{{t('loadingProductEditor')}}</p> }
 }
 @if (tab==='extensions') {
   <ng-container #extensionAdminHost></ng-container>
-  @if (extensionAdminLoading) { <p class="muted" role="status">{{t('loadingProductEditor')}}</p> }
+  @if (extensionAdminLoading) { <p class="muted loading-indicator" role="status">{{t('loadingProductEditor')}}</p> }
 }@if (tab==='system' && isSuperadmin) {
   <section><artio-license-admin></artio-license-admin><div class="panel"><p class="eyebrow">{{t('systemEyebrow')}}</p><h2>{{t('systemInstallation')}}</h2><p class="muted">{{t('systemOwnerNotice')}}</p><form class="create-form" (ngSubmit)="saveSystemSettings()"><label>{{t('systemStoreName')}}<input [(ngModel)]="systemSettings.storeName" name="storeName" maxlength="120" required></label><div class="form-grid"><label>{{t('systemCountry')}}<artio-search-select [(ngModel)]="systemSettings.countryCode" name="countryCode" [label]="t('systemStoreCountry')" [options]="countryOptions"></artio-search-select></label><label>{{t('systemCurrency')}}<artio-search-select [(ngModel)]="systemSettings.currencyCode" name="currencyCode" [label]="t('systemStoreCurrency')" [options]="currencyOptions"></artio-search-select></label></div><div class="form-grid"><label>{{t('systemDefaultLocale')}}<artio-search-select [(ngModel)]="systemSettings.locale" name="locale" [label]="t('systemStoreLocale')" [options]="localeOptions"></artio-search-select></label><label>{{t('systemTimeZone')}}<artio-search-select [(ngModel)]="systemSettings.timezone" name="timezone" [label]="t('systemStoreTimeZone')" [options]="timezoneOptions"></artio-search-select></label></div><label>{{t('systemLanguages')}}<artio-search-select [(ngModel)]="systemSelectedLanguages" name="systemLanguages" [label]="t('systemContentLanguages')" [options]="storeLanguageOptions" [multiple]="true" [placeholder]="t('systemChooseLanguages')"></artio-search-select><small>{{t('systemLanguageTags')}}</small></label><label>{{t('systemExternalUrl')}}<input [(ngModel)]="systemSettings.externalBaseUrl" name="externalBaseUrl" type="url" [placeholder]="t('systemUrlPlaceholder')"><small>{{t('systemHttpsHelp')}}</small></label><p class="muted">{{t('systemDistribution')}}: {{systemSettings.distributionId}}</p><button class="primary">{{t('systemSave')}}</button></form><button class="link-button" (click)="navigateTo('extensions')">{{t('systemOpenPlugins')}}</button></div><div class="panel table-panel"><p class="eyebrow">{{t('systemRegionalEyebrow')}}</p><h2>{{t('systemRecommendations')}}</h2><p class="muted">{{t('systemRegionalHelp')}}</p><table><thead><tr><th scope="col">{{t('systemPlugin')}}</th><th scope="col">{{t('systemStatus')}}</th><th scope="col">{{t('systemRecommendation')}}</th></tr></thead><tbody>@for (item of distributionPlugins; track item) {
   <tr><td>{{item.pluginId}}</td><td>{{systemPluginStatus(item.status)}}</td><td>{{item.optional?t('systemOptional'):t('systemRecommended')}} · {{item.reason}}</td></tr>
@@ -105,18 +105,18 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
 }</div></section>
 }@if (tab==='pricing') {
   <ng-container #pricingAdminHost></ng-container>
-  @if (pricingAdminLoading) { <p class="muted" role="status">{{t('loadingProductEditor')}}</p> }
+  @if (pricingAdminLoading) { <p class="muted loading-indicator" role="status">{{t('loadingProductEditor')}}</p> }
 }@if (tab==='orders') {
   <ng-container #ordersAdminHost></ng-container>@if (ordersAdminLoading) { <p class="muted" role="status">{{ordersAdminLoadingText()}}</p> }
 }
 @if (mediaProduct) {
-  @defer (when mediaProduct !== null) { <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null"></artio-product-media-admin> } @placeholder { <p class="muted" role="status">{{t('loadingProductMedia')}}</p> }
+  @defer (when mediaProduct !== null) { <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null"></artio-product-media-admin> } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingProductMedia')}}</p> }
   }@if (tab==='catalogData') {
-  @defer (when tab==='catalogData') { <artio-catalog-metadata-admin></artio-catalog-metadata-admin> } @placeholder { <p class="muted" role="status">{{t('loadingCatalogData')}}</p> }
+  @defer (when tab==='catalogData') { <artio-catalog-metadata-admin></artio-catalog-metadata-admin> } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingCatalogData')}}</p> }
   }@if (tab==='inventory') {
-  @defer (when tab==='inventory') { <artio-inventory-admin></artio-inventory-admin> } @placeholder { <p class="muted" role="status">{{t('loadingInventory')}}</p> }
+  @defer (when tab==='inventory') { <artio-inventory-admin></artio-inventory-admin> } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingInventory')}}</p> }
   }@if (tab==='giftCards') {
-  @defer (when tab==='giftCards') { <artio-gift-card-admin></artio-gift-card-admin> } @placeholder { <p class="muted" role="status">{{t('loadingGiftCards')}}</p> }
+  @defer (when tab==='giftCards') { <artio-gift-card-admin></artio-gift-card-admin> } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingGiftCards')}}</p> }
   }@if (tab==='operations') {
   <ng-container #operationsAdminHost></ng-container>@if (operationsAdminLoading) { <p class="muted" role="status">{{operationsAdminLoadingText()}}</p> }
 }@if (tab==='users') {
@@ -351,8 +351,8 @@ export class AdminComponent {
  systemPluginStatus(status:string):string{const keys:Record<string,BackofficeTextKey>={WAITING_FOR_RELEASE:'systemWaitingRelease',CONFIGURATION_REQUIRED:'systemConfigurationRequired',READY_TO_INSTALL:'systemReadyToInstall',RETRY_REQUIRED:'systemRetryRequired',INSTALLED_DISABLED:'systemInstalledDisabled',ACTIVE:'systemActive',UNINSTALLED_BY_ADMIN:'systemUninstalled',LIFECYCLE_IN_PROGRESS:'systemInProgress'};const key=keys[status];return key?this.t(key):status}
  selectLocale(value:string):void{if(value==='de'||value==='it'||value==='fr'||value==='en')setBackofficeLocale(value)}
  formatWorkspaceDate():string{return new Intl.DateTimeFormat(currentBackofficeLocale(),{weekday:'long',month:'long',day:'numeric'}).format(this.today)}
- navigateTo(tab:string):void{this.navOpen=false;this.router.navigateByUrl(tab==='productNew'?'/products/new':'/'+tab)}
- private syncRoute():void{const path=this.router.url.split('?')[0];const tab=path==='/products/new'?'productNew':path.slice(1);if(['overview','products','productNew','catalogData','bundles','extensions','pricing','inventory','orders','users','giftCards','operations','system','reports'].includes(tab))this.tab=tab;this.error='';this.success='';if(this.setupChecked&&!this.setupRequired&&this.token&&!this.mfaSetupRequired){switch(this.tab){case 'overview':this.loadDashboard();break;case 'products':this.loadProducts();break;case 'bundles':this.loadBundles();break;case 'extensions':this.loadExtensions();break;case 'pricing':this.loadPrices();break;case 'orders':this.loadOrders();break;case 'users':this.loadUsers();break;case 'operations':this.loadOutbox();break;case 'system':if(this.isSuperadmin)this.loadSystemSettings();break;case 'reports':break;}}}
+ navigateTo(tab:string):void{this.navOpen=false;const routes:Record<string,string>={productNew:'/products/new',catalogData:'/catalog-data',giftCards:'/gift-cards'};void this.router.navigateByUrl(routes[tab]??'/'+tab)}
+ private syncRoute():void{const path=this.router.url.split('?')[0];const legacyRoutes:Record<string,string>={'/catalogData':'/catalog-data','/giftCards':'/gift-cards'};const normalizedPath=legacyRoutes[path]??path;if(normalizedPath!==path){void this.router.navigateByUrl(normalizedPath,{replaceUrl:true});return}const routeTabs:Record<string,string>={'/products/new':'productNew','/catalog-data':'catalogData','/gift-cards':'giftCards'};const tab=routeTabs[path]??path.slice(1);if(['overview','products','productNew','catalogData','bundles','extensions','pricing','inventory','orders','users','giftCards','operations','system','reports'].includes(tab))this.tab=tab;this.error='';this.success='';if(this.setupChecked&&!this.setupRequired&&this.token&&!this.mfaSetupRequired){switch(this.tab){case 'overview':this.loadDashboard();break;case 'products':this.loadProducts();break;case 'bundles':this.loadBundles();break;case 'extensions':this.loadExtensions();break;case 'pricing':this.loadPrices();break;case 'orders':this.loadOrders();break;case 'users':this.loadUsers();break;case 'operations':this.loadOutbox();break;case 'system':if(this.isSuperadmin)this.loadSystemSettings();break;case 'reports':break;}}}
  productCreated(id:string):void{this.loadCatalogFilters();this.catalogPage=0;this.catalogState='ALL';this.query='';this.catalogBrandId='';this.catalogCategoryId='';this.router.navigateByUrl('/products').then(()=>this.success='Product created successfully. Add pricing and stock when you are ready to sell.')}
  get filteredProducts():Product[]{return this.products} get catalogPages():number{return Math.max(1,Math.ceil(this.catalogTotal/this.catalogSize))}
  resetCatalogPage():void{this.catalogPage=0;this.loadProducts()} previousCatalogPage():void{if(this.catalogPage>0){this.catalogPage--;this.loadProducts()}} nextCatalogPage():void{if(this.catalogPage+1<this.catalogPages){this.catalogPage++;this.loadProducts()}}

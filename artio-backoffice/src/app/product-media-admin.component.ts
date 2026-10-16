@@ -22,7 +22,7 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
         <label>{{m('alternativeText')}}<input [(ngModel)]="altText" name="altText" maxlength="500" [placeholder]="m('alternativeTextPlaceholder')"></label>
         <button class="primary" [disabled]="!file || busy">{{busy?m('uploading'):m('upload')}}</button>
       </form>
-      @if (loading) { <p class="muted" role="status">{{m('loading')}}</p> }
+      @if (loading) { <p class="muted loading-indicator" role="status">{{m('loading')}}</p> }
       @if (error) {
         <p class="error" role="alert">{{error}}</p>
       }

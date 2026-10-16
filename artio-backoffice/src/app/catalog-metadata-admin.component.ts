@@ -5,6 +5,7 @@ import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { FormsModule } from '@angular/forms';
 import { backofficeText, currentBackofficeLocale, BackofficeTextKey } from './backoffice-locale';
 import { catalogText, CatalogTextKey } from './catalog-backoffice-locale';
+import { finalize } from 'rxjs';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
 type Brand = { id: string; name: string; description: string; active: boolean };
@@ -19,20 +20,22 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
     <section>
       <div class="panel">
         <div class="panel-heading"><div><p class="eyebrow">{{ct('structure')}}</p><h2>{{ct('categories')}}</h2></div><button class="link-button" (click)="load()">{{ct('refresh')}}</button></div>
+        @if (metadataLoading) { <div class="loading-indicator" role="status"><span>{{t('loadingCatalogData')}}</span></div> }
         <form class="create-form" (ngSubmit)="createCategory()">
           <label class="sr-only" for="new-category-name">{{ct('categoryName')}}</label>
           <input id="new-category-name" [(ngModel)]="categoryDraft.name" name="categoryName" maxlength="120" [placeholder]="ct('categoryName')" required>
           <artio-search-select [(ngModel)]="categoryDraft.parentId" name="categoryParent" [label]="ct('parentCategory')" [options]="parentOptions" [placeholder]="ct('topLevel')"></artio-search-select>
-          <button class="primary">{{ct('addCategory')}}</button>
+          <button class="primary" [disabled]="metadataLoading || creatingCategory">@if (creatingCategory) {<span class="button-spinner" aria-hidden="true"></span>}{{ct('addCategory')}}</button>
         </form>
         @for (category of categories; track category) {
           <div class="row"><span class="row-main"><strong>{{category.name}}</strong><small>{{category.parentId?ct('childOf').replace('{name}',categoryName(category.parentId)):ct('topLevel')}} · {{category.active?ct('active'):ct('inactive')}}</small></span><button class="link-button" (click)="editCategory(category)">{{ct('edit')}}</button><button class="link-button" (click)="toggleCategory(category)">{{category.active?ct('deactivate'):ct('activate')}}</button></div>
         }
-        @if (!categories.length) {
+        @if (!metadataLoading && !categories.length) {
           <p class="empty">{{ct('noCategories')}}</p>
         }
       </div>
 
+      @if (productsLoading) { <div class="loading-indicator" role="status"><span>{{t('loadingCatalogData')}}</span></div> }
       @if (products.length) {
         <div class="panel">
           <div class="panel-heading"><div><p class="eyebrow">{{ct('classification')}}</p><h2>{{ct('assignData')}}</h2></div></div>
@@ -59,11 +62,11 @@ type CatalogProduct = { id: string; name: string; sku: string; brandId: string |
 
     <div class="panel">
       <div class="panel-heading"><div><p class="eyebrow">{{ct('manufacturers')}}</p><h2>{{ct('brands')}}</h2></div></div>
-      <form class="create-form" (ngSubmit)="createBrand()"><label class="sr-only" for="new-brand-name">{{ct('brandName')}}</label><input id="new-brand-name" [(ngModel)]="brandDraft.name" name="brandName" maxlength="160" [placeholder]="ct('brandName')" required><label class="sr-only" for="new-brand-description">{{ct('description')}}</label><input id="new-brand-description" [(ngModel)]="brandDraft.description" name="brandDescription" maxlength="1000" [placeholder]="ct('description')"><button class="primary">{{ct('addBrand')}}</button></form>
+      <form class="create-form" (ngSubmit)="createBrand()"><label class="sr-only" for="new-brand-name">{{ct('brandName')}}</label><input id="new-brand-name" [(ngModel)]="brandDraft.name" name="brandName" maxlength="160" [placeholder]="ct('brandName')" required><label class="sr-only" for="new-brand-description">{{ct('description')}}</label><input id="new-brand-description" [(ngModel)]="brandDraft.description" name="brandDescription" maxlength="1000" [placeholder]="ct('description')"><button class="primary" [disabled]="metadataLoading || creatingBrand">@if (creatingBrand) {<span class="button-spinner" aria-hidden="true"></span>}{{ct('addBrand')}}</button></form>
       @for (brand of brands; track brand) {
         <div class="row"><span class="row-main"><strong>{{brand.name}}</strong><small>{{brand.description}} · {{brand.active?ct('active'):ct('inactive')}}</small></span><button class="link-button" (click)="editBrand(brand)">{{ct('edit')}}</button><button class="link-button" (click)="toggleBrand(brand)">{{brand.active?ct('deactivate'):ct('activate')}}</button></div>
       }
-      @if (!brands.length) {
+      @if (!metadataLoading && !brands.length) {
         <p class="empty">{{ct('noBrands')}}</p>
       }
     </div>
@@ -123,6 +126,11 @@ export class CatalogMetadataAdminComponent {
   selectedProduct: CatalogProduct | null = null;
   productDraft = { brandId: '', categoryIds: [] as string[], attributes: {} as Record<string,string> };
   error = '';
+  metadataLoading = false;
+  productsLoading = false;
+  creatingCategory = false;
+  creatingBrand = false;
+  private metadataLoadGeneration = 0;
   catalogEditor:any=null;
   catalogEditorBusy=false;
   catalogEditorError='';
@@ -142,12 +150,16 @@ export class CatalogMetadataAdminComponent {
   }
 
   load(): void {
-    this.http.get<Category[]>('/api/v1/categories').subscribe({ next: rows => this.categories = rows, error: e => this.fail(e, this.ct('loadCategoriesFailure')) });
-    this.http.get<Brand[]>('/api/v1/brands').subscribe({ next: rows => this.brands = rows, error: e => this.fail(e, this.ct('loadBrandsFailure')) });
-    this.http.get<AttributeDefinition[]>('/api/v1/attribute-definitions').subscribe({ next: rows => this.attributes = rows, error: e => this.fail(e, this.ct('loadAttributesFailure')) });
+    const generation = ++this.metadataLoadGeneration;
+    let pending = 3;
+    this.metadataLoading = true;
+    const finish = () => { if (generation === this.metadataLoadGeneration && --pending === 0) this.metadataLoading = false; };
+    this.http.get<Category[]>('/api/v1/categories').pipe(finalize(finish)).subscribe({ next: rows => { if (generation === this.metadataLoadGeneration) this.categories = rows; }, error: e => this.fail(e, this.ct('loadCategoriesFailure')) });
+    this.http.get<Brand[]>('/api/v1/brands').pipe(finalize(finish)).subscribe({ next: rows => { if (generation === this.metadataLoadGeneration) this.brands = rows; }, error: e => this.fail(e, this.ct('loadBrandsFailure')) });
+    this.http.get<AttributeDefinition[]>('/api/v1/attribute-definitions').pipe(finalize(finish)).subscribe({ next: rows => { if (generation === this.metadataLoadGeneration) this.attributes = rows; }, error: e => this.fail(e, this.ct('loadAttributesFailure')) });
   }
 
-  loadProducts(): void { this.http.get<CatalogProduct[]>('/api/v1/products').subscribe({next:rows=>this.products=rows,error:e=>this.fail(e,this.ct('loadProductsFailure'))}); }
+  loadProducts(): void { this.productsLoading=true;this.http.get<CatalogProduct[]>('/api/v1/products').subscribe({next:rows=>{this.products=rows;this.productsLoading=false},error:e=>{this.productsLoading=false;this.fail(e,this.ct('loadProductsFailure'))}}); }
   selectProduct(id:string):void{this.selectedProduct=this.products.find(row=>row.id===id)??null;if(!this.selectedProduct)return;this.productDraft={brandId:this.selectedProduct.brandId??'',categoryIds:[...this.selectedProduct.categoryIds],attributes:{...this.selectedProduct.attributes}};}
   toggleProductCategory(id:string,event:Event):void{const checked=(event.target as HTMLInputElement).checked;this.productDraft.categoryIds=checked?[...this.productDraft.categoryIds,id]:this.productDraft.categoryIds.filter(value=>value!==id);}
   setAttribute(code:string,value:string):void{this.productDraft.attributes={...this.productDraft.attributes,[code]:value};}
@@ -155,8 +167,10 @@ export class CatalogMetadataAdminComponent {
 
   categoryName(id: string): string { return this.categories.find(row => row.id === id)?.name ?? this.ct('unknownParent'); }
   createCategory(): void {
+    if (this.creatingCategory || !this.categoryDraft.name.trim()) return;
+    this.creatingCategory = true;
     this.http.post<Category>('/api/v1/categories', { name: this.categoryDraft.name.trim(), parentId: this.categoryDraft.parentId || null, active: true }).subscribe({
-      next: () => { this.categoryDraft = { name: '', parentId: '' }; this.load(); this.error = ''; }, error: e => this.fail(e, this.ct('createCategoryFailure'))
+      next: () => { this.creatingCategory = false; this.categoryDraft = { name: '', parentId: '' }; this.load(); this.error = ''; }, error: e => { this.creatingCategory = false; this.fail(e, this.ct('createCategoryFailure')); }
     });
   }
   editCategory(row: Category): void {
@@ -167,7 +181,9 @@ export class CatalogMetadataAdminComponent {
   }
 
   createBrand(): void {
-    this.http.post('/api/v1/brands', { ...this.brandDraft, name: this.brandDraft.name.trim(), active: true }).subscribe({ next: () => { this.brandDraft = { name: '', description: '' }; this.load(); this.error = ''; }, error: e => this.fail(e, this.ct('createBrandFailure')) });
+    if (this.creatingBrand || !this.brandDraft.name.trim()) return;
+    this.creatingBrand = true;
+    this.http.post('/api/v1/brands', { ...this.brandDraft, name: this.brandDraft.name.trim(), active: true }).subscribe({ next: () => { this.creatingBrand = false; this.brandDraft = { name: '', description: '' }; this.load(); this.error = ''; }, error: e => { this.creatingBrand = false; this.fail(e, this.ct('createBrandFailure')); } });
   }
   editBrand(row: Brand): void {
     this.openCatalogEditor('brand',{...row});

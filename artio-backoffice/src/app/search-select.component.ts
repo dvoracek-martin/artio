@@ -27,7 +27,7 @@ let nextSelectId = 0;
           <div class="search-select-popover" [style.left.px]="position.left" [style.top.px]="position.top" [style.width.px]="position.width" [style.max-height.px]="position.height">
             <div class="select-search"><span aria-hidden="true">⌕</span><input type="search" [(ngModel)]="query" (ngModelChange)="search.emit($event)" [ngModelOptions]="{standalone:true}" [attr.aria-label]="text('selectSearch',{label})" [placeholder]="text('selectSearchPlaceholder',{label:label.toLowerCase()})" (keydown.arrowdown)="focusOption($event,0)" (keydown.escape)="close()" autocomplete="off"></div>
             @if (loading) {
-              <p class="select-no-results" role="status">{{text('selectLoading')}}</p>
+              <p class="select-no-results loading-indicator" role="status">{{text('selectLoading')}}</p>
             }
             @if (multiple) {
               <div class="select-selection-bar"><span>{{selectedCount}}</span><button type="button" (click)="clear()" [disabled]="!values.length">{{text('selectClear')}}</button></div>

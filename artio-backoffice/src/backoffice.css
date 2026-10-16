@@ -225,3 +225,11 @@ artio-sellable-select{display:block;min-width:200px}.create-form>artio-sellable-
 .login-card .remember-switch>input:checked+.remember-switch-track>span{transform:translateX(16px);background:#fff}
 .login-card .remember-switch>input:focus-visible+.remember-switch-track{outline:2px solid #06b6d4;outline-offset:3px}
 @media(max-width:700px){.login-card>.header-actions{top:12px;right:12px;gap:8px}.login-card .login-language-control>span{display:none}.login-card .login-language-control .language-picker{min-width:100px}.developer-mode-badge{font-size:9px;padding:0 8px}.login-card{padding:48px 26px 30px}}
+
+/* Shared, low-motion loading feedback for async panels. */
+.loading-indicator{display:flex;align-items:center;gap:10px;min-height:38px;color:#a8dff0}
+.loading-indicator::before,.button-spinner{content:"";display:inline-block;width:15px;height:15px;border:2px solid #5b7893;border-top-color:#29cde7;border-right-color:#8b72ff;border-radius:50%;animation:artio-loading-spin .8s linear infinite;flex:none}
+.loading-indicator.notice{padding:12px 16px}
+.button-spinner{width:12px;height:12px;margin-right:8px;vertical-align:-2px}
+@keyframes artio-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.loading-indicator::before,.button-spinner{animation-duration:2.4s}}

@@ -30,7 +30,7 @@ type AdvancedReport = {
     </div>
     <p class="muted">{{t('reportActivityHelp')}}</p>
     @if (loading) {
-      <p class="muted" role="status">{{t('loadingReports')}}</p>
+      <p class="muted loading-indicator" role="status">{{t('loadingReports')}}</p>
     }
     @if (error) {
       <p class="error" role="alert">{{error}}</p>

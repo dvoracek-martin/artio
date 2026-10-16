@@ -4,7 +4,7 @@
     <li [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{stepDescription(index)}}</small></div></li>
   }</ol>
   @if (loading) {
-    <p class="notice" role="status">{{t('loading')}}</p>
+    <p class="notice loading-indicator" role="status" aria-live="polite">{{t('loading')}}</p>
   }
   @if (error) {
     <div class="notice error" role="alert">{{error}} @if (!categories.length && step===0) {
@@ -32,7 +32,7 @@
             }@if (!categories.length) {
             <button type="button" class="secondary" (click)="loadOptions()">{{t('reloadCategories')}}</button>
           }</fieldset>
-          <details class="new-category"><summary>＋ {{t('createCategory')}}</summary><div><label>{{t('categoryName')}}<input name="newCategory" [(ngModel)]="categoryName" maxlength="120" [placeholder]="t('categoryPlaceholder')"></label><button type="button" class="secondary" [disabled]="!categoryName.trim() || creatingCategory" (click)="createCategory()">{{creatingCategory?t('creating'):t('createSelect')}}</button></div></details>
+          <details class="new-category"><summary>＋ {{t('createCategory')}}</summary><div><label>{{t('categoryName')}}<input name="newCategory" [(ngModel)]="categoryName" maxlength="120" [placeholder]="t('categoryPlaceholder')"></label><button type="button" class="secondary" [disabled]="!categoryName.trim() || creatingCategory" (click)="createCategory()">@if (creatingCategory) {<span class="button-spinner" aria-hidden="true"></span>}{{creatingCategory?t('creating'):t('createSelect')}}</button></div></details>
           <div class="setup-field"><span>{{t('brandOptional')}}</span><artio-search-select [label]="t('productBrand')" name="brand" [(ngModel)]="draft.brandId" [options]="brandOptions" [placeholder]="t('noBrand')"></artio-search-select></div>
           @if (attributes.length) {
             <div class="field-divider"><h3>{{t('productAttributes')}}</h3><p>{{t('attributeHelp')}}</p></div>
@@ -78,7 +78,7 @@
     @if (productId) {
       <p class="muted">{{t('draftSaved')}}</p>
       }@if (busy) {
-      <p class="notice" role="status" aria-live="polite">{{progress}}</p>
+      <p class="notice loading-indicator" role="status" aria-live="polite">{{progress}}</p>
     }
     <div class="wizard-footer"><button class="secondary" [disabled]="busy || !!productId" (click)="back()">← {{t('back')}}</button><button class="primary" [disabled]="busy" (click)="save()">{{busy?t('saving'):productId?t('retryRemaining'):publish?t('createActivate'):t('createDraft')}} <span>↗</span></button></div>
   </div>

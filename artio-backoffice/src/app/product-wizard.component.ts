@@ -4,7 +4,7 @@ import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, ChangeDetec
 import { FormsModule } from '@angular/forms';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { ProductWizardTextKey, productWizardText } from './product-wizard-locale';
-import { firstValueFrom, forkJoin } from 'rxjs';
+import { firstValueFrom, forkJoin, timeout } from 'rxjs';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
 type Brand = { id: string; name: string; active: boolean };
@@ -44,7 +44,7 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   loadOptions(): void {
     this.loading = true;
     this.error = '';
-    forkJoin({ categories: this.http.get<Category[]>('/api/v1/categories'), brands: this.http.get<Brand[]>('/api/v1/brands'), attributes: this.http.get<Attribute[]>('/api/v1/attribute-definitions') }).subscribe({
+    forkJoin({ categories: this.http.get<Category[]>('/api/v1/categories'), brands: this.http.get<Brand[]>('/api/v1/brands'), attributes: this.http.get<Attribute[]>('/api/v1/attribute-definitions') }).pipe(timeout({ first: 30000 })).subscribe({
       next: data => { this.categories = data.categories.filter(x => x.active); this.brands = data.brands.filter(x => x.active); this.attributes = data.attributes.filter(x => x.active); this.loading = false; },
       error: e => { this.loading = false; this.error = this.message(e, this.t('loadFailure')); }
     });
