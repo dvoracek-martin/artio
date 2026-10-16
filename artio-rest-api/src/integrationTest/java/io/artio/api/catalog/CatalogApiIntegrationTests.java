@@ -110,12 +110,21 @@ class CatalogApiIntegrationTests {
 
         UUID firstInstance = createRouteGuardInstance();
         UUID secondInstance = createRouteGuardInstance();
-        jdbc.update("INSERT INTO extension_capability_bindings(binding_id,instance_id,capability_id,operation_name,scope,priority) "
-                        + "VALUES (?,?,'catalog.enrichment.v1','enrich','{\"country\":\"CH\"}'::jsonb,5)",
-                UUID.randomUUID(), firstInstance);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO extension_capability_bindings(binding_id,instance_id,capability_id,operation_name,scope,priority) "
-                        + "VALUES (?,?,'catalog.enrichment.v1','enrich','{\"currency\":\"CHF\"}'::jsonb,5)",
-                UUID.randomUUID(), secondInstance)).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        String firstPlugin = jdbc.queryForObject("SELECT plugin_id FROM extension_plugin_instances WHERE instance_id=?", String.class, firstInstance);
+        String secondPlugin = jdbc.queryForObject("SELECT plugin_id FROM extension_plugin_instances WHERE instance_id=?", String.class, secondInstance);
+        try {
+            jdbc.update("INSERT INTO extension_capability_bindings(binding_id,instance_id,capability_id,operation_name,scope,priority) "
+                            + "VALUES (?,?,'catalog.enrichment.v1','enrich','{\"country\":\"CH\"}'::jsonb,5)",
+                    UUID.randomUUID(), firstInstance);
+            assertThatThrownBy(() -> jdbc.update("INSERT INTO extension_capability_bindings(binding_id,instance_id,capability_id,operation_name,scope,priority) "
+                            + "VALUES (?,?,'catalog.enrichment.v1','enrich','{\"currency\":\"CHF\"}'::jsonb,5)",
+                    UUID.randomUUID(), secondInstance)).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        } finally {
+            jdbc.update("DELETE FROM extension_capability_bindings WHERE instance_id IN (?,?)", firstInstance, secondInstance);
+            jdbc.update("DELETE FROM extension_plugin_instances WHERE instance_id IN (?,?)", firstInstance, secondInstance);
+            jdbc.update("DELETE FROM extension_plugin_releases WHERE plugin_id IN (?,?)", firstPlugin, secondPlugin);
+            jdbc.update("DELETE FROM extension_plugins WHERE plugin_id IN (?,?)", firstPlugin, secondPlugin);
+        }
     }
 
     private UUID createRouteGuardInstance() {
@@ -481,9 +490,8 @@ class CatalogApiIntegrationTests {
         assertThat(updated.getBody().name()).isEqualTo("Studio Display X");
         assertThat(updated.getBody().sku()).isEqualTo("DSP-2701");
 
-        adminExchange("/api/v1/products/{id}/active", HttpMethod.PUT,
-                new SetActiveRequest(false), String.class, created.getBody().id());
-        var inactive = http.getForEntity("/api/v1/products/{id}", ProductResponse.class, created.getBody().id());
+        var inactive = adminExchange("/api/v1/products/{id}/active", HttpMethod.PUT,
+                new SetActiveRequest(false), ProductResponse.class, created.getBody().id());
         assertThat(inactive.getBody()).isNotNull();
         assertThat(inactive.getBody().active()).isFalse();
     }
@@ -818,8 +826,10 @@ class CatalogApiIntegrationTests {
                 Map.of("capabilityId", "catalog.enrichment.v1", "operationName", "enrich",
                         "scope", Map.of("currency", "CHF"), "priority", 20, "instanceId", secondInstanceId), Map.class, pluginId);
         assertThat(overlappingBinding.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_capability_bindings WHERE capability_id='catalog.enrichment.v1' AND operation_name='enrich'",
-                Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_capability_bindings b "
+                        + "JOIN extension_plugin_instances i ON i.instance_id=b.instance_id "
+                        + "WHERE i.plugin_id=? AND b.capability_id='catalog.enrichment.v1' AND b.operation_name='enrich'",
+                Integer.class, pluginId)).isEqualTo(1);
         var webhookBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
                 Map.of("capabilityId", "payment.provider.v1", "operationName", "verifyWebhook",
                         "scope", Map.of("country", "CH"), "priority", 20), Map.class, pluginId);
@@ -1321,11 +1331,13 @@ class CatalogApiIntegrationTests {
                 io.artio.api.extensions.ExtensionManagementController.PluginView.class);
         adminExchange("/api/v1/admin/extensions/register", HttpMethod.POST, dependent,
                 io.artio.api.extensions.ExtensionManagementController.PluginView.class);
-        adminExchange("/api/v1/admin/extensions/{id}/configuration", HttpMethod.PUT, Map.of(),
+        var configuration = adminExchange("/api/v1/admin/extensions/{id}/configuration", HttpMethod.PUT, Map.of(),
                 io.artio.api.extensions.ExtensionManagementController.PluginView.class, dependent.id());
+        assertThat(configuration.getStatusCode()).as("configuration response: %s", configuration.getBody())
+                .isEqualTo(HttpStatus.OK);
 
         var install = adminExchange("/api/v1/admin/extensions/{id}/install", HttpMethod.POST, null, Map.class, dependent.id());
-        assertThat(install.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(install.getStatusCode()).as("install response: %s", install.getBody()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(install.getBody()).containsEntry("valid", false);
         assertThat(String.valueOf(install.getBody().get("errors"))).contains("dependency is not installed: common.transport");
 
@@ -1475,9 +1487,8 @@ class CatalogApiIntegrationTests {
         assertThat(archived.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(archived.getBody().archived()).isTrue();
         assertThat(archived.getBody().active()).isFalse();
-        var retained=http.getForEntity("/api/v1/products/{id}",ProductResponse.class,product.getBody().id());
-        assertThat(retained.getBody()).isNotNull();
-        assertThat(retained.getBody().sku()).isEqualTo(product.getBody().sku());
+        String retainedSku = jdbc.queryForObject("SELECT sku FROM catalog_product WHERE id=?", String.class, product.getBody().id());
+        assertThat(retainedSku).isEqualTo(product.getBody().sku());
         var blockedVariantActivation=adminExchange("/api/v1/variants/{id}/active",HttpMethod.PUT,new SetActiveRequest(true),ApiError.class,variant.getBody().id());
         assertThat(blockedVariantActivation.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         var restored=adminExchange("/api/v1/products/{id}/restore",HttpMethod.PUT,null,ProductResponse.class,product.getBody().id());
@@ -2991,6 +3002,17 @@ class CatalogApiIntegrationTests {
             Object... uriVariables) {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(adminToken);
-        return http.exchange(url, method, new HttpEntity<>(body, headers), responseType, uriVariables);
+        ResponseEntity<String> response = http.exchange(url, method, new HttpEntity<>(body, headers), String.class, uriVariables);
+        if (response.getBody() == null || response.getBody().isBlank()) {
+            return ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders()).build();
+        }
+        try {
+            T decoded = responseType == String.class ? responseType.cast(response.getBody())
+                    : mapper.readValue(response.getBody(), responseType);
+            return ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders()).body(decoded);
+        } catch (Exception invalidResponse) {
+            throw new org.springframework.web.client.RestClientException("Could not decode " + method + " " + url
+                    + " response (HTTP " + response.getStatusCode() + "): " + response.getBody(), invalidResponse);
+        }
     }
 }
