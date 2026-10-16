@@ -17,11 +17,12 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
         <div><p class="eyebrow">{{m('eyebrow')}}</p><h2 id="product-media-heading">{{productName}} {{m('titleSuffix')}}</h2></div>
         <button type="button" class="link-button" (click)="close.emit()">{{m('close')}}</button>
       </div>
-      <form class="create-form" (ngSubmit)="upload(uploadInput)">
+      @if (!uploadAvailable) { <div class="notice"><p>{{m('storagePluginRequired')}}</p><button type="button" class="link-button" (click)="installStoragePlugin.emit()">{{m('installStoragePlugin')}}</button></div> }
+      @if (uploadAvailable) { <form class="create-form" (ngSubmit)="upload(uploadInput)">
         <label>{{m('imageFile')}}<input #uploadInput type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" (change)="selectFile($event)" required></label>
         <label>{{m('alternativeText')}}<input [(ngModel)]="altText" name="altText" maxlength="500" [placeholder]="m('alternativeTextPlaceholder')"></label>
         <button class="primary" [disabled]="!file || busy">{{busy?m('uploading'):m('upload')}}</button>
-      </form>
+      </form> }
       @if (loading) { <p class="muted loading-indicator" role="status">{{m('loading')}}</p> }
       @if (error) {
         <p class="error" role="alert">{{error}}</p>
@@ -33,7 +34,7 @@ type ProductMedia = { id: string; altText: string; position: number; contentUrl:
               <img [src]="item.contentUrl" [alt]="item.altText" width="240" height="180" loading="lazy">
             <p>{{item.altText || m('noAlternativeText')}} · {{item.width}}×{{item.height}}</p>
               <div class="row">
-                <label class="link-button">{{m('replace')}}<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden (change)="replace(item,$event)"></label>
+                @if (uploadAvailable) { <label class="link-button">{{m('replace')}}<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden (change)="replace(item,$event)"></label> }
                 <button type="button" class="link-button" [disabled]="index===0" [attr.aria-label]="m('moveEarlier',{index:(index+1).toString()})" (click)="move(index,-1)">{{m('earlier')}}</button>
                 <button type="button" class="link-button" [disabled]="index===items.length-1" [attr.aria-label]="m('moveLater',{index:(index+1).toString()})" (click)="move(index,1)">{{m('later')}}</button>
                 <button type="button" class="link-button danger" [attr.aria-label]="m('deleteImage',{index:(index+1).toString()})" (click)="remove(item)">{{m('delete')}}</button>
@@ -70,12 +71,14 @@ export class ProductMediaAdminComponent implements OnChanges {
   @Input({required:true}) productId='';
   @Input() productName='';
   @Output() close = new EventEmitter<void>();
+  @Output() installStoragePlugin = new EventEmitter<void>();
   private http=inject(HttpClient);
   items:ProductMedia[]=[];
   file:File|null=null;
   altText='';
   error='';
   loading=false;
+  uploadAvailable=false;
   busy=false;
   deleteTarget:ProductMedia|null=null;
   deleteBusy=false;
@@ -83,9 +86,10 @@ export class ProductMediaAdminComponent implements OnChanges {
 
   ngOnChanges(changes:SimpleChanges):void { if(changes['productId']&&this.productId)this.load(); }
   selectFile(event:Event):void { const input=event.target as HTMLInputElement; this.file=input.files?.[0]??null; this.error=''; }
-  load():void { this.loading=true;this.error='';this.http.get<ProductMedia[]>(`/api/v1/products/${this.productId}/media`).subscribe({next:items=>{this.items=items;this.loading=false},error:e=>{this.loading=false;this.error=e.error?.message??e.error?.detail??this.m('loadFailure')}}); }
+  load():void { this.loading=true;this.error='';this.http.get<{uploadAvailable:boolean}>('/api/v1/admin/catalog/media/storage-status').subscribe({next:status=>this.uploadAvailable=status.uploadAvailable,error:()=>this.uploadAvailable=false});this.http.get<ProductMedia[]>(`/api/v1/products/${this.productId}/media`).subscribe({next:items=>{this.items=items;this.loading=false},error:e=>{this.loading=false;this.error=e.error?.message??e.error?.detail??this.m('loadFailure')}}); }
   upload(input:HTMLInputElement):void {
     if(this.busy)return;
+    if(!this.uploadAvailable){this.error=this.m('storagePluginRequired');return;}
     if(!this.file)return;
     if(this.file.size>10*1024*1024){this.error=this.m('uploadLimit');return;}
     if(!this.isSupported(this.file)){this.error=this.m('unsupported');return;}
@@ -97,7 +101,7 @@ export class ProductMediaAdminComponent implements OnChanges {
     });
   }
   replace(item:ProductMedia,event:Event):void {
-    const input=event.target as HTMLInputElement;const file=input.files?.[0];input.value='';if(!file)return;
+    const input=event.target as HTMLInputElement;const file=input.files?.[0];input.value='';if(!file)return;if(!this.uploadAvailable){this.error=this.m('storagePluginRequired');return;}
     if(file.size>10*1024*1024){this.error=this.m('uploadLimit');return;}
     if(!this.isSupported(file)){this.error=this.m('unsupported');return;}
     const form=new FormData();form.append('file',file,file.name);

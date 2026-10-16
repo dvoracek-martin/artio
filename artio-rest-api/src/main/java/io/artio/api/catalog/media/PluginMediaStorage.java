@@ -38,6 +38,10 @@ public final class PluginMediaStorage implements MediaStorage {
         this(invoker, jdbc, mapper, null);
     }
 
+    public boolean hasEnabledStorageBinding() {
+        return invoker.hasEnabledBinding("storage.object.v1", "put");
+    }
+
     @Override
     public void store(String key, byte[] content) {
         String checksum = sha256(content);

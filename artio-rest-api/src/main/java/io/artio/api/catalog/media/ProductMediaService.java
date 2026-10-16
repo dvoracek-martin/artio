@@ -34,7 +34,12 @@ public class ProductMediaService {
         this.storage = storage;
     }
 
+    public boolean isUploadAvailable() {
+        return storage instanceof PluginMediaStorage pluginStorage && pluginStorage.hasEnabledStorageBinding();
+    }
+
     public MediaView upload(UUID productId, byte[] uploaded, String altText) {
+        requirePluginStorage();
         lockProduct(productId);
         Integer currentCount = jdbc.queryForObject("SELECT count(*) FROM catalog_product_media WHERE product_id=?", Integer.class, productId);
         if (currentCount != null && currentCount >= MAX_MEDIA_PER_PRODUCT) throw new ResponseStatusException(HttpStatus.CONFLICT, "A product cannot have more than 100 images");
@@ -88,6 +93,7 @@ public class ProductMediaService {
     }
 
     public MediaView replace(UUID productId, UUID mediaId, byte[] uploaded, String altText) {
+        requirePluginStorage();
         lockProduct(productId);
         if (uploaded == null || uploaded.length == 0) throw new IllegalArgumentException("Choose an image file");
         if (uploaded.length > MAX_UPLOAD_BYTES) throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "Image upload is limited to 10 MiB");
@@ -225,6 +231,12 @@ public class ProductMediaService {
     private void requireProduct(UUID productId) {
         if (jdbc.query("SELECT 1 FROM catalog_product WHERE id=?", (rs, n) -> rs.getInt(1), productId).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product not found");
+        }
+    }
+
+    private void requirePluginStorage() {
+        if (!isUploadAvailable()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "MEDIA_STORAGE_PLUGIN_REQUIRED");
         }
     }
 

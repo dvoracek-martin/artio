@@ -50,7 +50,10 @@
     @if (step===2) {
       <div class="wizard-form">
         <p class="muted">{{t('imageHelp')}}</p>
+        @if (!uploadAvailable) { <div class="notice"><p>{{t('storagePluginRequired')}}</p><button type="button" class="link-button" (click)="installStoragePlugin.emit()">{{t('installStoragePlugin')}}</button></div> }
+        @if (uploadAvailable) {
         <label class="upload-zone" (dragover)="$event.preventDefault()" (drop)="drop($event)"><span class="upload-symbol">↑</span><strong>{{t('dropImages')}}</strong><span>{{t('or')}} <em>{{t('browseFiles')}}</em></span><small>{{t('imageLimits')}}</small><input type="file" accept="image/jpeg,image/png" multiple (change)="selectImages($event)" [attr.aria-label]="t('chooseImages')"></label>
+        }
         <div class="wizard-image-grid">@for (image of images; track image; let index = $index) {
           <article><div class="image-preview"><img [src]="image.url" [alt]="image.alt">@if (index===0) {
             <span class="cover-badge">{{t('coverImage')}}</span>

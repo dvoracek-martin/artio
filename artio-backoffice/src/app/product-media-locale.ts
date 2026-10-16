@@ -7,7 +7,7 @@ const COPY = {
     replace: 'Replace', earlier: '← Earlier', later: 'Later →', moveEarlier: 'Move image {index} earlier', moveLater: 'Move image {index} later',
     delete: 'Delete', deleteImage: 'Delete image {index}', empty: 'No product images yet.', loading: 'Loading product images…',
     loadFailure: 'Could not load product images.', uploadLimit: 'Image uploads are limited to 10 MiB.', unsupported: 'Choose a JPEG or PNG image.',
-    uploadFailure: 'Could not upload the image.', replaceFailure: 'Could not replace the image.', reorderFailure: 'Could not reorder images.'
+    uploadFailure: 'Could not upload the image.', storagePluginRequired: 'Install an image storage plugin from the Storage category before uploading or replacing images.', installStoragePlugin: 'Browse storage plugins', replaceFailure: 'Could not replace the image.', reorderFailure: 'Could not reorder images.'
   },
   de: {
     eyebrow: 'KATALOGMEDIEN', titleSuffix: 'Bilder', close: 'Schließen', imageFile: 'Bilddatei', alternativeText: 'Alternativtext',
@@ -15,7 +15,7 @@ const COPY = {
     replace: 'Ersetzen', earlier: '← Weiter nach oben', later: 'Weiter nach unten →', moveEarlier: 'Bild {index} nach oben verschieben', moveLater: 'Bild {index} nach unten verschieben',
     delete: 'Löschen', deleteImage: 'Bild {index} löschen', empty: 'Noch keine Produktbilder vorhanden.', loading: 'Produktbilder werden geladen…',
     loadFailure: 'Produktbilder konnten nicht geladen werden.', uploadLimit: 'Bilder dürfen höchstens 10 MiB groß sein.', unsupported: 'Wählen Sie ein JPEG- oder PNG-Bild aus.',
-    uploadFailure: 'Das Bild konnte nicht hochgeladen werden.', replaceFailure: 'Das Bild konnte nicht ersetzt werden.', reorderFailure: 'Die Bildreihenfolge konnte nicht geändert werden.'
+    uploadFailure: 'Das Bild konnte nicht hochgeladen werden.', storagePluginRequired: 'Installieren Sie vor dem Hochladen oder Ersetzen von Bildern ein Bildspeicher-Plugin aus der Kategorie Speicher.', installStoragePlugin: 'Speicher-Plugins ansehen', replaceFailure: 'Das Bild konnte nicht ersetzt werden.', reorderFailure: 'Die Bildreihenfolge konnte nicht geändert werden.'
   },
   it: {
     eyebrow: 'MEDIA DEL CATALOGO', titleSuffix: 'immagini', close: 'Chiudi', imageFile: 'File immagine', alternativeText: 'Testo alternativo',
@@ -23,7 +23,7 @@ const COPY = {
     replace: 'Sostituisci', earlier: '← Anticipa', later: 'Posticipa →', moveEarlier: 'Anticipa immagine {index}', moveLater: 'Posticipa immagine {index}',
     delete: 'Elimina', deleteImage: 'Elimina immagine {index}', empty: 'Non ci sono ancora immagini del prodotto.', loading: 'Caricamento delle immagini del prodotto…',
     loadFailure: 'Impossibile caricare le immagini del prodotto.', uploadLimit: 'Le immagini non possono superare 10 MiB.', unsupported: 'Scegli un’immagine JPEG o PNG.',
-    uploadFailure: 'Impossibile caricare l’immagine.', replaceFailure: 'Impossibile sostituire l’immagine.', reorderFailure: 'Impossibile riordinare le immagini.'
+    uploadFailure: 'Impossibile caricare l’immagine.', storagePluginRequired: 'Installa un plugin di archiviazione immagini dalla categoria Archiviazione prima di caricare o sostituire immagini.', installStoragePlugin: 'Sfoglia i plugin di archiviazione', replaceFailure: 'Impossibile sostituire l’immagine.', reorderFailure: 'Impossibile riordinare le immagini.'
   },
   fr: {
     eyebrow: 'MÉDIAS DU CATALOGUE', titleSuffix: 'images', close: 'Fermer', imageFile: 'Fichier image', alternativeText: 'Texte alternatif',
@@ -31,7 +31,7 @@ const COPY = {
     replace: 'Remplacer', earlier: '← Monter', later: 'Descendre →', moveEarlier: 'Monter l’image {index}', moveLater: 'Descendre l’image {index}',
     delete: 'Supprimer', deleteImage: 'Supprimer l’image {index}', empty: 'Aucune image produit pour le moment.', loading: 'Chargement des images produit…',
     loadFailure: 'Impossible de charger les images produit.', uploadLimit: 'Les images ne peuvent pas dépasser 10 Mio.', unsupported: 'Choisissez une image JPEG ou PNG.',
-    uploadFailure: 'Impossible de téléverser l’image.', replaceFailure: 'Impossible de remplacer l’image.', reorderFailure: 'Impossible de réorganiser les images.'
+    uploadFailure: 'Impossible de téléverser l’image.', storagePluginRequired: 'Installez un plugin de stockage d’images dans la catégorie Stockage avant d’importer ou de remplacer des images.', installStoragePlugin: 'Voir les plugins de stockage', replaceFailure: 'Impossible de remplacer l’image.', reorderFailure: 'Impossible de réorganiser les images.'
   }
 } as const;
 

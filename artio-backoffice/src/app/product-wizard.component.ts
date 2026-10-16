@@ -4,7 +4,7 @@ import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, ChangeDetec
 import { FormsModule } from '@angular/forms';
 import { SearchSelectComponent, SelectOption } from './search-select.component';
 import { ProductWizardTextKey, productWizardText } from './product-wizard-locale';
-import { firstValueFrom, forkJoin, timeout } from 'rxjs';
+import { catchError, firstValueFrom, forkJoin, of, timeout } from 'rxjs';
 
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
 type Brand = { id: string; name: string; active: boolean };
@@ -19,6 +19,7 @@ type ImageDraft = { file: File; url: string; alt: string; uploaded: boolean };
 export class ProductWizardComponent implements OnInit, OnDestroy {
   @Output() cancel = new EventEmitter<void>();
   @Output() created = new EventEmitter<string>();
+  @Output() installStoragePlugin = new EventEmitter<void>();
   private http = inject(HttpClient);
   private destroyed = false;
   get steps():string[]{return [this.t('stepEssentials'),this.t('stepOrganization'),this.t('stepImages'),this.t('stepReview')]}
@@ -38,14 +39,15 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   publish = false;
   categoryName = '';
   creatingCategory = false;
+  uploadAvailable = false;
 
   ngOnInit(): void { this.loadOptions(); }
   ngOnDestroy(): void { this.destroyed = true; this.images.forEach(image => URL.revokeObjectURL(image.url)); }
   loadOptions(): void {
     this.loading = true;
     this.error = '';
-    forkJoin({ categories: this.http.get<Category[]>('/api/v1/categories'), brands: this.http.get<Brand[]>('/api/v1/brands'), attributes: this.http.get<Attribute[]>('/api/v1/attribute-definitions') }).pipe(timeout({ first: 30000 })).subscribe({
-      next: data => { this.categories = data.categories.filter(x => x.active); this.brands = data.brands.filter(x => x.active); this.attributes = data.attributes.filter(x => x.active); this.loading = false; },
+    forkJoin({ categories: this.http.get<Category[]>('/api/v1/categories'), brands: this.http.get<Brand[]>('/api/v1/brands'), attributes: this.http.get<Attribute[]>('/api/v1/attribute-definitions'), storage: this.http.get<{ uploadAvailable: boolean }>('/api/v1/admin/catalog/media/storage-status').pipe(catchError(() => of({ uploadAvailable: false }))) }).pipe(timeout({ first: 30000 })).subscribe({
+      next: data => { this.categories = data.categories.filter(x => x.active); this.brands = data.brands.filter(x => x.active); this.attributes = data.attributes.filter(x => x.active); this.uploadAvailable = data.storage.uploadAvailable; this.loading = false; },
       error: e => { this.loading = false; this.error = this.message(e, this.t('loadFailure')); }
     });
   }
@@ -107,6 +109,7 @@ export class ProductWizardComponent implements OnInit, OnDestroy {
   drop(event: DragEvent): void { event.preventDefault(); if (!this.busy && !this.productId) this.addImages(Array.from(event.dataTransfer?.files ?? [])); }
   addImages(files: File[]): void {
     this.error = '';
+    if (!this.uploadAvailable) { this.error = this.t('storagePluginRequired'); return; }
     for (const file of files) {
       if (this.images.length >= 100) { this.error = this.t('imageCountError'); break; }
       if (!['image/jpeg', 'image/png'].includes(file.type) || !file.size || file.size > 10 * 1024 * 1024) { this.error = this.t('imageFileError',{file:file.name}); continue; }

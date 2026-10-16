@@ -80,7 +80,7 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
 }
 @if (tab==='productNew') {
   @defer (when tab==='productNew') {
-  <artio-product-wizard (cancel)="navigateTo('products')" (created)="productCreated($event)"></artio-product-wizard>
+  <artio-product-wizard (cancel)="navigateTo('products')" (created)="productCreated($event)" (installStoragePlugin)="navigateTo('extensions')"></artio-product-wizard>
   } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingProductEditor')}}</p> }
 }
 @if (tab==='products') {
@@ -110,7 +110,7 @@ type Product={id:string;name:string;description:string;sku:string;active:boolean
   <ng-container #ordersAdminHost></ng-container>@if (ordersAdminLoading) { <p class="muted" role="status">{{ordersAdminLoadingText()}}</p> }
 }
 @if (mediaProduct) {
-  @defer (when mediaProduct !== null) { <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null"></artio-product-media-admin> } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingProductMedia')}}</p> }
+  @defer (when mediaProduct !== null) { <artio-product-media-admin [productId]="mediaProduct.id" [productName]="mediaProduct.name" (close)="mediaProduct=null" (installStoragePlugin)="mediaProduct=null; navigateTo('extensions')"></artio-product-media-admin> } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingProductMedia')}}</p> }
   }@if (tab==='catalogData') {
   @defer (when tab==='catalogData') { <artio-catalog-metadata-admin></artio-catalog-metadata-admin> } @placeholder { <p class="muted loading-indicator" role="status">{{t('loadingCatalogData')}}</p> }
   }@if (tab==='inventory') {
