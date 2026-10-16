@@ -12,19 +12,42 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 /** Loads and validates immutable distribution manifests packaged with the Core API. */
 @Component
 public class RegionalDistributionCatalog {
     private static final Pattern ID = Pattern.compile("[a-z][a-z0-9]*(?:-[a-z0-9]+)*-v[1-9][0-9]*");
+    private static final RegionalDistribution.PluginRecommendation DEV_MINIO_RECOMMENDATION =
+            new RegionalDistribution.PluginRecommendation(
+                    "storage.artio-minio",
+                    "MinIO object storage (development)",
+                    "Managed MinIO or an administrator-configured external S3 endpoint for Artio object storage. Development profile only; the current MinIO Community build has known high-severity vulnerabilities and must not be used for production or customer data.",
+                    List.of("storage.object.v1"),
+                    "Development-only Switzerland recommendation. The owner has approved the known MinIO Community vulnerabilities for isolated local development with disposable data.",
+                    true);
     private final Map<String, RegionalDistribution> distributions;
 
+    @Autowired
+    public RegionalDistributionCatalog(ObjectMapper mapper, Environment environment) {
+        this(mapper, environment.acceptsProfiles(Profiles.of("dev")));
+    }
+
     public RegionalDistributionCatalog(ObjectMapper mapper) {
+        this(mapper, false);
+    }
+
+    private RegionalDistributionCatalog(ObjectMapper mapper, boolean developmentProfile) {
         try {
             Resource[] resources = new PathMatchingResourcePatternResolver()
                     .getResources("classpath*:distributions/*.json");
-            List<RegionalDistribution> loaded = Arrays.stream(resources).map(resource -> read(mapper, resource)).toList();
+            List<RegionalDistribution> loaded = Arrays.stream(resources)
+                    .map(resource -> read(mapper, resource))
+                    .map(distribution -> developmentProfile ? addDevelopmentRecommendations(distribution) : distribution)
+                    .toList();
             for (RegionalDistribution distribution : loaded) validate(distribution);
             this.distributions = loaded.stream().collect(Collectors.toUnmodifiableMap(
                     RegionalDistribution::id, distribution -> distribution));
@@ -43,6 +66,20 @@ public class RegionalDistributionCatalog {
         if (distribution == null) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.NOT_FOUND, "Regional distribution was not found");
         return distribution;
+    }
+
+    private static RegionalDistribution addDevelopmentRecommendations(RegionalDistribution distribution) {
+        if (!"switzerland-v1".equals(distribution.id())
+                || distribution.pluginRecommendations().stream()
+                        .anyMatch(recommendation -> DEV_MINIO_RECOMMENDATION.pluginId().equals(recommendation.pluginId()))) {
+            return distribution;
+        }
+        List<RegionalDistribution.PluginRecommendation> recommendations =
+                new java.util.ArrayList<>(distribution.pluginRecommendations());
+        recommendations.add(DEV_MINIO_RECOMMENDATION);
+        return new RegionalDistribution(distribution.manifestVersion(), distribution.id(), distribution.name(),
+                distribution.description(), distribution.countryCode(), distribution.currencyCode(),
+                distribution.defaultLocale(), distribution.availableLanguages(), distribution.timezone(), recommendations);
     }
 
     private static RegionalDistribution read(ObjectMapper mapper, Resource resource) {
