@@ -53,6 +53,8 @@ describe('InventoryAdminComponent', () => {
       fixture.detectChanges();
       await new Promise(resolve => setTimeout(resolve, 0));
       http.expectOne('/api/v1/variants/variant-1').flush({ id: 'variant-1', productId: 'product-1', name: 'Widget', sku: 'W-1', active: true });
+      await new Promise(resolve => setTimeout(resolve, 250));
+      http.expectOne('/api/v1/admin/catalog/products?q=&page=0&size=10&state=ALL&sort=name&direction=asc').flush({ items: [] });
       fixture.componentInstance.adjust();
       fixture.detectChanges();
       await new Promise(resolve => setTimeout(resolve, 0));
