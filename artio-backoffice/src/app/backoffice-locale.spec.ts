@@ -16,6 +16,18 @@ describe('shared Backoffice loading copy', () => {
   });
 
   it.each([
+    ['en', 'Email verified', 'Email not verified', 'Manual adjustment'],
+    ['de', 'E-Mail bestätigt', 'E-Mail nicht bestätigt', 'Manuelle Anpassung'],
+    ['it', 'Email verificata', 'Email non verificata', 'Rettifica manuale'],
+    ['fr', 'E-mail vérifié', 'E-mail non vérifié', 'Ajustement manuel'],
+  ] as const)('localizes customer verification and manual loyalty history in %s', (locale, verified, unverified, manual) => {
+    const language = locale as BackofficeLocale;
+    expect(backofficeText(language, 'usersEmailVerified')).toBe(verified);
+    expect(backofficeText(language, 'usersEmailUnverified')).toBe(unverified);
+    expect(backofficeText(language, 'usersManualTransaction')).toBe(manual);
+  });
+
+  it.each([
     ['en', 'Loading product media…', 'Loading catalog data…', 'Loading inventory…', 'Loading gift cards…'],
     ['de', 'Produktmedien werden geladen…', 'Katalogdaten werden geladen…', 'Bestand wird geladen…', 'Geschenkkarten werden geladen…'],
     ['it', 'Caricamento immagini prodotto…', 'Caricamento dati catalogo…', 'Caricamento inventario…', 'Caricamento gift card…'],
