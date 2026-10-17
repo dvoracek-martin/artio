@@ -883,6 +883,12 @@ class CatalogApiIntegrationTests {
                 .filter(subscription -> subscriptionId.toString().equals(subscription.get("subscriptionId")))
                 .findFirst().orElseThrow()).containsEntry("subscriptionState", "PAUSED");
 
+        var thirdInstance = adminExchange("/api/v1/admin/extensions/{id}/instances", HttpMethod.POST,
+                Map.of("instanceKey", "account-at", "configuration", Map.of("account", "AT", "apiKey", "third-private-key")),
+                Map.class, pluginId);
+        assertThat(thirdInstance.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID thirdInstanceId = UUID.fromString(thirdInstance.getBody().get("instanceId").toString());
+
         var binding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
                 Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
                         "scope", Map.of("country", "CH"), "priority", 20), Map.class, pluginId);
@@ -918,6 +924,8 @@ class CatalogApiIntegrationTests {
         var aggregateArrivals = new java.util.concurrent.CountDownLatch(2);
         var aggregateInFlight = new java.util.concurrent.atomic.AtomicInteger();
         var aggregatePeakConcurrency = new java.util.concurrent.atomic.AtomicInteger();
+        var unavailableStorageRuntime = new java.util.concurrent.atomic.AtomicReference<String>();
+        var unavailableStorageKey = new java.util.concurrent.atomic.AtomicReference<String>();
         org.mockito.Mockito.when(aggregateRuntime.invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.eq("payment.provider.v1"), org.mockito.ArgumentMatchers.eq("listMethods"),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
@@ -954,7 +962,7 @@ class CatalogApiIntegrationTests {
                 Map.of("capabilityId", "payment.provider.v1", "operationName", "verifyWebhook",
                         "scope", Map.of("country", "CH"), "priority", 20), Map.class, pluginId);
         assertThat(webhookBinding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        for (UUID storageInstance : List.of(instanceId, secondInstanceId)) {
+        for (UUID storageInstance : List.of(instanceId, secondInstanceId, thirdInstanceId)) {
             var storageBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
                     Map.of("capabilityId", "storage.object.v1", "operationName", "put", "scope", Map.of(),
                             "priority", 5, "instanceId", storageInstance), Map.class, pluginId);
@@ -964,7 +972,7 @@ class CatalogApiIntegrationTests {
         jdbc.update("INSERT INTO catalog_media_storage_objects(storage_key,content_checksum,byte_length,primary_instance_id,"
                         + "primary_release_id,primary_configuration_generation,replica_instance_ids,provider_versions) "
                         + "VALUES (?, ?, 1, ?, ?, 1, ?::jsonb, '{}'::jsonb)", protectedMediaKey, "a".repeat(64), instanceId,
-                v2ReleaseId, "[\"" + secondInstanceId + "\"]");
+                v2ReleaseId, "[\"" + secondInstanceId + "\",\"" + thirdInstanceId + "\"]");
         assertThat(adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}", HttpMethod.DELETE, null, Map.class,
                 pluginId, instanceId).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         jdbc.update("DELETE FROM catalog_media_storage_objects WHERE storage_key=?", protectedMediaKey);
@@ -1039,6 +1047,8 @@ class CatalogApiIntegrationTests {
             var request = new com.fasterxml.jackson.databind.ObjectMapper().readTree((String) call.getArgument(6));
             String objectKey = request.path("key").asText();
             if ("put".equals(operation)) {
+                if (runtimeIdentity.equals(unavailableStorageRuntime.get()) && objectKey.equals(unavailableStorageKey.get()))
+                    return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(503, "{}");
                 String uploadId = request.path("uploadId").asText();
                 String chunkKey = runtimeIdentity + ":" + uploadId;
                 var stream = pendingChunks.computeIfAbsent(chunkKey, ignored -> new java.io.ByteArrayOutputStream());
@@ -1079,6 +1089,8 @@ class CatalogApiIntegrationTests {
                 new com.fasterxml.jackson.databind.ObjectMapper(), encryption, fakeRuntimeProvider);
         var pluginMediaStorage = new io.artio.api.catalog.media.PluginMediaStorage(storageInvoker, jdbc,
                 new com.fasterxml.jackson.databind.ObjectMapper());
+        jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='ENABLED' WHERE instance_id IN (?,?,?)",
+                instanceId, secondInstanceId, thirdInstanceId);
         String testMediaKey = UUID.randomUUID() + ".png";
         byte[] testMediaBytes = "v2 replicated media".getBytes(StandardCharsets.UTF_8);
         pluginMediaStorage.store(testMediaKey, testMediaBytes);
@@ -1086,7 +1098,37 @@ class CatalogApiIntegrationTests {
                 .toList().getLast();
         assertThat(jdbc.queryForObject("SELECT replica_instance_ids::text FROM catalog_media_storage_objects WHERE storage_key=?", String.class,
                 testMediaKey)).contains(expectedReplicaId.toString());
+        assertThat(jdbc.queryForObject("SELECT jsonb_array_length(replica_instance_ids) FROM catalog_media_storage_objects WHERE storage_key=?",
+                Integer.class, testMediaKey)).isEqualTo(2);
         assertThat(pluginMediaStorage.read(testMediaKey)).isEqualTo(testMediaBytes);
+
+        // A partial replica outage leaves an immutable three-instance plan in UNKNOWN. Once the
+        // provider returns, retry the exact storage request on those same instances and converge.
+        String recoveredMediaKey = UUID.randomUUID() + ".png";
+        List<UUID> expectedPlacement = List.of(instanceId, secondInstanceId, thirdInstanceId).stream()
+                .sorted(java.util.Comparator.comparing(UUID::toString)).toList();
+        String unavailableRuntime = jdbc.queryForObject("SELECT runtime_identity FROM extension_plugin_instances WHERE instance_id=?",
+                String.class, expectedPlacement.getLast());
+        unavailableStorageRuntime.set(unavailableRuntime);
+        unavailableStorageKey.set(recoveredMediaKey);
+        assertThatThrownBy(() -> pluginMediaStorage.store(recoveredMediaKey, testMediaBytes))
+                .isInstanceOf(io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException.class);
+        String recoveredPutKey = UUID.nameUUIDFromBytes(("artio-media:put:0:" + recoveredMediaKey).getBytes(StandardCharsets.UTF_8)).toString();
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE idempotency_key=?",
+                String.class, recoveredPutKey)).isEqualTo("UNKNOWN");
+        assertThat(jdbc.queryForObject("SELECT jsonb_array_length(plan_snapshot->'targets') FROM extension_operation_attempts WHERE idempotency_key=?",
+                Integer.class, recoveredPutKey)).isEqualTo(3);
+        unavailableStorageRuntime.set(null);
+        unavailableStorageKey.set(null);
+        pluginMediaStorage.store(recoveredMediaKey, testMediaBytes);
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE idempotency_key=?",
+                String.class, recoveredPutKey)).isEqualTo("SUCCEEDED");
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM extension_operation_attempts WHERE idempotency_key=?",
+                Integer.class, recoveredPutKey)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT jsonb_array_length(replica_instance_ids) FROM catalog_media_storage_objects WHERE storage_key=?",
+                Integer.class, recoveredMediaKey)).isEqualTo(2);
+        assertThat(pluginMediaStorage.read(recoveredMediaKey)).isEqualTo(testMediaBytes);
+        pluginMediaStorage.delete(recoveredMediaKey);
         String readIdempotencyKey = UUID.nameUUIDFromBytes(("artio-media:get:0:" + testMediaKey).getBytes(StandardCharsets.UTF_8)).toString();
         String encryptedReadResult = jdbc.queryForObject("SELECT result_snapshot::text FROM extension_operation_attempts WHERE idempotency_key=?",
                 String.class, readIdempotencyKey);
@@ -1144,7 +1186,7 @@ class CatalogApiIntegrationTests {
                 objectPutKey, Map.of("key", "media-object", "contentBase64", "aGVsbG8=", "sha256", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")))
                 .isInstanceOf(io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException.class);
         assertThat(jdbc.queryForObject("SELECT jsonb_array_length(plan_snapshot->'targets') FROM extension_operation_attempts WHERE idempotency_key=?",
-                Integer.class, objectPutKey)).isEqualTo(2);
+                Integer.class, objectPutKey)).isEqualTo(3);
         assertThat(jdbc.queryForObject("SELECT plan_snapshot->>'policy' FROM extension_operation_attempts WHERE idempotency_key=?",
                 String.class, objectPutKey)).isEqualTo("PRIMARY_REPLICAS");
 
@@ -1222,9 +1264,9 @@ class CatalogApiIntegrationTests {
         Map<?, ?> pluginSummary = java.util.Arrays.stream(summary.getBody()).filter(plugin -> pluginId.equals(plugin.get("id")))
                 .findFirst().orElseThrow();
         assertThat(pluginSummary.get("compatibilityModes")).isEqualTo("CAPABILITY_V2");
-        assertThat(pluginSummary.get("instanceCount")).isEqualTo(2);
-        assertThat(pluginSummary.get("bindingCount")).isEqualTo(8);
-        assertThat(pluginSummary.get("subscriptionCount")).isEqualTo(2);
+        assertThat(pluginSummary.get("instanceCount")).isEqualTo(3);
+        assertThat(pluginSummary.get("bindingCount")).isEqualTo(9);
+        assertThat(pluginSummary.get("subscriptionCount")).isEqualTo(3);
 
         UUID deadDeliveryId = UUID.randomUUID();
         UUID deadEventId = UUID.randomUUID();

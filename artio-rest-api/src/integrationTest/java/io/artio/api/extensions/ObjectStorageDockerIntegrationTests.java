@@ -26,7 +26,7 @@ class ObjectStorageDockerIntegrationTests {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
-    void storesReadsAndTombstonesObjectsAcrossTwoIsolatedPluginInstances() throws Exception {
+    void storesReadsAndTombstonesObjectsAcrossThreeIsolatedPluginInstances() throws Exception {
         String image = System.getenv("ARTIO_TEST_OBJECT_STORAGE_IMAGE");
         assumeTrue(image != null, "Run scripts/verify-extension-runtime.ps1 to build the pinned object-storage fixture image");
         DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
@@ -39,6 +39,7 @@ class ObjectStorageDockerIntegrationTests {
             String pluginId = "runtime.e2e" + runId + ".storage";
             String first = "instance-" + UUID.randomUUID().toString().replace("-", "");
             String second = "instance-" + UUID.randomUUID().toString().replace("-", "");
+            String third = "instance-" + UUID.randomUUID().toString().replace("-", "");
             docker.createNetworkCmd().withName(network).withDriver("bridge")
                     .withLabels(Map.of("io.artio.test.run", runId)).exec();
             var runtime = new DockerExtensionRuntime(docker, network, 8080,
@@ -50,16 +51,19 @@ class ObjectStorageDockerIntegrationTests {
             try {
                 runtime.installInstance(first, release);
                 runtime.installInstance(second, release);
+                runtime.installInstance(third, release);
                 runtime.enableInstance(first, release, 1, Map.of());
                 runtime.enableInstance(second, release, 1, Map.of());
+                runtime.enableInstance(third, release, 1, Map.of());
                 assertThat(runtime.healthInstance(first, release).healthy()).isTrue();
                 assertThat(runtime.healthInstance(second, release).healthy()).isTrue();
+                assertThat(runtime.healthInstance(third, release).healthy()).isTrue();
 
                 byte[] bytes = "isolated durable product media".getBytes(StandardCharsets.UTF_8);
                 String checksum = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
                 String key = UUID.randomUUID() + ".png";
                 String upload = UUID.randomUUID().toString();
-                for (String instance : List.of(first, second)) {
+                for (String instance : List.of(first, second, third)) {
                     String putKey = UUID.randomUUID().toString();
                     var put = runtime.invoke(instance, 1, "storage.object.v1", "put", putKey, "{}",
                             MAPPER.writeValueAsString(Map.of("key", key, "uploadId", upload, "chunkIndex", 0,
@@ -68,7 +72,7 @@ class ObjectStorageDockerIntegrationTests {
                             Duration.ofSeconds(5));
                     assertThat(MAPPER.readTree(put.responseJson()).path("sha256").asText()).isEqualTo(checksum);
                 }
-                for (String instance : List.of(first, second)) {
+                for (String instance : List.of(first, second, third)) {
                     var get = runtime.invoke(instance, 1, "storage.object.v1", "get", UUID.randomUUID().toString(), "{}",
                             MAPPER.writeValueAsString(Map.of("key", key, "chunkIndex", 0,
                                     "placementRole", instance.equals(first) ? "PRIMARY" : "REPLICA")), Duration.ofSeconds(5));
@@ -77,14 +81,20 @@ class ObjectStorageDockerIntegrationTests {
 
                 String firstVolume = DockerExtensionRuntime.volumeName(first, "main", "/data");
                 String secondVolume = DockerExtensionRuntime.volumeName(second, "main", "/data");
-                assertThat(firstVolume).isNotEqualTo(secondVolume);
+                String thirdVolume = DockerExtensionRuntime.volumeName(third, "main", "/data");
+                assertThat(firstVolume).isNotEqualTo(secondVolume).isNotEqualTo(thirdVolume);
+                assertThat(secondVolume).isNotEqualTo(thirdVolume);
                 var firstVolumeInfo = docker.inspectVolumeCmd(firstVolume).exec();
                 var secondVolumeInfo = docker.inspectVolumeCmd(secondVolume).exec();
+                var thirdVolumeInfo = docker.inspectVolumeCmd(thirdVolume).exec();
                 assertThat(firstVolumeInfo.getLabels()).containsEntry("io.artio.extension", pluginId)
                         .containsEntry("io.artio.extension.runtime", first)
                         .containsEntry("io.artio.managed", "true");
                 assertThat(secondVolumeInfo.getLabels()).containsEntry("io.artio.extension", pluginId)
                         .containsEntry("io.artio.extension.runtime", second)
+                        .containsEntry("io.artio.managed", "true");
+                assertThat(thirdVolumeInfo.getLabels()).containsEntry("io.artio.extension", pluginId)
+                        .containsEntry("io.artio.extension.runtime", third)
                         .containsEntry("io.artio.managed", "true");
 
                 // A plugin restart replaces its container but must retain its separately scoped data volume.
@@ -110,11 +120,16 @@ class ObjectStorageDockerIntegrationTests {
                 var unaffected = runtime.invoke(second, 1, "storage.object.v1", "get", UUID.randomUUID().toString(), "{}",
                         MAPPER.writeValueAsString(Map.of("key", key, "chunkIndex", 0, "placementRole", "REPLICA")), Duration.ofSeconds(5));
                 assertThat(MAPPER.readTree(unaffected.responseJson()).path("sha256").asText()).isEqualTo(checksum);
+                var thirdUnaffected = runtime.invoke(third, 1, "storage.object.v1", "get", UUID.randomUUID().toString(), "{}",
+                        MAPPER.writeValueAsString(Map.of("key", key, "chunkIndex", 0, "placementRole", "REPLICA")), Duration.ofSeconds(5));
+                assertThat(MAPPER.readTree(thirdUnaffected.responseJson()).path("sha256").asText()).isEqualTo(checksum);
             } finally {
                 runtime.disableInstance(first, pluginId);
                 runtime.uninstallInstance(first, pluginId);
                 runtime.disableInstance(second, pluginId);
                 runtime.uninstallInstance(second, pluginId);
+                runtime.disableInstance(third, pluginId);
+                runtime.uninstallInstance(third, pluginId);
                 docker.removeNetworkCmd(network).exec();
             }
         }
