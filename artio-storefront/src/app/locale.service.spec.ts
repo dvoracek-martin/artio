@@ -24,6 +24,19 @@ describe('LocaleService', () => {
   });
 
   it.each([
+    ['en', 'Cancel order', 'Cancel this order and expire its pending payment checkout?', 'Confirm cancellation', 'Keep order'],
+    ['de', 'Bestellung stornieren', 'Bestellung stornieren und den ausstehenden Zahlungsvorgang beenden?', 'Stornierung bestätigen', 'Bestellung behalten'],
+    ['fr', 'Annuler la commande', 'Annuler cette commande et expirer le paiement en attente ?', 'Confirmer l’annulation', 'Conserver la commande'],
+    ['it', 'Annulla ordine', 'Annullare questo ordine e la sessione di pagamento in sospeso?', 'Conferma annullamento', 'Mantieni ordine']
+  ] as const)('localizes customer order cancellation copy in %s', (language, title, message, confirm, keep) => {
+    const supportedLocale = language as StoreLocale;
+    expect(locale.translate('cancelOrder', supportedLocale)).toBe(title);
+    expect(locale.translate('cancelConfirm', supportedLocale)).toBe(message);
+    expect(locale.translate('confirmCancelOrder', supportedLocale)).toBe(confirm);
+    expect(locale.translate('keepOrder', supportedLocale)).toBe(keep);
+  });
+
+  it.each([
     ['de-CH', 'de'],
     ['fr_CH', 'fr'],
     ['it', 'it'],

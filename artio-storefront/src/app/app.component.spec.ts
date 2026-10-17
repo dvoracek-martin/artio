@@ -96,29 +96,44 @@ describe('Storefront payment return', () => {
     expect(http.post).toHaveBeenCalledWith('/api/v1/payments/provider/orders/paypal-order/capture?token=provider-token', {});
   });
 
-  it('confirms customer order cancellation in an accessible dialog before calling Core', () => {
+  it('traps keyboard focus in the order cancellation dialog and confirms only after an accessible choice', async () => {
     const { fixture, http } = createComponent('PENDING', true, '/orders');
     const buttons = () => [...fixture.nativeElement.querySelectorAll('button')] as HTMLButtonElement[];
     buttons().find(button => button.textContent?.trim() === 'Cancel order')?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
 
     const dialog = fixture.nativeElement.querySelector('[role="dialog"][aria-modal="true"]');
     expect(dialog?.getAttribute('aria-labelledby')).toBe('cancel-order-title');
     expect(dialog?.textContent).toContain('Cancel this order and expire its pending payment checkout?');
     expect(http.post.mock.calls.some(([url]) => url === '/api/v1/payments/orders/order-1/cancel')).toBe(false);
-
-    buttons().find(button => button.textContent?.trim() === 'Keep order')?.click();
+    const closeButton = dialog?.querySelector('.return-close') as HTMLButtonElement;
+    expect(document.activeElement).toBe(closeButton);
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
     fixture.detectChanges();
+    const keepButton = [...dialog.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Keep order') as HTMLButtonElement;
+    expect(document.activeElement).toBe(keepButton);
+    keepButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(closeButton);
+
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('[aria-labelledby="cancel-order-title"]')).toBeNull();
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel order');
 
     buttons().find(button => button.textContent?.trim() === 'Cancel order')?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
     buttons().find(button => button.textContent?.trim() === 'Confirm cancellation')?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
 
     expect(http.post).toHaveBeenCalledWith('/api/v1/payments/orders/order-1/cancel', {});
     expect(http.get.mock.calls.filter(([url]) => url === '/api/v1/cart/orders')).toHaveLength(2);
     expect(fixture.nativeElement.querySelector('[aria-labelledby="cancel-order-title"]')).toBeNull();
+    expect(document.activeElement?.id).toBe('order-history-title');
   });
 
   it('keeps order cancellation open and reports a localized Core conflict', () => {
