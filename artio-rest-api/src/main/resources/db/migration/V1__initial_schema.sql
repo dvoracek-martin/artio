@@ -113,6 +113,7 @@ CREATE TABLE pricing_discount_rule (
     priority INTEGER NOT NULL CHECK (priority >= 0),
     valid_from TIMESTAMP WITH TIME ZONE NOT NULL,
     valid_until TIMESTAMP WITH TIME ZONE,
+    usage_limit INTEGER CHECK (usage_limit IS NULL OR usage_limit > 0),
     active BOOLEAN NOT NULL,
     CHECK (valid_until IS NULL OR valid_until > valid_from)
 );
@@ -243,6 +244,13 @@ CREATE TABLE carts (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(
 CREATE TABLE cart_items (cart_id UUID NOT NULL REFERENCES carts(id) ON DELETE CASCADE, variant_id UUID NOT NULL, quantity INTEGER NOT NULL CHECK (quantity > 0), unit_price NUMERIC(19,4) NOT NULL CHECK (unit_price >= 0), currency CHAR(3) NOT NULL, PRIMARY KEY (cart_id, variant_id));
 CREATE TABLE orders (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), status VARCHAR(32) NOT NULL, subtotal NUMERIC(19,4) NOT NULL, tax NUMERIC(19,4) NOT NULL, shipping NUMERIC(19,4) NOT NULL, total NUMERIC(19,4) NOT NULL, currency CHAR(3) NOT NULL, shipping_address TEXT NOT NULL, billing_address TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, shipping_method_id VARCHAR(120), shipping_parcel_weight_kg NUMERIC(12,3), shipment_reference VARCHAR(255), shipping_label_url TEXT);
 CREATE TABLE order_items (id UUID PRIMARY KEY, order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE, variant_id UUID NOT NULL, quantity INTEGER NOT NULL CHECK (quantity > 0), unit_price NUMERIC(19,4) NOT NULL, currency CHAR(3) NOT NULL);
+CREATE TABLE pricing_discount_redemptions (
+  discount_rule_id UUID NOT NULL REFERENCES pricing_discount_rule(id),
+  order_id UUID NOT NULL REFERENCES orders(id),
+  redeemed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(discount_rule_id,order_id)
+);
+CREATE INDEX pricing_discount_redemptions_order_idx ON pricing_discount_redemptions(order_id);
 CREATE TABLE order_shipments (
     id UUID PRIMARY KEY,
     order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,

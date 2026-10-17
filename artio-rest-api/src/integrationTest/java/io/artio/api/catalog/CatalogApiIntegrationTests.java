@@ -2570,6 +2570,26 @@ class CatalogApiIntegrationTests {
         return orderId;
     }
 
+    private String registerCustomerToken(String prefix) {
+        String email = prefix + "-" + UUID.randomUUID() + "@example.test";
+        var registered = http.postForEntity("/api/v1/auth/register",Map.of("email",email,"password","valid-password-123",
+                "firstName","Promotion","lastName","Customer"),String.class);
+        assertThat(registered.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var login = http.postForEntity("/api/v1/auth/login",Map.of("email",email,"password","valid-password-123"),LoginResponse.class);
+        assertThat(login.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(login.getBody()).isNotNull();
+        return login.getBody().accessToken();
+    }
+
+    private void addCustomerCartItem(String token, UUID sellableId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        var result = http.exchange("/api/v1/cart/items",HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.orders.CartController.AddItemRequest(sellableId,BigDecimal.ONE,"US","WEB","US"),headers),
+                io.artio.api.orders.CartController.CartView.class);
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
     @Test
     void concurrentReservationsCannotOversellSharedStock() throws Exception {
         var warehouse = adminExchange("/api/v1/warehouses", HttpMethod.POST,
@@ -2830,6 +2850,55 @@ class CatalogApiIntegrationTests {
         } catch (IllegalStateException insufficientStock) {
             return false;
         }
+    }
+
+    @Test
+    void limitedPromotionIsRedeemedOnlyOnceAcrossConcurrentCheckouts() throws Exception {
+        var product = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Limited promotion item", "One-use promotion fixture", "PROMO" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT)), ProductResponse.class);
+        var variant = adminExchange("/api/v1/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Standard", "PROMOV" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT)), VariantResponse.class, product.getBody().id());
+        adminExchange("/api/v1/prices", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.PriceRequest(variant.getBody().id(), "US", "WEB",
+                        new BigDecimal("100.00"), "USD", java.time.Instant.now().minusSeconds(60), null),
+                io.artio.api.pricing.PricingApplicationService.PriceView.class);
+        var discount = adminExchange("/api/v1/discount-rules", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.DiscountRequest("LIMIT-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(java.util.Locale.ROOT),
+                        variant.getBody().id(), "US", new BigDecimal("10"), 0, java.time.Instant.now().minusSeconds(60), null, 1),
+                io.artio.api.pricing.PricingApplicationService.DiscountView.class);
+        assertThat(discount.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        String warehouseCode = "PROMO-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+        var warehouseResponse = adminExchange("/api/v1/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(warehouseCode, "Promotion test", "US"), String.class);
+        var warehouse = readWarehouse(warehouseResponse.getBody());
+        adminExchange("/api/v1/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryController.QuantityRequest(new BigDecimal("10")),
+                io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouse.id(), variant.getBody().id());
+
+        String firstToken = registerCustomerToken("promo-first");
+        String secondToken = registerCustomerToken("promo-second");
+        addCustomerCartItem(firstToken,variant.getBody().id());
+        addCustomerCartItem(secondToken,variant.getBody().id());
+        var firstHeaders = new HttpHeaders(); firstHeaders.setBearerAuth(firstToken); firstHeaders.set("Idempotency-Key","promo-first-"+UUID.randomUUID());
+        var secondHeaders = new HttpHeaders(); secondHeaders.setBearerAuth(secondToken); secondHeaders.set("Idempotency-Key","promo-second-"+UUID.randomUUID());
+        var request = new io.artio.api.orders.CartController.CheckoutRequest("1 Test Street",null,"US","en-US");
+        var firstFuture = CompletableFuture.supplyAsync(() -> http.exchange("/api/v1/cart/checkout",HttpMethod.POST,new HttpEntity<>(request,firstHeaders),String.class));
+        var secondFuture = CompletableFuture.supplyAsync(() -> http.exchange("/api/v1/cart/checkout",HttpMethod.POST,new HttpEntity<>(request,secondHeaders),String.class));
+        var firstOrder = firstFuture.get(30,TimeUnit.SECONDS);
+        var secondOrder = secondFuture.get(30,TimeUnit.SECONDS);
+        assertThat(firstOrder.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(secondOrder.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode firstJson = mapper.readTree(firstOrder.getBody());
+        JsonNode secondJson = mapper.readTree(secondOrder.getBody());
+        boolean firstUsed = firstJson.path("taxSnapshot").path("lines").get(0).path("appliedDiscountCodes").toString().contains(discount.getBody().code());
+        boolean secondUsed = secondJson.path("taxSnapshot").path("lines").get(0).path("appliedDiscountCodes").toString().contains(discount.getBody().code());
+        assertThat(firstUsed).isNotEqualTo(secondUsed);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pricing_discount_redemptions WHERE discount_rule_id=?",
+                Integer.class,discount.getBody().id())).isEqualTo(1);
+        assertThat(jdbc.queryForList("SELECT subtotal FROM orders WHERE id IN (?,?)",BigDecimal.class,
+                UUID.fromString(firstJson.path("orderId").asText()),UUID.fromString(secondJson.path("orderId").asText())))
+                .containsExactlyInAnyOrder(new BigDecimal("90.0000"),new BigDecimal("100.0000"));
     }
 
     @Test

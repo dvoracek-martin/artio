@@ -40,4 +40,16 @@ describe('PricingAdminComponent', () => {
     }]);
     expect(component.taxEditorOpen).toBe(false);
   });
+
+  it('emits discount activation changes and exposes optional usage limits', () => {
+    const component = new PricingAdminComponent();
+    const actions: unknown[] = [];
+    component.action.subscribe(action => actions.push(action));
+    component.discounts = [{ id: 'discount-1', code: 'WELCOME', usageLimit: 12, active: true }];
+    component.emit({ type: 'setDiscountActive', id: 'discount-1', active: false });
+
+    expect(component.discounts[0].usageLimit).toBe(12);
+    expect(component.discountDraft.usageLimit).toBeNull();
+    expect(actions).toEqual([{ type: 'setDiscountActive', id: 'discount-1', active: false }]);
+  });
 });

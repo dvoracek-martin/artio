@@ -26,6 +26,13 @@ class PricingEngineTests {
         var quote = new PricingEngine().calculate(item, dollars("10.00"), new Quantity(BigDecimal.ONE), "US", "US-CA", NOW, List.of(discount), null);
         assertThat(quote.total().amount()).isEqualByComparingTo("10.00");
     }
+    @Test void limitedPromotionKeepsItsUsageBoundaryInTheDomainModel() {
+        var limited=DiscountRule.create(new DiscountRuleId(UUID.randomUUID()),"LIMITED",null,"US",
+                new Percentage(new BigDecimal("15")),0,NOW,null,3);
+        assertThat(limited.getUsageLimit()).isEqualTo(3);
+        assertThatThrownBy(()->DiscountRule.create(new DiscountRuleId(UUID.randomUUID()),"EMPTY",null,"US",
+                new Percentage(new BigDecimal("15")),0,NOW,null,0)).isInstanceOf(IllegalArgumentException.class);
+    }
     @Test void appliesDiscountToRoundedLineAmountForFractionalQuantities() {
         UUID item = UUID.randomUUID();
         var discount = DiscountRule.create(new DiscountRuleId(UUID.randomUUID()), "TEN", item, "US", new Percentage(new BigDecimal("10")), 0, NOW, null);

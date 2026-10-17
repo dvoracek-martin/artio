@@ -40,7 +40,8 @@ public final class PricingEngine {
                 money(taxable, unitPrice, scale), money(tax, unitPrice, scale), money(total, unitPrice, scale),
                 jurisdiction, taxRule != null && taxRule.applies(jurisdiction, at) ? taxRule.getCategory() : TaxCategory.STANDARD,
                 taxRate, taxRule != null && taxRule.applies(jurisdiction, at) ? taxRule.getValidFrom() : null,
-                taxRule != null && taxRule.applies(jurisdiction, at) ? taxRule.getValidUntil() : null, at, pricesIncludeTax);
+                taxRule != null && taxRule.applies(jurisdiction, at) ? taxRule.getValidUntil() : null, at, pricesIncludeTax,
+                applicable.stream().map(rule -> rule.getId().value()).toList(), applicable.stream().map(DiscountRule::getCode).toList());
     }
     private Money money(BigDecimal value, Money basis, int scale) { return new Money(value.setScale(scale, RoundingMode.HALF_EVEN), basis.currency()); }
 }
