@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 import { ExtensionAdminComponent } from './extension-admin.component';
@@ -75,6 +75,33 @@ describe('ExtensionAdminComponent', () => {
     fixture.detectChanges();
     const page = fixture.nativeElement.textContent as string;
     expect(page).toContain('Compatibility: CAPABILITY_V2 · 2 instance(s) · 3 binding(s) · 1 subscription(s)');
+  });
+
+  it('previews the Core-selected active-exclusive route and reports an ambiguous route', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const component = fixture.componentInstance;
+    const http = TestBed.inject(HttpTestingController);
+    component.selectedExtension = { compatibilityModes: 'CAPABILITY_V2', manifest: { id: 'payments.example', extensionPoints: [], configuration: {} } };
+    component.extensionBindings = [{ bindingId: 'binding-a', instanceId: 'instance-a', capabilityId: 'payment.provider.v1', operationName: 'createCheckout', scope: { countryCode: 'CH' }, priority: 10, eligibilityState: 'ACTIVE' }];
+    fixture.detectChanges();
+    http.expectOne('/api/v1/admin/extensions/security/advisories').flush({ releases: [] });
+
+    const previewButton = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Preview routing')) as HTMLButtonElement;
+    expect(previewButton).toBeTruthy();
+    previewButton.click();
+    const request = http.expectOne('/api/v1/admin/extensions/routing/resolve');
+    expect(request.request.body).toEqual({ capabilityId: 'payment.provider.v1', operationName: 'createCheckout', scope: { countryCode: 'CH' }, pinnedInstanceId: null, newCommitment: true });
+    request.flush({ capabilityId: 'payment.provider.v1', operationName: 'createCheckout', policy: 'EXCLUSIVE', sideEffecting: true, scope: { countryCode: 'CH' }, instanceIds: ['instance-a'], bindingIds: ['binding-a'] });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Eligible instances: instance-a');
+    expect(fixture.nativeElement.textContent).toContain('Selected bindings: binding-a');
+
+    previewButton.click();
+    http.expectOne('/api/v1/admin/extensions/routing/resolve').flush({ message: 'Ambiguous exclusive route' }, { status: 409, statusText: 'Conflict' });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain('Ambiguous exclusive route');
   });
 
   it('selects immutable releases per instance and emits update or rollback actions by semantic version', () => {
