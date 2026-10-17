@@ -1,10 +1,10 @@
 package io.artio.api.extensions;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import io.artio.api.security.PrivilegedStepUpMfa;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,17 +20,19 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/admin/extensions/registries")
 public final class ExtensionRegistryCredentialController {
-  private static final Duration STEP_UP_AGE = Duration.ofMinutes(5);
   private final ExtensionRegistryCredentialService credentials;
+  private final PrivilegedStepUpMfa stepUpMfa;
 
-  public ExtensionRegistryCredentialController(ExtensionRegistryCredentialService credentials) {
+  public ExtensionRegistryCredentialController(ExtensionRegistryCredentialService credentials, PrivilegedStepUpMfa stepUpMfa) {
     this.credentials = credentials;
+    this.stepUpMfa = stepUpMfa;
   }
 
   @GetMapping
   public List<ExtensionRegistryCredentialService.RegistryCredentialSummary> list(
       JwtAuthenticationToken actor) {
-    requireStepUpMfa(actor);
+    requireSuperadmin(actor);
+    stepUpMfa.require(actor);
     return credentials.list();
   }
 
@@ -39,7 +41,8 @@ public final class ExtensionRegistryCredentialController {
       @PathVariable String registryHost,
       @RequestBody RegistryCredentialRequest request,
       JwtAuthenticationToken actor) {
-    requireStepUpMfa(actor);
+    requireSuperadmin(actor);
+    stepUpMfa.require(actor);
     if (request == null)
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Registry credentials are required");
     return credentials.put(
@@ -52,18 +55,15 @@ public final class ExtensionRegistryCredentialController {
   @DeleteMapping("/{registryHost}")
   public Map<String, String> delete(
       @PathVariable String registryHost, JwtAuthenticationToken actor) {
-    requireStepUpMfa(actor);
+    requireSuperadmin(actor);
+    stepUpMfa.require(actor);
     credentials.delete(registryHost, UUID.fromString(actor.getToken().getSubject()));
     return Map.of("message", "Registry credentials removed");
   }
 
-  private static void requireStepUpMfa(JwtAuthenticationToken actor) {
-    Instant issuedAt = actor.getToken().getIssuedAt();
-    if (!Boolean.TRUE.equals(actor.getToken().getClaimAsBoolean("mfaVerified"))
-        || issuedAt == null
-        || issuedAt.isBefore(Instant.now().minus(STEP_UP_AGE)))
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Recent multi-factor authentication is required");
+  private static void requireSuperadmin(JwtAuthenticationToken actor) {
+    if (actor == null || actor.getAuthorities().stream().noneMatch(authority -> "ROLE_SUPERADMIN".equals(authority.getAuthority())))
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "SUPERADMIN authority is required to manage private registry credentials");
   }
 
   public record RegistryCredentialRequest(String username, String password) {}

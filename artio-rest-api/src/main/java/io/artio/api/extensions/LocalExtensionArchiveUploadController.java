@@ -1,10 +1,9 @@
 package io.artio.api.extensions;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.artio.api.security.PrivilegedStepUpMfa;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.PluginManifestValidator;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,13 +26,13 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/admin/extensions")
 public class LocalExtensionArchiveUploadController {
-  private static final Duration STEP_UP_AGE = Duration.ofMinutes(5);
   private final JdbcTemplate jdbc;
   private final ObjectMapper mapper;
   private final PluginManifestValidator manifestValidator;
   private final ExtensionInstallationJobOperations installationJobs;
   private final OciArchiveQuarantineStore quarantine;
   private final String coreVersion;
+  private final PrivilegedStepUpMfa stepUpMfa;
 
   public LocalExtensionArchiveUploadController(
       JdbcTemplate jdbc,
@@ -41,13 +40,15 @@ public class LocalExtensionArchiveUploadController {
       PluginManifestValidator manifestValidator,
       ExtensionInstallationJobOperations installationJobs,
       OciArchiveQuarantineStore quarantine,
-      @Value("${artio.extensions.core-version:0.1.0}") String coreVersion) {
+      @Value("${artio.extensions.core-version:0.1.0}") String coreVersion,
+      PrivilegedStepUpMfa stepUpMfa) {
     this.jdbc = jdbc;
     this.mapper = mapper;
     this.manifestValidator = manifestValidator;
     this.installationJobs = installationJobs;
     this.quarantine = quarantine;
     this.coreVersion = coreVersion;
+    this.stepUpMfa = stepUpMfa;
   }
 
   @PostMapping(path = "/{pluginId}/installations/archive", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -57,7 +58,9 @@ public class LocalExtensionArchiveUploadController {
       @RequestPart("archive") MultipartFile archive,
       @RequestHeader("Idempotency-Key") String idempotencyKey,
       JwtAuthenticationToken actor) {
-    requireStepUpMfa(actor);
+    if (actor == null || actor.getAuthorities().stream().noneMatch(authority -> "ROLE_SUPERADMIN".equals(authority.getAuthority())))
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "SUPERADMIN authority is required to import a local plugin archive");
+    stepUpMfa.require(actor);
     if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{8,128}")) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Idempotency-Key must contain 8 to 128 safe characters");
     }
@@ -102,14 +105,6 @@ public class LocalExtensionArchiveUploadController {
     try { return mapper.readValue(source, PluginManifest.class); }
     catch (Exception malformed) {
       throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Stored plugin manifest is invalid", malformed);
-    }
-  }
-
-  private static void requireStepUpMfa(JwtAuthenticationToken actor) {
-    Instant issuedAt = actor.getToken().getIssuedAt();
-    if (!Boolean.TRUE.equals(actor.getToken().getClaimAsBoolean("mfaVerified")) || issuedAt == null
-        || issuedAt.isBefore(Instant.now().minus(STEP_UP_AGE))) {
-      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Recent multi-factor authentication is required");
     }
   }
 
