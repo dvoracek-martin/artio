@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
-import { NEVER, Subject, of } from 'rxjs';
+import { NEVER, Subject, of, throwError } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app.component';
 
@@ -94,6 +94,47 @@ describe('Storefront payment return', () => {
     expect(fixture.componentInstance.paymentReturnConfirmed).toBe(true);
     expect(fixture.nativeElement.textContent).toContain('Your payment is confirmed.');
     expect(http.post).toHaveBeenCalledWith('/api/v1/payments/provider/orders/paypal-order/capture?token=provider-token', {});
+  });
+
+  it('confirms customer order cancellation in an accessible dialog before calling Core', () => {
+    const { fixture, http } = createComponent('PENDING', true, '/orders');
+    const buttons = () => [...fixture.nativeElement.querySelectorAll('button')] as HTMLButtonElement[];
+    buttons().find(button => button.textContent?.trim() === 'Cancel order')?.click();
+    fixture.detectChanges();
+
+    const dialog = fixture.nativeElement.querySelector('[role="dialog"][aria-modal="true"]');
+    expect(dialog?.getAttribute('aria-labelledby')).toBe('cancel-order-title');
+    expect(dialog?.textContent).toContain('Cancel this order and expire its pending payment checkout?');
+    expect(http.post.mock.calls.some(([url]) => url === '/api/v1/payments/orders/order-1/cancel')).toBe(false);
+
+    buttons().find(button => button.textContent?.trim() === 'Keep order')?.click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[aria-labelledby="cancel-order-title"]')).toBeNull();
+
+    buttons().find(button => button.textContent?.trim() === 'Cancel order')?.click();
+    fixture.detectChanges();
+    buttons().find(button => button.textContent?.trim() === 'Confirm cancellation')?.click();
+    fixture.detectChanges();
+
+    expect(http.post).toHaveBeenCalledWith('/api/v1/payments/orders/order-1/cancel', {});
+    expect(http.get.mock.calls.filter(([url]) => url === '/api/v1/cart/orders')).toHaveLength(2);
+    expect(fixture.nativeElement.querySelector('[aria-labelledby="cancel-order-title"]')).toBeNull();
+  });
+
+  it('keeps order cancellation open and reports a localized Core conflict', () => {
+    const { fixture, http } = createComponent('PENDING', true, '/orders');
+    const cancelUrl = '/api/v1/payments/orders/order-1/cancel';
+    http.post.mockImplementation((url: string) => url === cancelUrl
+      ? throwError(() => ({ status: 409 }))
+      : of({}));
+    const buttons = () => [...fixture.nativeElement.querySelectorAll('button')] as HTMLButtonElement[];
+    buttons().find(button => button.textContent?.trim() === 'Cancel order')?.click();
+    fixture.detectChanges();
+    buttons().find(button => button.textContent?.trim() === 'Confirm cancellation')?.click();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('[aria-labelledby="cancel-order-title"]')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain('This action conflicts with the current state.');
   });
 
   it('does not trust a success redirect when the customer session is missing', () => {
