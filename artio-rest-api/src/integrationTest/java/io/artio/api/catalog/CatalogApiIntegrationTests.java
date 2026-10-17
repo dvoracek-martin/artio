@@ -1191,6 +1191,17 @@ class CatalogApiIntegrationTests {
         UUID subscriptionId = jdbc.queryForObject("SELECT subscription_id FROM extension_event_subscriptions WHERE instance_id=?", UUID.class, instanceId);
         assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class, subscriptionId))
                 .isEqualTo("PENDING_APPROVAL");
+        var pendingView = adminExchange("/api/v1/admin/extensions/{id}/subscriptions", HttpMethod.GET, null, Map[].class, pluginId);
+        assertThat(java.util.Arrays.stream(pendingView.getBody())
+                .filter(subscription -> subscriptionId.toString().equals(subscription.get("subscriptionId")))
+                .findFirst().orElseThrow()).containsEntry("subscriptionState", "PENDING_APPROVAL").containsEntry("canApprove", false);
+        var deniedApproval = adminExchange("/api/v1/admin/extensions/{id}/subscriptions/{subscriptionId}/state", HttpMethod.PUT,
+                Map.of("state", "ACTIVE"), Map.class, pluginId, subscriptionId);
+        assertThat(deniedApproval.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class, subscriptionId))
+                .isEqualTo("PENDING_APPROVAL");
+        // The persisted-permission filter must observe an owner role promotion on the next request.
+        jdbc.update("UPDATE users SET role='SUPERADMIN',permissions='*' WHERE id=?", adminUserId);
         var approved = adminExchange("/api/v1/admin/extensions/{id}/subscriptions/{subscriptionId}/state", HttpMethod.PUT,
                 Map.of("state", "ACTIVE"), Map.class, pluginId, subscriptionId);
         assertThat(approved.getStatusCode()).isEqualTo(HttpStatus.OK);
