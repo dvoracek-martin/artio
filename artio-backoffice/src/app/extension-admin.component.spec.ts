@@ -50,6 +50,37 @@ describe('ExtensionAdminComponent', () => {
     expect(actions).toEqual(['toggleRegistration']);
   });
 
+  it('shows storage placement status and advances verified migration one bounded batch at a time', async () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const http = TestBed.inject(HttpTestingController);
+    fixture.detectChanges();
+    http.expectOne('/api/v1/admin/extensions/security/advisories').flush({ releases: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ uploadAvailable: true, installCategory: 'storage', storageMode: 'plugins', migrationSource: 's3', mediaCount: 3, activePluginObjects: 1, pendingMigration: 2, deletePending: 0, tombstoned: 0, migrationAvailable: true, canManageStorage: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Storage placement and migration');
+    expect(fixture.nativeElement.textContent).toContain('Waiting to migrate: 2');
+
+    const migrate = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Migrate next batch')) as HTMLButtonElement;
+    migrate.click();
+    http.expectOne('/api/v1/admin/catalog/media/storage-backfill?limit=50').flush({ inspected: 2, migrated: 2, failed: 0, complete: false, nextCursor: 'abc.jpg', failures: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ uploadAvailable: true, storageMode: 'plugins', migrationSource: 's3', mediaCount: 3, activePluginObjects: 2, pendingMigration: 1, deletePending: 0, tombstoned: 0, migrationAvailable: true, canManageStorage: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Inspected 2 · migrated 2 · failed 0');
+
+    [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Continue migration'))?.click();
+    const next = http.expectOne('/api/v1/admin/catalog/media/storage-backfill?limit=50&afterStorageKey=abc.jpg');
+    next.flush({ inspected: 1, migrated: 1, failed: 0, complete: true, nextCursor: 'xyz.png', failures: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ uploadAvailable: true, storageMode: 'plugins', migrationSource: 's3', mediaCount: 3, activePluginObjects: 3, pendingMigration: 0, deletePending: 0, tombstoned: 0, migrationAvailable: true, canManageStorage: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('All legacy media has been copied and verified. Source data is retained.');
+  });
+
   it('includes the entered Marketplace query and country in the search action', () => {
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
     const actions: any[] = [];

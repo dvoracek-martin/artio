@@ -7,6 +7,7 @@ import { extensionAdminText, type ExtensionAdminTextKey } from './extension-admi
 import { ExtensionSecurityComponent } from './extension-security.component';
 import { ExtensionRegistryCredentialsComponent } from './extension-registry-credentials.component';
 import { ExtensionLocalArchiveComponent } from './extension-local-archive.component';
+import { storageAdminText, type StorageAdminTextKey } from './storage-admin-locale';
 
 export type ExtensionAdminAction =
   | { type: 'toggleRegistration' | 'register' | 'closeAudit' | 'closeSettings' | 'saveConfiguration' | 'invoke' | 'openDashboards' }
@@ -31,6 +32,17 @@ export type ExtensionAdminAction =
 
 @Component({ selector: 'artio-extension-admin', imports: [CommonModule, FormsModule, ExtensionSecurityComponent, ExtensionRegistryCredentialsComponent, ExtensionLocalArchiveComponent], template: `
   <section class="extension-admin"><div class="toolbar"><p>{{t('intro')}}</p><button type="button" class="primary" (click)="emit({type:'toggleRegistration'})">＋ {{t('register')}}</button></div>
+    @if (storageStatusLoading) { <div class="panel"><p class="muted loading-indicator" role="status" aria-live="polite">{{st('loading')}}</p></div> }
+    @if (storageStatusError) { <div class="panel"><p class="error" role="alert">{{storageStatusError}}</p><button type="button" class="secondary" (click)="loadStorageStatus()">{{st('retry')}}</button></div> }
+    @if (storageStatus && storageStatus.storageMode==='plugins') { <div class="panel table-panel"><p class="eyebrow">{{st('eyebrow')}}</p><h2>{{st('title')}}</h2><p class="muted">{{st('help')}}</p>
+      <p>{{st('mode')}}: <strong>{{storageStatus.storageMode}}</strong> · {{st('source')}}: <strong>{{storageStatus.migrationSource}}</strong></p>
+      <p>{{st('media')}}: {{storageStatus.mediaCount}} · {{st('placed')}}: {{storageStatus.activePluginObjects}} · {{st('pending')}}: {{storageStatus.pendingMigration}} · {{st('deletePending')}}: {{storageStatus.deletePending}}</p>
+      @if (storageBackfillLoading) { <p class="muted" role="status" aria-live="polite">{{st('working')}}</p> }
+      @if (storageBackfillError) { <p class="error" role="alert">{{storageBackfillError}}</p> }
+      @if (storageBackfillResult) { <div class="notice" role="status"><p>{{st('batchResult', {inspected: storageBackfillResult.inspected, migrated: storageBackfillResult.migrated, failed: storageBackfillResult.failed})}}</p>@for (failure of storageBackfillResult.failures; track $index) { <small>{{failure.code}}</small> }@if (storageBackfillResult.complete) { <p>{{st('complete')}}</p> }</div> }
+      @if (storageStatus.canManageStorage) { @if (!storageBackfillResult?.complete) { <button type="button" class="primary" [disabled]="storageBackfillLoading || !storageStatus.migrationAvailable || storageStatus.pendingMigration===0" (click)="migrateStorageBatch()">{{storageBackfillResult?.nextCursor ? st('nextBatch') : st('startMigration')}}</button> } } @else { <p class="muted">{{st('superadminOnly')}}</p> }
+      <button type="button" class="link-button" [disabled]="storageStatusLoading || storageBackfillLoading" (click)="loadStorageStatus()">{{st('refresh')}}</button>
+    </div> }
     <div class="panel table-panel"><p class="eyebrow">{{t('marketplace')}}</p><h2>{{t('marketplaceTitle')}}</h2><p class="muted">{{t('marketplaceHelp')}}</p>
       <form class="create-form" (ngSubmit)="emit({type:'marketplaceSearch',query:marketplaceQuery,country:marketplaceCountry})"><label>{{t('marketplaceSearchLabel')}}<input [(ngModel)]="marketplaceQuery" name="marketplaceQuery" maxlength="100"></label><label>{{t('marketplaceCountry')}}<input [(ngModel)]="marketplaceCountry" name="marketplaceCountry" maxlength="2" pattern="[A-Z]{2}"></label><button class="primary">{{t('marketplaceSearchButton')}}</button></form>
       @if (marketplaceLoading) { <p class="muted loading-indicator" role="status" aria-live="polite">{{t('marketplaceLoading')}}</p> }@if (marketplaceError) { <p class="notice error" role="alert">{{marketplaceError}}</p> }
@@ -82,8 +94,9 @@ export type ExtensionAdminAction =
 ` })
 export class ExtensionAdminComponent implements OnInit {
   securityAdvisories:any=null;
+  storageStatus:any=null; storageStatusLoading=false; storageStatusError=''; storageBackfillLoading=false; storageBackfillError=''; storageBackfillResult:any=null; private storageCursor:string|null=null;
   constructor(private readonly http:HttpClient){}
-  ngOnInit():void{this.http.get<any>('/api/v1/admin/extensions/security/advisories').subscribe({next:status=>this.securityAdvisories=status,error:()=>this.securityAdvisories=null})}
+  ngOnInit():void{this.http.get<any>('/api/v1/admin/extensions/security/advisories').subscribe({next:status=>this.securityAdvisories=status,error:()=>this.securityAdvisories=null});this.loadStorageStatus()}
   @Input() extensionCatalog:any[]=[]; @Input() marketplacePlugins:any[]=[]; @Input() marketplaceTotal=0; @Input() marketplacePage=0; @Input() marketplaceQuery=''; @Input() marketplaceCountry=''; @Input() marketplaceLoading=false; @Input() marketplaceError=''; @Input() extensions:any[]=[]; @Input() extensionsLoading=false; @Input() error=''; @Input() extensionHealth=''; @Input() showExtensionRegistration=false; @Input() extensionManifestJson=''; @Input() extensionAuditFor:string|null=null; @Input() extensionAudit:any[]=[]; @Input() selectedExtension:any=null; @Input() extensionConfig:Record<string,any>={}; @Input() extensionInvocation:any={extensionPoint:'',operation:'health',payloadJson:'{}'}; @Input() extensionInvocationResult:any=null;
   @Input() extensionInstances:any[]=[]; @Input() extensionBindings:any[]=[]; @Input() extensionSubscriptions:any[]=[]; @Input() extensionReleases:any[]=[];
   @Input() instanceHealth:Record<string,any>={}; @Input() instanceObligations:Record<string,any>={};
@@ -94,6 +107,9 @@ export class ExtensionAdminComponent implements OnInit {
   @Output() action=new EventEmitter<ExtensionAdminAction>(); @Output() manifestChange=new EventEmitter<string>();
   ngOnChanges(changes:SimpleChanges):void{if(changes['selectedExtension']){this.newInstanceConfiguration={};this.selectedReleaseByInstance={}}if(changes['selectedExtension']||changes['extensionInvocation']){const points=this.selectedExtension?.manifest?.extensionPoints;if(Array.isArray(points)&&points.length&&!points.includes(this.extensionInvocation.extensionPoint))this.extensionInvocation.extensionPoint=points[0];for(const {key,value} of this.extensionFields())if(value.type==='enum'&&value.required&&this.newInstanceConfiguration[key]===undefined&&value.options?.length)this.newInstanceConfiguration[key]=value.options[0]}if(changes['extensionInstances']||changes['selectedExtension'])for(const instance of this.extensionInstances){this.instanceConfigurations[instance.instanceId]??={...(instance.publicConfiguration??{})}}if(changes['extensionInstances']||changes['extensionReleases']||changes['selectedExtension'])for(const instance of this.extensionInstances){if(this.selectedReleaseByInstance[instance.instanceId]==null)this.selectedReleaseByInstance[instance.instanceId]=this.extensionReleases.find(release=>release.releaseId!==instance.releaseId)?.releaseId??null}}
   t(key:ExtensionAdminTextKey):string{return extensionAdminText(currentBackofficeLocale(),key)}
+  st(key:StorageAdminTextKey,values:Record<string,string|number>={}):string{return storageAdminText(currentBackofficeLocale(),key,values)}
+  loadStorageStatus():void{if(this.storageStatusLoading)return;this.storageStatusLoading=true;this.storageStatusError='';this.http.get<any>('/api/v1/admin/catalog/media/storage-status').subscribe({next:status=>{this.storageStatus=status;this.storageStatusLoading=false},error:error=>{this.storageStatusLoading=false;this.storageStatusError=error.error?.message??error.error?.detail??this.st('loadFailure')}})}
+  migrateStorageBatch():void{if(this.storageBackfillLoading||!this.storageStatus?.migrationAvailable||this.storageStatus.pendingMigration===0)return;this.storageBackfillLoading=true;this.storageBackfillError='';const params=new URLSearchParams({limit:'50'});if(this.storageCursor)params.set('afterStorageKey',this.storageCursor);this.http.post<any>(`/api/v1/admin/catalog/media/storage-backfill?${params.toString()}`,{}).subscribe({next:result=>{this.storageBackfillResult=result;this.storageCursor=result.nextCursor??null;this.storageBackfillLoading=false;this.loadStorageStatus()},error:error=>{this.storageBackfillLoading=false;this.storageBackfillError=error.error?.message??error.error?.detail??this.st('migrationFailure')}})}
   isRegistered(pluginId:string):boolean{return this.extensions.some(extension=>extension.id===pluginId&&extension.lifecycleState!=='UNINSTALLED')}
   canRegisterMarketplaceRelease(item:any):boolean{const extension=this.extensions.find(candidate=>candidate.id===item.pluginId&&candidate.lifecycleState!=='UNINSTALLED');return extension?.compatibilityModes==='CAPABILITY_V2'&&extension.version!==item.version}
   marketplaceReleaseFor(pluginId:string):any{return this.marketplacePlugins.find((release:any)=>release.pluginId===pluginId)??null}

@@ -6,6 +6,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 /** Explicit, resumable administrator-controlled migration; the source store is never deleted. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -22,7 +25,9 @@ public class MediaStorageBackfillController {
     @PostMapping
     public MediaStorageBackfillService.BackfillResult backfill(
             @RequestParam(required = false) String afterStorageKey,
-            @RequestParam(defaultValue = "50") int limit) {
+            @RequestParam(defaultValue = "50") int limit, JwtAuthenticationToken auth) {
+        if (auth == null || !"SUPERADMIN".equals(auth.getToken().getClaimAsString("role")))
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a superadmin can migrate plugin media storage");
         return service.backfill(afterStorageKey, limit);
     }
 }
