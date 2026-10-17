@@ -29,7 +29,7 @@ public class CustomerOrderController {
                         + "WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0)) END AS shipped_quantity,"
                         + "GREATEST((CASE WHEN o.status IN ('SHIPPED','DELIVERED','RETURNED') THEN oi.quantity ELSE "
                         + "floor(COALESCE((SELECT sum(si.quantity) FROM order_shipment_items si JOIN order_shipments s ON s.id=si.shipment_id "
-                        + "WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0) END)-COALESCE((SELECT sum(ri.quantity) "
+                        + "WHERE s.order_id=oi.order_id AND si.order_item_id=oi.id),0)) END)-COALESCE((SELECT sum(ri.quantity) "
                         + "FROM order_return_items ri JOIN order_returns r ON r.id=ri.return_id WHERE ri.order_item_id=oi.id "
                         + "AND r.status IN ('REQUESTED','APPROVED','COMPLETED')),0),0) AS returnable_quantity "
                         + "FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.order_id=? ORDER BY oi.id",

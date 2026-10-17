@@ -389,6 +389,14 @@ class CatalogApiIntegrationTests {
                 Map.of("trackingNumber","TRACK-"+orderId,"items",List.of(Map.of("orderItemId",orderItemId,"quantity",1))),Map.class);
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("PARTIALLY_SHIPPED");
+        var customerHeaders=new HttpHeaders();customerHeaders.setBearerAuth(adminToken);
+        var returnableItems=http.exchange("/api/v1/orders/{orderId}/items",HttpMethod.GET,new HttpEntity<>(customerHeaders),List.class,orderId);
+        assertThat(returnableItems.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(returnableItems.getBody()).singleElement().satisfies(raw->{
+            var line=(Map<?,?>)raw;
+            assertThat(((Number)line.get("shippedQuantity")).intValue()).isEqualTo(1);
+            assertThat(((Number)line.get("returnableQuantity")).intValue()).isEqualTo(1);
+        });
         assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement().satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("1");assertThat(stock.reserved()).isEqualByComparingTo("1");});
 
         var duplicate=adminExchange("/api/v1/admin/orders/"+orderId+"/shipments",HttpMethod.POST,
@@ -398,6 +406,13 @@ class CatalogApiIntegrationTests {
                 Map.of("trackingNumber","TRACK-SECOND-"+orderId,"items",List.of(Map.of("orderItemId",orderItemId,"quantity",1))),Map.class);
         assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("SHIPPED");
+        var fullyShippedItems=http.exchange("/api/v1/orders/{orderId}/items",HttpMethod.GET,new HttpEntity<>(customerHeaders),List.class,orderId);
+        assertThat(fullyShippedItems.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(fullyShippedItems.getBody()).singleElement().satisfies(raw->{
+            var line=(Map<?,?>)raw;
+            assertThat(((Number)line.get("shippedQuantity")).intValue()).isEqualTo(2);
+            assertThat(((Number)line.get("returnableQuantity")).intValue()).isEqualTo(2);
+        });
         assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement().satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("0");assertThat(stock.reserved()).isEqualByComparingTo("0");});
     }
 
