@@ -31,6 +31,8 @@ class RedisCacheSharingIntegrationTests {
 
             assertThat(secondApiCache.getCache("catalog-products").get("published", CachedProduct.class))
                     .isEqualTo(product);
+            secondApiCache.getCache("catalog-products").evict("published");
+            assertThat(firstApiCache.getCache("catalog-products").get("published")).isNull();
         } finally {
             firstApiCache.getCache("catalog-products").clear();
             firstConnection.destroy();
