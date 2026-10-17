@@ -324,6 +324,8 @@ const COPY = {
 } as const;
 
 export type BackofficeTextKey = keyof typeof COPY.en;
+type CompleteBackofficeTranslations = Record<BackofficeLocale, Record<BackofficeTextKey, string>>;
+const completeTranslations: CompleteBackofficeTranslations = COPY;
 
 export function currentBackofficeLocale(): BackofficeLocale {
   try {
@@ -344,5 +346,5 @@ export function setBackofficeLocale(locale: BackofficeLocale): void {
 }
 
 export function backofficeText(locale: BackofficeLocale, key: BackofficeTextKey): string {
-  return COPY[locale][key] ?? COPY.en[key];
+  return completeTranslations[locale][key] ?? completeTranslations.en[key];
 }
