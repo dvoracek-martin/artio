@@ -6,6 +6,21 @@ The Grafana administrator credentials are schema-backed plugin settings. The pas
 
 Build the five local images with `./build-images.ps1`. The manifest is a template and deliberately contains non-digest placeholders. Local Docker acceptance builds and installs all five images using exact digests from a disposable local registry; those fixture digests are not public release digests. The manifest remains un-installable until release publishes the images and the template is filled with the exact registry-reported digests. No image digest is fabricated here.
 
+After publishing and promoting all five images, prepare a release manifest with the exact references returned by the public registry. The command creates a new `manifest.json` in the output directory and refuses tags, placeholders, private staging paths, mixed registry hosts, unexpected repositories, or overwriting existing package files:
+
+```powershell
+python .\prepare_release.py `
+  --version 1.0.0 `
+  --output .\release-package `
+  --control-image 'registry.example/public/plugins/observability-control@sha256:<64-hex-digest>' `
+  --collector-image 'registry.example/public/plugins/observability-collector@sha256:<64-hex-digest>' `
+  --prometheus-image 'registry.example/public/plugins/observability-prometheus@sha256:<64-hex-digest>' `
+  --jaeger-image 'registry.example/public/plugins/observability-jaeger@sha256:<64-hex-digest>' `
+  --grafana-image 'registry.example/public/plugins/observability-grafana@sha256:<64-hex-digest>'
+```
+
+Replace the example host and digests with values reported by the registry after promotion. This only prepares the manifest; complete the catalog metadata/assets and use Marketplace's separate publisher and admin approval steps before treating the plugin as installable.
+
 Core remains optional: OTLP export is disabled unless configured. The commerce runtime does not depend on this bundle's health. The Backoffice Plugin Manager can install, configure, enable, disable, update, roll back and uninstall a valid bundle. Grafana is exposed through an authenticated, read-only same-origin proxy after the operator enables the plugin. No Grafana administrator credential or Artio bearer token is exposed to the browser.
 
 The Compose overlay under `artio-docker/` remains a local development/reference path. It is not the production plugin lifecycle.

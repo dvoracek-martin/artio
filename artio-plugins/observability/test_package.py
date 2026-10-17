@@ -1,9 +1,13 @@
 import json
 import pathlib
+import sys
+import tempfile
 import unittest
 
 
 ROOT = pathlib.Path(__file__).parent
+sys.path.insert(0, str(ROOT))
+from prepare_release import IMAGE_IDS, prepare_release_manifest, resolve_manifest
 
 
 class ObservabilityPackageTests(unittest.TestCase):
@@ -25,6 +29,52 @@ class ObservabilityPackageTests(unittest.TestCase):
         manifest = json.loads((ROOT / "manifest.template.json").read_text(encoding="utf-8"))
         images = [manifest["image"], *(service["image"] for service in manifest["services"])]
         self.assertTrue(all("REPLACE_WITH_PUBLISHED_IMAGE_DIGEST" in image for image in images))
+
+    def test_release_manifest_uses_only_supplied_registry_digests(self):
+        template = json.loads((ROOT / "manifest.template.json").read_text(encoding="utf-8"))
+        images = {
+            image_id: f"registry.example/public/plugins/observability-{image_id}@sha256:{str(index) * 64}"
+            for index, image_id in enumerate(IMAGE_IDS, start=1)
+        }
+
+        release = resolve_manifest(template, "1.0.1", images)
+
+        self.assertEqual("1.0.1", release["version"])
+        self.assertEqual(images["control"], release["image"])
+        self.assertEqual(images["collector"], next(s for s in release["services"] if s["id"] == "collector")["image"])
+        self.assertFalse(any("REPLACE_WITH_PUBLISHED_IMAGE_DIGEST" in ref
+                             for ref in [release["image"], *(service["image"] for service in release["services"])]))
+
+    def test_release_manifest_rejects_placeholders_mixed_hosts_and_invalid_versions(self):
+        template = json.loads((ROOT / "manifest.template.json").read_text(encoding="utf-8"))
+        images = {
+            image_id: f"registry.example/public/plugins/observability-{image_id}@sha256:{str(index) * 64}"
+            for index, image_id in enumerate(IMAGE_IDS, start=1)
+        }
+
+        invalid_cases = [
+            ({**images, "control": template["image"]}, "1.0.1"),
+            ({**images, "grafana": images["grafana"].replace("registry.example", "other.example")}, "1.0.1"),
+            ({**images, "control": images["control"].replace("public/plugins", "staging/plugins")}, "1.0.1"),
+            (images, "01.0.1"),
+        ]
+        for invalid_images, version in invalid_cases:
+            with self.subTest(images=invalid_images, version=version):
+                with self.assertRaises(ValueError):
+                    resolve_manifest(template, version, invalid_images)
+
+    def test_release_manifest_preparation_never_overwrites_package_files(self):
+        images = {
+            image_id: f"registry.example/public/plugins/observability-{image_id}@sha256:{str(index) * 64}"
+            for index, image_id in enumerate(IMAGE_IDS, start=1)
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            output = pathlib.Path(temporary) / "release"
+            destination = prepare_release_manifest("1.0.1", images, output)
+            generated = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual("1.0.1", generated["version"])
+            with self.assertRaises(ValueError):
+                prepare_release_manifest("1.0.2", images, output)
 
     def test_sidecar_urls_match_the_runtime_container_names(self):
         collector = (ROOT / "collector" / "otel-collector.yaml").read_text(encoding="utf-8")
