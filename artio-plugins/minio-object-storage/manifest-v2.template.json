@@ -4,7 +4,7 @@
     "id": "storage.artio-minio",
     "name": "Artio MinIO Object Storage",
     "vendor": "Artio",
-    "version": "1.1.0",
+    "version": "1.1.2",
     "description": "Private S3-compatible object storage with managed MinIO or an approved external endpoint.",
     "minimumCoreVersion": "0.1.0",
     "maximumCoreVersion": "9.0.0",

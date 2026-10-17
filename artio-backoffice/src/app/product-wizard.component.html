@@ -49,7 +49,7 @@
         <label class="upload-zone" (dragover)="$event.preventDefault()" (drop)="drop($event)"><span class="upload-symbol">↑</span><strong>{{t('dropImages')}}</strong><span>{{t('or')}} <em>{{t('browseFiles')}}</em></span><small>{{t('imageLimits')}}</small><input type="file" accept="image/jpeg,image/png" multiple (change)="selectImages($event)" [attr.aria-label]="t('chooseImages')"></label>
         }
         <div class="wizard-image-grid">@for (image of images; track image; let index = $index) {
-          <article><div class="image-preview"><img [src]="image.url" [alt]="image.alt">@if (index===0) {
+          <article><div class="image-preview">@if (!image.previewError) {<img [src]="image.url" [alt]="image.alt" (error)="imagePreviewFailed(image)">}@if(image.previewError){<span class="muted" role="status">{{t('imagePreviewFailure')}}</span>}@if (index===0) {
             <span class="cover-badge">{{t('coverImage')}}</span>
             }</div><label>{{t('altText')}}<input [(ngModel)]="image.alt" maxlength="500" [attr.aria-label]="t('imageAltLabel',{n:index+1})"></label><div class="image-actions"><button class="secondary" (click)="moveImage(index,-1)" [disabled]="index===0" [attr.aria-label]="t('moveEarlier')">←</button><button class="secondary" (click)="moveImage(index,1)" [disabled]="index===images.length-1" [attr.aria-label]="t('moveLater')">→</button><button class="link-button danger" (click)="removeImage(index)">{{t('remove')}}</button></div></article>
           }</div>
@@ -81,8 +81,10 @@
   </div>
 }
 </div>
-<aside class="wizard-preview"><div class="panel"><p class="eyebrow">{{t('preview')}}</p><div class="preview-art">@if (images.length) {
-<img [src]="images[0].url" [alt]="images[0].alt">
+<aside class="wizard-preview"><div class="panel"><p class="eyebrow">{{t('preview')}}</p><div class="preview-art">@if (images.length && !images[0].previewError) {
+<img [src]="images[0].url" [alt]="images[0].alt" (error)="imagePreviewFailed(images[0])">
+}@if (images.length && images[0].previewError) {
+<span class="muted" role="status">{{t('imagePreviewFailure')}}</span>
 }@if (!images.length) {
 <span>{{draft.name ? draft.name.charAt(0).toUpperCase() : '✳'}}</span>
 }</div><span class="pill inactive">{{t('draft')}}</span><h3>{{draft.name || t('previewTitle')}}</h3><code>{{draft.sku || 'PRODUCT-SKU'}}</code><p>{{draft.description || t('previewStory')}}</p>@if (selectedCategories) {

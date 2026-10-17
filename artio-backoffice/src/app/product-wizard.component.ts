@@ -10,7 +10,7 @@ import { backofficeText, currentBackofficeLocale } from './backoffice-locale';
 type Category = { id: string; name: string; parentId: string | null; active: boolean };
 type Brand = { id: string; name: string; active: boolean };
 type Attribute = { code: string; label: string; type: string; required: boolean; active: boolean };
-type ImageDraft = { file: File; url: string; alt: string; uploaded: boolean };
+type ImageDraft = { file: File; url: string; alt: string; uploaded: boolean; previewError?: boolean };
 
 @Component({
     selector: 'artio-product-wizard', imports: [FormsModule, SearchSelectComponent],
@@ -166,6 +166,10 @@ export class ProductWizardComponent implements OnInit, OnDestroy, DoCheck {
   next(): void {
     if(this.creatingCategory||this.creatingBrand)return;
     if (!this.validate(this.step)) return;
+    if (this.step === 2 && this.images.some(image => image.previewError)) {
+      this.error = this.t('imagePreviewFailure');
+      return;
+    }
     this.step++;
     if (this.step === 1 && !this.optionsLoaded) this.loadOptions();
     if (this.step === 2) this.loadStorageAvailability();
@@ -186,9 +190,18 @@ export class ProductWizardComponent implements OnInit, OnDestroy, DoCheck {
     }
   }
   removeImage(index: number): void { URL.revokeObjectURL(this.images[index].url); this.images.splice(index, 1); }
+  imagePreviewFailed(image: ImageDraft): void {
+    image.previewError = true;
+    this.error = this.t('imagePreviewFailure');
+  }
   moveImage(index: number, delta: number): void { const target = index + delta; if (target < 0 || target >= this.images.length) return; [this.images[index], this.images[target]] = [this.images[target], this.images[index]]; }
   async save(): Promise<void> {
     if (this.busy) return;
+    if (this.images.some(image => image.previewError)) {
+      this.step = 2;
+      this.error = this.t('imagePreviewFailure');
+      return;
+    }
     if (!this.productId) for (let step = 0; step < 2; step++) if (!this.validate(step)) { this.step = step; return; }
     this.busy = true;
     this.error = '';

@@ -37,7 +37,7 @@ class StorageError(Exception):
 
 
 def root_path():
-    root = Path(os.environ.get("ARTIO_OBJECT_STORAGE_PATH", "/data")).resolve()
+    root = Path(os.environ.get("ARTIO_OBJECT_STORAGE_PATH", "/data/minio")).resolve()
     for name in ("staging", "records", "operations", "tombstones"):
         (root / name).mkdir(parents=True, exist_ok=True)
     return root
