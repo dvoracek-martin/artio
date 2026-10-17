@@ -427,11 +427,22 @@ CREATE TABLE payment_refunds (
   currency CHAR(3) NOT NULL,
   status VARCHAR(16) NOT NULL CHECK (status IN ('PROCESSING','COMPLETED','FAILED')),
   provider_reference VARCHAR(255),
+  tax_allocation_snapshot JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(payment_id,idempotency_key)
 );
 CREATE INDEX idx_payment_refunds_payment ON payment_refunds(payment_id,created_at);
+CREATE FUNCTION payment_refund_tax_snapshot_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.tax_allocation_snapshot IS NOT NULL
+      AND NEW.tax_allocation_snapshot IS DISTINCT FROM OLD.tax_allocation_snapshot THEN
+    RAISE EXCEPTION 'payment refund tax allocation snapshot is immutable';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER payment_refund_tax_snapshot_immutable
+    BEFORE UPDATE ON payment_refunds FOR EACH ROW EXECUTE FUNCTION payment_refund_tax_snapshot_immutable();
 CREATE TABLE notifications (
   id UUID PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

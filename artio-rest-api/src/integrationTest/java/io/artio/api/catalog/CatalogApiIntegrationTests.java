@@ -2381,6 +2381,71 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void partialRefundsAllocateTaxFromTheImmutableOrderSnapshotAndReplayExactly() throws Exception {
+        UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
+        UUID orderId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+        String snapshot = "{\"schemaVersion\":2,\"jurisdiction\":\"CH\",\"currency\":\"CHF\",\"lines\":["
+                + "{\"taxCategory\":\"STANDARD\",\"taxRatePercent\":8.1,\"tax\":8.10,\"taxableAmount\":100.00}]}";
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,"
+                        + "shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                        + "VALUES (?,?,'PAID',100,8.10,0,108.10,'CHF','Test address','Test address',now(),'CH','CH','CH',?::jsonb,?)",
+                orderId,userId,snapshot,"tax-refund-"+orderId);
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,captured_amount,captured_currency,"
+                        + "refunded_amount,reversed_amount,created_at,updated_at) VALUES (?,?,?,108.10,'CHF','EXTENSION','CAPTURED',?,108.10,'CHF',0,0,now(),now())",
+                paymentId,orderId,userId,"tax-refund-payment-"+paymentId);
+
+        var firstHeaders = new HttpHeaders();
+        firstHeaders.setBearerAuth(adminToken);
+        firstHeaders.set("Idempotency-Key","tax-refund-first-"+paymentId);
+        var first = http.exchange("/api/v1/payments/{paymentId}/refund",HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.payments.PaymentController.RefundCommand(new BigDecimal("54.05")),firstHeaders),
+                io.artio.api.payments.PaymentController.RefundView.class,paymentId);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(first.getBody().taxAllocationSnapshot()).containsEntry("method","PROPORTIONAL_ORDER_TAX_SNAPSHOT_V1");
+        assertThat(first.getBody().taxAllocationSnapshot().get("allocatedTax").toString()).isEqualTo("4.05");
+        assertThat(first.getBody().taxAllocationSnapshot().get("orderTaxSnapshot").toString()).contains("STANDARD");
+
+        var replay = http.exchange("/api/v1/payments/{paymentId}/refund",HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.payments.PaymentController.RefundCommand(new BigDecimal("54.05")),firstHeaders),
+                io.artio.api.payments.PaymentController.RefundView.class,paymentId);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(replay.getBody().taxAllocationSnapshot()).isEqualTo(first.getBody().taxAllocationSnapshot());
+
+        var secondHeaders = new HttpHeaders();
+        secondHeaders.setBearerAuth(adminToken);
+        secondHeaders.set("Idempotency-Key","tax-refund-second-"+paymentId);
+        var second = http.exchange("/api/v1/payments/{paymentId}/refund",HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.payments.PaymentController.RefundCommand(new BigDecimal("54.05")),secondHeaders),
+                io.artio.api.payments.PaymentController.RefundView.class,paymentId);
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(second.getBody().taxAllocationSnapshot().get("allocatedTax").toString()).isEqualTo("4.05");
+        assertThat(jdbc.queryForObject("SELECT sum((tax_allocation_snapshot->>'allocatedTax')::numeric) FROM payment_refunds WHERE payment_id=?",
+                BigDecimal.class,paymentId)).isEqualByComparingTo("8.10");
+        assertThat(jdbc.queryForObject("SELECT tax_allocation_snapshot->'orderTaxSnapshot'->'lines'->0->>'taxRatePercent' FROM payment_refunds WHERE id=?",
+                String.class,first.getBody().id())).isEqualTo("8.1");
+        UUID additionalPaymentId = UUID.randomUUID();
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,captured_amount,captured_currency,"
+                        + "refunded_amount,reversed_amount,created_at,updated_at) VALUES (?,?,?,54.05,'CHF','EXTENSION','CAPTURED',?,54.05,'CHF',0,0,now(),now())",
+                additionalPaymentId,orderId,userId,"tax-refund-overpayment-"+additionalPaymentId);
+        var overpaymentHeaders = new HttpHeaders();
+        overpaymentHeaders.setBearerAuth(adminToken);
+        overpaymentHeaders.set("Idempotency-Key","tax-refund-overpayment-"+additionalPaymentId);
+        var overpayment = http.exchange("/api/v1/payments/{paymentId}/refund",HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.payments.PaymentController.RefundCommand(new BigDecimal("54.05")),overpaymentHeaders),
+                io.artio.api.payments.PaymentController.RefundView.class,additionalPaymentId);
+        assertThat(overpayment.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(new BigDecimal(overpayment.getBody().taxAllocationSnapshot().get("allocatedTax").toString())).isEqualByComparingTo("0.00");
+        assertThat(overpayment.getBody().taxAllocationSnapshot().get("unallocatedRefundAmount").toString()).isEqualTo("54.05");
+        assertThat(jdbc.queryForObject("SELECT sum((tax_allocation_snapshot->>'allocatedTax')::numeric) FROM payment_refunds r "
+                        + "JOIN payments p ON p.id=r.payment_id WHERE p.order_id=?",BigDecimal.class,orderId)).isEqualByComparingTo("8.10");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.update("UPDATE payment_refunds SET tax_allocation_snapshot='{}'::jsonb WHERE id=?",
+                        first.getBody().id()))
+                .isInstanceOf(org.springframework.jdbc.UncategorizedSQLException.class)
+                .hasMessageContaining("payment refund tax allocation snapshot is immutable");
+    }
+
+    @Test
     void verifiedDisputeAndReversalWebhooksCorrelateByProviderTransactionReference() throws Exception {
         UUID userId = jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'admin-%@example.test' ORDER BY created_at DESC LIMIT 1", UUID.class);
         UUID wonOrder = insertPendingOrder(userId);

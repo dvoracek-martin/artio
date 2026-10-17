@@ -42,7 +42,9 @@ import org.springframework.transaction.annotation.Transactional;
 @RequestMapping("/api/v1/payments")
 public class PaymentController {
     private static final ObjectMapper OWNER_MAPPER = new ObjectMapper();
+    private static final ObjectMapper TAX_MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, String>> OWNER_SCOPE = new TypeReference<>() { };
+    private static final TypeReference<Map<String, Object>> TAX_ALLOCATION = new TypeReference<>() { };
     private final JdbcTemplate jdbc;
     private final InventoryApplicationService inventory;
     private final OrderUpdatePublisher orderUpdates;
@@ -585,19 +587,29 @@ public class PaymentController {
         if (role == null || !Set.of("ADMIN", "SUPERADMIN").contains(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         if (idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Idempotency-Key header is required");
+        var orderIds = jdbc.query("SELECT order_id FROM payments WHERE id=?",(rs,n)->rs.getObject(1,UUID.class),paymentId);
+        if (orderIds.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
+        UUID refundOrderId = orderIds.getFirst();
+        var orderRows = jdbc.query("SELECT subtotal,tax,shipping,total,currency,tax_snapshot::text FROM orders WHERE id=? FOR UPDATE",
+                (rs,n)->new RefundOrder(rs.getBigDecimal("subtotal"),rs.getBigDecimal("tax"),rs.getBigDecimal("shipping"),
+                        rs.getBigDecimal("total"),rs.getString("currency").trim(),readTaxAllocation(rs.getString("tax_snapshot"))),refundOrderId);
+        if (orderRows.isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT,"The payment order is unavailable for tax allocation");
+        RefundOrder order = orderRows.getFirst();
         var payments = jdbc.query("SELECT provider_reference,status,COALESCE(captured_amount,amount) amount,refunded_amount,reversed_amount,COALESCE(captured_currency,currency) currency,method,order_id,user_id,gift_card_id,provider_instance_id,provider_release_id,provider_configuration_generation,provider_account_fingerprint,provider_scope::text FROM payments WHERE id=? FOR UPDATE",
                 (rs,n)->new RefundRow(rs.getString(1),rs.getString(2),rs.getBigDecimal(3),rs.getBigDecimal(4),rs.getBigDecimal(5),rs.getString(6).trim(),rs.getString(7),rs.getObject(8,UUID.class),rs.getObject(9,UUID.class),rs.getObject(10,UUID.class),providerOwner(rs,11)),paymentId);
         if (payments.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Payment not found");
         RefundRow payment = payments.getFirst();
-        var priorRows = jdbc.query("SELECT id,amount,status,provider_reference FROM payment_refunds WHERE payment_id=? AND idempotency_key=?",
-                (rs,n)->new RefundRecord(rs.getObject("id",UUID.class),rs.getBigDecimal("amount"),rs.getString("status"),rs.getString("provider_reference")),paymentId,idempotencyKey);
+        if (!refundOrderId.equals(payment.orderId())) throw new ResponseStatusException(HttpStatus.CONFLICT,"The payment order changed during refund processing");
+        var priorRows = jdbc.query("SELECT id,amount,status,provider_reference,tax_allocation_snapshot::text FROM payment_refunds WHERE payment_id=? AND idempotency_key=?",
+                (rs,n)->new RefundRecord(rs.getObject("id",UUID.class),rs.getBigDecimal("amount"),rs.getString("status"),rs.getString("provider_reference"),
+                        readTaxAllocation(rs.getString("tax_allocation_snapshot"))),paymentId,idempotencyKey);
         RefundRecord prior = priorRows.isEmpty() ? null : priorRows.getFirst();
         BigDecimal remaining = payment.amount().subtract(payment.refundedAmount()).subtract(payment.reversedAmount());
         if (prior != null && prior.status().equals("COMPLETED")) {
             if (command != null && command.amount() != null && prior.amount().compareTo(command.amount()) != 0)
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"This idempotency key was already used for a different refund amount");
             return ResponseEntity.ok(new RefundView(prior.id(), paymentId, prior.amount(), payment.currency(), payment.refundedAmount(), remaining,
-                    prior.providerReference(), "COMPLETED"));
+                    prior.providerReference(), "COMPLETED", prior.taxAllocationSnapshot()));
         }
         if (!Set.of("CAPTURED", "CAPTURE_REVIEW", "PARTIALLY_REFUNDED").contains(payment.status()))
             throw new ResponseStatusException(HttpStatus.CONFLICT,"Only captured payments can be refunded");
@@ -610,6 +622,12 @@ public class PaymentController {
         if (prior != null && prior.amount().compareTo(refundAmount) != 0)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"This idempotency key was already used for a different refund amount");
         UUID refundId = prior == null ? UUID.nameUUIDFromBytes((paymentId + ":" + idempotencyKey).getBytes(StandardCharsets.UTF_8)) : prior.id();
+        if (!payment.currency().equals(order.currency()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Payment and order currencies do not match for tax allocation");
+        BigDecimal priorOrderRefunds = jdbc.queryForObject("SELECT COALESCE(sum(r.amount),0) FROM payment_refunds r JOIN payments p ON p.id=r.payment_id "
+                + "WHERE p.order_id=? AND r.status='COMPLETED' AND r.id<>?", BigDecimal.class, payment.orderId(), refundId);
+        Map<String,Object> taxAllocation = TaxRefundAllocation.snapshot(order.subtotal(),order.tax(),order.shipping(),order.total(),order.currency(),
+                refundAmount,priorOrderRefunds==null?BigDecimal.ZERO:priorOrderRefunds,order.taxSnapshot());
         if (prior == null) jdbc.update("INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,currency,status) VALUES (?,?,?,?,?,'PROCESSING')",
                 refundId,paymentId,idempotencyKey,refundAmount,payment.currency());
         else if (prior.status().equals("PROCESSING")) throw new ResponseStatusException(HttpStatus.CONFLICT,"This refund is already processing");
@@ -642,12 +660,13 @@ public class PaymentController {
         String paymentStatus = totalRefunded.compareTo(payment.amount()) == 0 ? "REFUNDED" : "PARTIALLY_REFUNDED";
         jdbc.update("UPDATE payments SET refunded_amount=?,status=?,updated_at=now() WHERE id=?",totalRefunded,paymentStatus,paymentId);
         if ("REFUNDED".equals(paymentStatus)) jdbc.update("UPDATE payment_reconciliation_cases SET status='RESOLVED',resolution_note='Captured amount fully refunded',resolved_at=now() WHERE payment_id=? AND status='OPEN'",paymentId);
-        jdbc.update("UPDATE payment_refunds SET status='COMPLETED',provider_reference=?,updated_at=now() WHERE id=?",providerReference,refundId);
+        jdbc.update("UPDATE payment_refunds SET status='COMPLETED',provider_reference=?,tax_allocation_snapshot=?::jsonb,updated_at=now() WHERE id=?",
+                providerReference,writeTaxAllocation(taxAllocation),refundId);
         LoyaltyAccounting.reverseForRefund(jdbc,refundId,payment.orderId());
         OrderTimelineEvents.record(jdbc,payment.orderId(),UUID.fromString(auth.getToken().getSubject()),"PAYMENT_REFUNDED",
                 "Refund processed: "+refundAmount.toPlainString()+" "+payment.currency(),true);
         return ResponseEntity.ok(new RefundView(refundId,paymentId,refundAmount,payment.currency(),totalRefunded,
-                payment.amount().subtract(totalRefunded).subtract(payment.reversedAmount()),providerReference,"COMPLETED"));
+                payment.amount().subtract(totalRefunded).subtract(payment.reversedAmount()),providerReference,"COMPLETED",taxAllocation));
     }
 
     public record CheckoutSession(String sessionId,String checkoutUrl){}
@@ -667,13 +686,23 @@ public class PaymentController {
     private static String writeJson(Object value) {
         try { return OWNER_MAPPER.writeValueAsString(value); } catch (Exception invalid) { throw new IllegalStateException("Provider owner scope could not be serialized", invalid); }
     }
+    private static Map<String,Object> readTaxAllocation(String json) {
+        if (json == null) return null;
+        try { return TAX_MAPPER.readValue(json,TAX_ALLOCATION); }
+        catch (Exception invalid) { throw new IllegalStateException("Stored refund tax allocation is invalid",invalid); }
+    }
+    private static String writeTaxAllocation(Map<String,Object> snapshot) {
+        try { return TAX_MAPPER.writeValueAsString(snapshot); }
+        catch (Exception invalid) { throw new IllegalStateException("Refund tax allocation could not be serialized",invalid); }
+    }
     private record RefundRow(String providerReference,String status,BigDecimal amount,BigDecimal refundedAmount,BigDecimal reversedAmount,String currency,String method,UUID orderId,UUID userId,UUID giftCardId,PaymentProvider.ProviderOwner owner){}
-    private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference){}
+    private record RefundRecord(UUID id,BigDecimal amount,String status,String providerReference,Map<String,Object> taxAllocationSnapshot){}
+    private record RefundOrder(BigDecimal subtotal,BigDecimal tax,BigDecimal shipping,BigDecimal total,String currency,Map<String,Object> taxSnapshot){}
     private record PaymentSettlement(UUID id,BigDecimal amount,String currency,UUID instanceId,String status){}
     private record PaymentRiskRow(BigDecimal expectedAmount,BigDecimal capturedAmount,String currency,String capturedCurrency,UUID instanceId,BigDecimal refundedAmount,BigDecimal reversedAmount,String status){}
     public record RefundCommand(BigDecimal amount){}
     public record RefundView(UUID id,UUID paymentId,BigDecimal amount,String currency,BigDecimal totalRefunded,
-                             BigDecimal remainingAmount,String providerReference,String status){}
+                             BigDecimal remainingAmount,String providerReference,String status,Map<String,Object> taxAllocationSnapshot){}
     private record OrderRow(BigDecimal total,String currency,String status,String country){}
     private record PendingPayment(UUID id,String providerReference,String method,PaymentProvider.ProviderOwner owner){}
     private record CapturePayment(String providerReference, String status, BigDecimal amount, String currency, PaymentProvider.ProviderOwner owner, UUID id) { }
