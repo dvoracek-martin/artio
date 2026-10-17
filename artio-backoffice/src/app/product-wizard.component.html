@@ -1,5 +1,5 @@
 <section class="product-wizard">
-  <div class="page-intro"><div><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p>{{t('intro')}}</p></div><div class="wizard-page-actions">@if(draftRestored&&!productId){<button type="button" class="secondary" [disabled]="busy" (click)="openDiscardConfirmation()">Discard draft</button>}<button type="button" class="secondary" [disabled]="busy" (click)="cancel.emit()">{{productId?t('returnProducts'):t('cancel')}}</button></div></div>
+  <div class="page-intro"><div><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p>{{t('intro')}}</p></div><div class="wizard-page-actions">@if(draftRestored&&!productId){<button type="button" class="secondary" [disabled]="busy" (click)="openDiscardConfirmation()">{{t('discardDraft')}}</button>}<button type="button" class="secondary" [disabled]="busy" (click)="cancel.emit()">{{productId?t('returnProducts'):t('cancel')}}</button></div></div>
   <ol class="wizard-steps" [attr.aria-label]="t('progress')">@for (label of steps; track label; let index = $index) {
     <li [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{stepDescription(index)}}</small></div></li>
   }</ol>
