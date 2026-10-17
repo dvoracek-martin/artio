@@ -270,7 +270,7 @@ public class ExtensionManagementController {
         jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,lifecycle_state,runtime_identity) VALUES (?,?, 'default',?,'CAPABILITY_V2','CONFIGURED',?)",
                 instanceId, source.id(), releaseId, source.id());
         for (PluginManifestV2.EventSubscription subscription : manifest.subscriptions()) {
-            jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,permissions_snapshot) VALUES (?,?,?,?,?::jsonb)",
+            jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,permissions_snapshot,subscription_state) VALUES (?,?,?,?,?::jsonb,'PENDING_APPROVAL')",
                     UUID.randomUUID(), instanceId, subscription.eventType(), subscription.schemaVersion(), write(subscription.permissions()));
         }
         audit(source.id(), actor, "REGISTER_V2", Map.of("version", source.version(), "image", source.image()));
@@ -337,22 +337,38 @@ public class ExtensionManagementController {
 
     @GetMapping("/{pluginId}/subscriptions")
     @Transactional(readOnly = true)
-    public List<SubscriptionView> subscriptions(@PathVariable String pluginId) {
+    public List<SubscriptionView> subscriptions(@PathVariable String pluginId, JwtAuthenticationToken actor) {
         findPlugin(pluginId);
+        boolean canApprove = actor != null && actor.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_SUPERADMIN".equals(authority.getAuthority()));
         return jdbc.query("SELECT s.subscription_id,s.instance_id,s.event_type,s.schema_version,s.subscription_state "
                         + "FROM extension_event_subscriptions s JOIN extension_plugin_instances i ON i.instance_id=s.instance_id "
                         + "WHERE i.plugin_id=? ORDER BY s.event_type,s.schema_version",
                 (rs, row) -> new SubscriptionView(rs.getObject("subscription_id", UUID.class), rs.getObject("instance_id", UUID.class),
-                        rs.getString("event_type"), rs.getInt("schema_version"), rs.getString("subscription_state")), pluginId);
+                        rs.getString("event_type"), rs.getInt("schema_version"), rs.getString("subscription_state"), canApprove), pluginId);
     }
 
     @PutMapping("/{pluginId}/subscriptions/{subscriptionId}/state")
     public ResponseEntity<?> updateSubscriptionState(@PathVariable String pluginId, @PathVariable UUID subscriptionId,
             @RequestBody SubscriptionStateRequest request, JwtAuthenticationToken actor) {
         findPlugin(pluginId);
-        if (request == null || !Set.of("ACTIVE", "PAUSED", "DRAINING", "DISABLED").contains(request.state())) {
+        if (request == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "state must be ACTIVE, PAUSED, DRAINING or DISABLED"));
         }
+        String current = jdbc.query("SELECT s.subscription_state FROM extension_event_subscriptions s "
+                        + "JOIN extension_plugin_instances i ON i.instance_id=s.instance_id "
+                        + "WHERE i.plugin_id=? AND s.subscription_id=? FOR UPDATE OF s",
+                rs -> rs.next() ? rs.getString(1) : null, pluginId, subscriptionId);
+        if (current == null) return ResponseEntity.notFound().build();
+        boolean superadmin = actor != null && actor.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_SUPERADMIN".equals(a.getAuthority()));
+        EventSubscriptionStatePolicy.Rejection rejection = EventSubscriptionStatePolicy.rejection(current, request.state(), superadmin);
+        if (rejection == EventSubscriptionStatePolicy.Rejection.INVALID_STATE)
+            return ResponseEntity.badRequest().body(Map.of("message", "state must be ACTIVE, PAUSED, DRAINING or DISABLED"));
+        if (rejection == EventSubscriptionStatePolicy.Rejection.SUPERADMIN_REQUIRED)
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "SUPERADMIN authority is required to approve event subscriptions"));
+        if (rejection == EventSubscriptionStatePolicy.Rejection.APPROVE_OR_DISABLE_REQUIRED)
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "A pending subscription must be approved or disabled"));
         int updated = jdbc.update("UPDATE extension_event_subscriptions s SET subscription_state=?,updated_at=now() "
                         + "FROM extension_plugin_instances i WHERE s.instance_id=i.instance_id AND i.plugin_id=? AND s.subscription_id=?",
                 request.state(), pluginId, subscriptionId);
@@ -581,8 +597,8 @@ public class ExtensionManagementController {
                 rs -> rs.next() ? read(rs.getString(1), PluginManifestV2.class) : null, releaseId);
         if (v2Manifest != null) {
             for (PluginManifestV2.EventSubscription subscription : v2Manifest.subscriptions()) {
-                jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,permissions_snapshot) "
-                                + "VALUES (?,?,?,?,?::jsonb)", UUID.randomUUID(), instanceId, subscription.eventType(),
+                jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,permissions_snapshot,subscription_state) "
+                                + "VALUES (?,?,?,?,?::jsonb,'PENDING_APPROVAL')", UUID.randomUUID(), instanceId, subscription.eventType(),
                         subscription.schemaVersion(), write(subscription.permissions()));
             }
         }
@@ -2008,7 +2024,7 @@ public class ExtensionManagementController {
     public record BindingView(UUID bindingId, UUID instanceId, String capabilityId, String operationName,
                               Map<String, String> scope, int priority, String eligibilityState) { }
     public record SubscriptionView(UUID subscriptionId, UUID instanceId, String eventType, int schemaVersion,
-                                   String subscriptionState) { }
+                                   String subscriptionState, boolean canApprove) { }
     public record DeadEventDeliveryView(UUID deliveryId, String pluginId, String eventType, int attempts,
             String lastErrorCode, java.time.Instant createdAt) { }
     public record BackfillPreviewRequest(UUID subscriptionId, java.time.Instant from, java.time.Instant to,

@@ -211,8 +211,8 @@ class PluginEventDeliveryDockerIntegrationTests {
                                 + "VALUES (?,?,'late',?,'CAPABILITY_V2','ENABLED',?,1,'{\"region\":\"eu\"}'::jsonb,?::jsonb)",
                         lateInstance, pluginId, jdbc.queryForObject("SELECT release_id FROM extension_plugin_releases WHERE plugin_id=?",
                                 Long.class, pluginId), lateIdentity, "{\"apiKey\":\"" + firstSecret + "\"}");
-                jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
-                        + "VALUES (?,?,'order.created',1)", lateSubscription, lateInstance);
+                jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,subscription_state) "
+                        + "VALUES (?,?,'order.created',1,'ACTIVE')", lateSubscription, lateInstance);
                 kafka.send(record).get(10, TimeUnit.SECONDS);
                 awaitConsumerLagZero();
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=?",
@@ -315,9 +315,9 @@ class PluginEventDeliveryDockerIntegrationTests {
                         + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
                         + "VALUES (?,?,'replica',?,'CAPABILITY_V2','ENABLED',?,1,'{\"region\":\"na\"}'::jsonb,?::jsonb)",
                 secondInstance, pluginId, releaseId, secondIdentity, "{\"apiKey\":\"" + secondSecret + "\"}");
-        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) VALUES (?,?,'order.created',1)",
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,subscription_state) VALUES (?,?,'order.created',1,'ACTIVE')",
                 firstSubscription, firstInstance);
-        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) VALUES (?,?,'order.created',1)",
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,subscription_state) VALUES (?,?,'order.created',1,'ACTIVE')",
                 secondSubscription, secondInstance);
     }
 

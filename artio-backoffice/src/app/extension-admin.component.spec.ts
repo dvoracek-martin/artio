@@ -303,6 +303,24 @@ describe('ExtensionAdminComponent', () => {
     expect(page).toContain('Create binding');
   });
 
+  it('keeps new event subscriptions pending and exposes approval only to a superadmin', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.selectedExtension = { compatibilityModes: 'CAPABILITY_V2', manifest: { id: 'example.events', name: 'Events' } };
+    fixture.componentInstance.extensionSubscriptions = [{ subscriptionId: 'sub-pending', instanceId: 'instance-1', eventType: 'order.paid', schemaVersion: 1, subscriptionState: 'PENDING_APPROVAL', canApprove: true }];
+    const actions: any[] = [];
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Pending SUPERADMIN approval');
+    const approve = [...fixture.nativeElement.querySelectorAll('button')].find((button: HTMLButtonElement) => button.textContent?.includes('Approve subscription')) as HTMLButtonElement;
+    approve.click();
+    expect(actions[0]).toMatchObject({ type: 'subscriptionState', subscription: { subscriptionId: 'sub-pending' }, state: 'ACTIVE' });
+
+    fixture.componentInstance.extensionSubscriptions = [{ subscriptionId: 'sub-pending', instanceId: 'instance-1', eventType: 'order.paid', schemaVersion: 1, subscriptionState: 'PENDING_APPROVAL', canApprove: false }];
+    fixture.detectChanges();
+    expect([...fixture.nativeElement.querySelectorAll('button')].some((button: HTMLButtonElement) => button.textContent?.includes('Approve subscription'))).toBe(false);
+  });
+
   it('renders manifest-driven storage fields, hides generated credentials and emits grouped rotation', () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);

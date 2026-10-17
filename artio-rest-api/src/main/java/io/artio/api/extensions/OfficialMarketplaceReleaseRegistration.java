@@ -168,8 +168,8 @@ public final class OfficialMarketplaceReleaseRegistration {
                         + "VALUES (?,?, 'default',?,'CAPABILITY_V2','CONFIGURED',?)",
                 instanceId, source.id(), releaseId, source.id());
         for (PluginManifestV2.EventSubscription subscription : manifest.subscriptions()) {
-            jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,permissions_snapshot) "
-                            + "VALUES (?,?,?,?,?::jsonb)",
+            jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,permissions_snapshot,subscription_state) "
+                            + "VALUES (?,?,?,?,?::jsonb,'PENDING_APPROVAL')",
                     UUID.randomUUID(), instanceId, subscription.eventType(), subscription.schemaVersion(), write(subscription.permissions()));
         }
         var job = installationJobs.requestMarketplace(source.id(), instanceId, source.id(), releaseId,

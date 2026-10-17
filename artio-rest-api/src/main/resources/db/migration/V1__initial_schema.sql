@@ -1459,7 +1459,8 @@ CREATE TABLE extension_event_subscriptions (
     event_type VARCHAR(160) NOT NULL,
     schema_version INTEGER NOT NULL CHECK (schema_version > 0),
     permissions_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(permissions_snapshot) = 'array'),
-    subscription_state VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (subscription_state IN ('ACTIVE','PAUSED','DRAINING','DISABLED')),
+    subscription_state VARCHAR(16) NOT NULL DEFAULT 'PENDING_APPROVAL'
+        CHECK (subscription_state IN ('PENDING_APPROVAL','ACTIVE','PAUSED','DRAINING','DISABLED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (instance_id, event_type, schema_version),

@@ -153,16 +153,16 @@ class OrderCreatedNotificationConsumerIntegrationTests {
                         + "lifecycle_state,runtime_identity,public_configuration,encrypted_secrets) VALUES (?,?,'main',?,'CAPABILITY_V2',"
                         + "'ENABLED',?,?::jsonb,?::jsonb)", instanceId, pluginId, releaseId, pluginId, "{\"region\":\"eu\"}",
                 "{\"apiKey\":\"" + encryption.encrypt("event-secret") + "\"}");
-        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
-                        + "VALUES (?,?,'order.created',1)", subscriptionId, instanceId);
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,subscription_state) "
+                        + "VALUES (?,?,'order.created',1,'ACTIVE')", subscriptionId, instanceId);
         String secondRuntimeIdentity = "instance-" + secondInstanceId.toString().replace("-", "");
         jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
                         + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
                         + "VALUES (?,?,'eu-copy',?,'CAPABILITY_V2','ENABLED',?,1,'{\"region\":\"na\"}'::jsonb,?::jsonb)",
                 secondInstanceId, pluginId, releaseId, secondRuntimeIdentity,
                 "{\"apiKey\":\"" + encryption.encrypt("second-event-secret") + "\"}");
-        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
-                        + "VALUES (?,?,'order.created',1)", secondSubscriptionId, secondInstanceId);
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,subscription_state) "
+                        + "VALUES (?,?,'order.created',1,'ACTIVE')", secondSubscriptionId, secondInstanceId);
         Integer activeSubscriptions = jdbc.queryForObject("SELECT count(*) FROM extension_event_subscriptions s "
                         + "JOIN extension_plugin_instances i ON i.instance_id=s.instance_id "
                         + "JOIN extension_plugins p ON p.plugin_id=i.plugin_id "
@@ -269,8 +269,8 @@ class OrderCreatedNotificationConsumerIntegrationTests {
                         + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
                         + "VALUES (?,?,'default',?,'CAPABILITY_V2','ENABLED',?,2,'{\"region\":\"eu\"}'::jsonb,?::jsonb)",
                 instanceId, pluginId, releaseId, pluginId, "{\"token\":\"" + encryption.encrypt("backfill-secret") + "\"}");
-        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version) "
-                + "VALUES (?,?,'order.created',1)", subscriptionId, instanceId);
+        jdbc.update("INSERT INTO extension_event_subscriptions(subscription_id,instance_id,event_type,schema_version,subscription_state) "
+                + "VALUES (?,?,'order.created',1,'ACTIVE')", subscriptionId, instanceId);
 
         var preview = eventBackfillOperations.preview(subscriptionId, occurredAt.minusSeconds(30), occurredAt.plusSeconds(30),
                 20, 2, actorId);

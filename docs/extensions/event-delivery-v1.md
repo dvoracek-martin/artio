@@ -2,6 +2,8 @@
 
 Artio owns Kafka access and persists a minimized delivery for each active v2 subscription in the same PostgreSQL transaction as the consumer inbox receipt. Each delivery freezes its target instance, release, runtime credential generation, public configuration, encrypted secrets and payload. Plugins receive neither Kafka nor PostgreSQL credentials. Delivery uses the authenticated events.subscriber.v1/deliver runtime operation and succeeds only when the plugin returns both accepted: true and the exact stable deliveryId.
 
+New event subscriptions declared by a registered release, Marketplace release, or new plugin instance start as `PENDING_APPROVAL` in the current V1 schema. They receive no events until a SUPERADMIN explicitly activates them through the versioned subscription-state endpoint. The Backoffice shows the pending state and only offers an approval action when the API confirms the current session has SUPERADMIN authority. Existing approved subscriptions retain their state when an instance is paused or resumed; disabling the instance or subscription prevents new event selection.
+
 The worker claims deliveries with a lease and fencing token, invokes each subscriber independently, retries transient failures with bounded exponential delay, and moves the twelfth failed attempt to DEAD_LETTER. A dead delivery can be replayed by an administrator through POST /api/v1/admin/extensions/events/{deliveryId}/replay; the original frozen target, payload and delivery identity are retained, and the replay is audited. A disabled subscription does not receive newly consumed events; already queued deliveries remain owned by that subscription and can be drained or replayed.
 
 ## Controlled backfill

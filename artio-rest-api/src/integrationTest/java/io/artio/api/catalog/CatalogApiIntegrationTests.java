@@ -1189,6 +1189,11 @@ class CatalogApiIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM extension_event_subscriptions WHERE instance_id=? AND event_type='order.paid' AND permissions_snapshot='[]'::jsonb",
                 Integer.class, instanceId)).isEqualTo(1);
         UUID subscriptionId = jdbc.queryForObject("SELECT subscription_id FROM extension_event_subscriptions WHERE instance_id=?", UUID.class, instanceId);
+        assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class, subscriptionId))
+                .isEqualTo("PENDING_APPROVAL");
+        var approved = adminExchange("/api/v1/admin/extensions/{id}/subscriptions/{subscriptionId}/state", HttpMethod.PUT,
+                Map.of("state", "ACTIVE"), Map.class, pluginId, subscriptionId);
+        assertThat(approved.getStatusCode()).isEqualTo(HttpStatus.OK);
         var paused = adminExchange("/api/v1/admin/extensions/{id}/subscriptions/{subscriptionId}/state", HttpMethod.PUT,
                 Map.of("state", "PAUSED"), Map.class, pluginId, subscriptionId);
         assertThat(paused.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -1198,7 +1203,7 @@ class CatalogApiIntegrationTests {
         assertThat(subscriptions.getBody()).hasSize(2);
         assertThat(java.util.Arrays.stream(subscriptions.getBody())
                 .filter(subscription -> subscriptionId.toString().equals(subscription.get("subscriptionId")))
-                .findFirst().orElseThrow()).containsEntry("subscriptionState", "PAUSED");
+                .findFirst().orElseThrow()).containsEntry("subscriptionState", "PAUSED").containsEntry("canApprove", true);
 
         var thirdInstance = adminExchange("/api/v1/admin/extensions/{id}/instances", HttpMethod.POST,
                 Map.of("instanceKey", "account-at", "configuration", Map.of("account", "AT", "apiKey", "third-private-key")),
