@@ -29,6 +29,24 @@ describe('authInterceptor', () => {
     request.flush({ required: true });
   });
 
+  it('does not attach a stale session token to public login requests', () => {
+    const client = TestBed.inject(HttpClient);
+    client.post('/api/v1/auth/login', { email: 'admin@example.test', password: 'local-only' }).subscribe();
+
+    const request = http.expectOne('/api/v1/auth/login');
+    expect(request.request.headers.has('Authorization')).toBe(false);
+    request.flush({ accessToken: 'fresh-token' });
+  });
+
+  it('keeps first-run setup requests independent of a stored session token', () => {
+    const client = TestBed.inject(HttpClient);
+    client.post('/api/v1/setup/complete', { password: 'local-only' }).subscribe();
+
+    const request = http.expectOne('/api/v1/setup/complete');
+    expect(request.request.headers.has('Authorization')).toBe(false);
+    request.flush({ complete: true });
+  });
+
   it('continues to send the stored token to authenticated routes', () => {
     const client = TestBed.inject(HttpClient);
     client.get('/api/v1/users/me').subscribe();
