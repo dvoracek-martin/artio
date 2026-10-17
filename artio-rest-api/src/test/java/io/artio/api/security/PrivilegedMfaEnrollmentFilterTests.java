@@ -33,6 +33,19 @@ class PrivilegedMfaEnrollmentFilterTests {
         assertThat(continued).isFalse();
     }
 
+    @Test void setupOnlyPrivilegedTokenCannotStartStorageRepair() throws Exception {
+        authenticate(true);
+        var request = new MockHttpServletRequest("POST", "/api/v1/admin/catalog/media/storage-repair");
+        var response = new MockHttpServletResponse();
+        var continued = new AtomicBoolean();
+
+        filter.doFilter(request, response, (req, res) -> continued.set(true));
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        assertThat(response.getContentAsString()).contains("verified multi-factor authentication");
+        assertThat(continued).isFalse();
+    }
+
     @Test void setupOnlyPrivilegedTokenCanCompleteEnrollment() throws Exception {
         authenticate(true);
         var request = new MockHttpServletRequest("POST", "/api/v1/auth/mfa/totp/enrollment");

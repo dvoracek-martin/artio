@@ -33,7 +33,6 @@ public final class PrivilegedMfaEnrollmentFilter extends OncePerRequestFilter {
     }
 
     private boolean isEnrollmentRoute(String path) {
-        return path.equals("/api/v1/auth/mfa/totp/enrollment") || path.equals("/api/v1/auth/mfa/totp/verify")
-                || path.equals("/api/v1/auth/mfa/totp/enrollment") || path.equals("/api/v1/auth/mfa/totp/verify");
+        return path.equals("/api/v1/auth/mfa/totp/enrollment") || path.equals("/api/v1/auth/mfa/totp/verify");
     }
 }
