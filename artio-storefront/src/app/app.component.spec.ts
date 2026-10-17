@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
-import { NEVER, of } from 'rxjs';
+import { NEVER, Subject, of } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppComponent } from './app.component';
 
@@ -189,6 +189,30 @@ describe('Storefront payment return', () => {
     const sessionCalls = http.post.mock.calls.filter(([url]) => String(url).includes('/checkout-session'));
     expect(sessionCalls).toHaveLength(2);
     expect(sessionCalls.map(([, body]) => body)).toEqual([{ methodReference: 'paypal-ref' }, { methodReference: 'paypal-ref' }]);
+  });
+
+  it('ignores stale Core payment methods after the customer changes market', () => {
+    const { fixture, http } = createComponent(undefined, true, '/checkout');
+    const stale = new Subject<{ methods: any[]; partialFailure: boolean }>();
+    const current = new Subject<{ methods: any[]; partialFailure: boolean }>();
+    let request = 0;
+    http.post.mockImplementation((url: string) => url === '/api/v1/payments/methods'
+      ? (request++ === 0 ? stale : current)
+      : of({}));
+
+    const component = fixture.componentInstance;
+    component.shippingCountry = 'CH';
+    component.loadPaymentMethods();
+    component.shippingCountry = 'US';
+    component.loadPaymentMethods();
+
+    current.next({ methods: [{ reference: 'us-card', displayName: 'US card' }], partialFailure: false });
+    stale.next({ methods: [{ reference: 'ch-card', displayName: 'Swiss card' }], partialFailure: true });
+
+    expect(component.paymentMethods).toEqual([{ reference: 'us-card', displayName: 'US card' }]);
+    expect(component.paymentMethodId).toBe('us-card');
+    expect(component.paymentMethodsPartialFailure).toBe(false);
+    expect(component.paymentMethodsLoading).toBe(false);
   });
 });
 
