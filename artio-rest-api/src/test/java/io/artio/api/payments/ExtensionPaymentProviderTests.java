@@ -146,6 +146,29 @@ class ExtensionPaymentProviderTests {
     }
 
     @Test
+    void refundUsesTheHistoricalProviderInstanceAndScope() throws Exception {
+        CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
+        UUID instanceId = UUID.randomUUID();
+        var scope = Map.of("country", "CH", "currency", "CHF");
+        var owner = new CommerceCapabilityInvoker.Owner(instanceId, 55L, 4, "c".repeat(64), scope);
+        when(routed.invoke(eq("payment.provider.v1"), eq("refund"), eq(scope), eq(instanceId), eq(false),
+                eq(UUID.nameUUIDFromBytes("artio:refund:refund-7".getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString()),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new CommerceCapabilityInvoker.Invocation(new ObjectMapper().readTree(
+                        "{\"providerReference\":\"session-old\",\"state\":\"REFUNDED\",\"amount\":\"12.50\",\"currency\":\"CHF\"}"), owner));
+        var adapter = new ExtensionPaymentProvider(invoker, new ObjectMapper(), routed, "payments.compat", "none");
+        var providerOwner = new PaymentProvider.ProviderOwner(instanceId, 55L, 4, "c".repeat(64), scope);
+
+        var result = adapter.refund(providerOwner,
+                new PaymentProvider.RefundRequest("session-old", "refund-7", new BigDecimal("12.50"), "CHF"));
+
+        assertThat(result.result().state()).isEqualTo(PaymentProvider.PaymentState.REFUNDED);
+        assertThat(result.owner().instanceId()).isEqualTo(instanceId);
+        verify(routed).invoke(eq("payment.provider.v1"), eq("refund"), eq(scope), eq(instanceId), eq(false),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void webhookVerificationUsesItsExplicitBindingOwner() throws Exception {
         CommerceCapabilityInvoker routed = mock(CommerceCapabilityInvoker.class);
         UUID instanceId = UUID.randomUUID();
