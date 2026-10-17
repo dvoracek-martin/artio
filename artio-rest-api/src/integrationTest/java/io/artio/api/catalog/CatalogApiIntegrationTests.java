@@ -65,6 +65,9 @@ class CatalogApiIntegrationTests {
     private static final AtomicBoolean SHIPPING_LABELS_ENABLED = new AtomicBoolean();
     private static final AtomicBoolean SHIPPING_TRACKING_ENABLED = new AtomicBoolean();
     private static final java.util.concurrent.atomic.AtomicInteger SHIPPING_LABEL_CREATION_COUNT = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger PAYMENT_CANCELLATION_COUNT = new java.util.concurrent.atomic.AtomicInteger();
+    private static final AtomicReference<String> PAYMENT_CANCELLATION_IDEMPOTENCY_KEY = new AtomicReference<>();
+    private static final AtomicReference<PaymentProvider.PaymentState> PAYMENT_CANCELLATION_RESULT = new AtomicReference<>(PaymentProvider.PaymentState.CANCELLED);
 
     @Autowired
     private TestRestTemplate http;
@@ -216,6 +219,9 @@ class CatalogApiIntegrationTests {
         SHIPPING_LABELS_ENABLED.set(false);
         SHIPPING_TRACKING_ENABLED.set(false);
         SHIPPING_LABEL_CREATION_COUNT.set(0);
+        PAYMENT_CANCELLATION_COUNT.set(0);
+        PAYMENT_CANCELLATION_IDEMPOTENCY_KEY.set(null);
+        PAYMENT_CANCELLATION_RESULT.set(PaymentProvider.PaymentState.CANCELLED);
         UUID userId = UUID.randomUUID();
         adminUserId = userId;
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) "
@@ -417,6 +423,50 @@ class CatalogApiIntegrationTests {
             assertThat(((Number)line.get("returnableQuantity")).intValue()).isEqualTo(2);
         });
         assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement().satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("0");assertThat(stock.reserved()).isEqualByComparingTo("0");});
+    }
+
+    @Test
+    void customerCanCancelOnlyTheirPendingOrderAndReplayIsIdempotent() {
+        String ownerToken=registerCustomerToken("order-cancel-owner");
+        String otherToken=registerCustomerToken("order-cancel-other");
+        UUID ownerId=jdbc.queryForObject("SELECT id FROM users WHERE email LIKE 'order-cancel-owner-%@example.test' ORDER BY created_at DESC LIMIT 1",UUID.class);
+        UUID orderId=insertPendingOrder(ownerId);
+        UUID paymentId=UUID.randomUUID();
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
+                paymentId,orderId,ownerId,"cancel-test-"+paymentId);
+
+        var hiddenFromOtherCustomer=exchangeWithToken(otherToken,"/api/v1/payments/orders/{orderId}/cancel",HttpMethod.POST,Map.of(),Map.class,orderId);
+        assertThat(hiddenFromOtherCustomer.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("PENDING");
+        assertThat(PAYMENT_CANCELLATION_COUNT).hasValue(0);
+
+        var cancelled=exchangeWithToken(ownerToken,"/api/v1/payments/orders/{orderId}/cancel",HttpMethod.POST,Map.of(),Map.class,orderId);
+        assertThat(cancelled.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(cancelled.getBody()).containsEntry("status","cancelled");
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?",String.class,paymentId)).isEqualTo("CANCELLED");
+        assertThat(PAYMENT_CANCELLATION_COUNT).hasValue(1);
+        assertThat(PAYMENT_CANCELLATION_IDEMPOTENCY_KEY).hasValue("artio-cancel-"+paymentId);
+
+        var replay=exchangeWithToken(ownerToken,"/api/v1/payments/orders/{orderId}/cancel",HttpMethod.POST,Map.of(),Map.class,orderId);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(replay.getBody()).containsEntry("status","cancelled");
+        assertThat(PAYMENT_CANCELLATION_COUNT).hasValue(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM order_timeline_events WHERE order_id=? AND event_type='ORDER_CANCELLED' AND customer_visible",Integer.class,orderId)).isEqualTo(1);
+
+        UUID capturedOrderId=insertPendingOrder(ownerId);
+        UUID capturedPaymentId=UUID.randomUUID();
+        jdbc.update("INSERT INTO payments(id,order_id,user_id,amount,currency,method,status,provider_reference,created_at,updated_at) "
+                        + "VALUES (?,?,?,1,'USD','EXTENSION','PENDING',?,now(),now())",
+                capturedPaymentId,capturedOrderId,ownerId,"capture-race-"+capturedPaymentId);
+        PAYMENT_CANCELLATION_RESULT.set(PaymentProvider.PaymentState.CAPTURED);
+        var capturedDuringCancellation=exchangeWithToken(ownerToken,"/api/v1/payments/orders/{orderId}/cancel",HttpMethod.POST,Map.of(),Map.class,capturedOrderId);
+        assertThat(capturedDuringCancellation.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,capturedOrderId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE id=?",String.class,capturedPaymentId)).isEqualTo("PENDING");
+        assertThat(PAYMENT_CANCELLATION_COUNT).hasValue(2);
+        assertThat(PAYMENT_CANCELLATION_IDEMPOTENCY_KEY).hasValue("artio-cancel-"+capturedPaymentId);
     }
 
     @Test
@@ -3903,7 +3953,9 @@ class CatalogApiIntegrationTests {
                     return new PaymentResult(reference, PaymentState.CAPTURED, null, null, null);
                 }
                 @Override public PaymentResult cancel(String reference, String key) {
-                    return new PaymentResult(reference, PaymentState.CANCELLED, null, null, null);
+                    PAYMENT_CANCELLATION_COUNT.incrementAndGet();
+                    PAYMENT_CANCELLATION_IDEMPOTENCY_KEY.set(key);
+                    return new PaymentResult(reference, PAYMENT_CANCELLATION_RESULT.get(), null, null, null);
                 }
                 @Override public PaymentResult refund(RefundRequest request) {
                     return new PaymentResult("refund-" + request.idempotencyKey(), PaymentState.REFUNDED,
