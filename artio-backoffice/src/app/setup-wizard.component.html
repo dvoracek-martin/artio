@@ -2,7 +2,7 @@
   <aside class="setup-story">
     <a class="brand">artio<span> / setup</span></a>
     <div class="setup-story-copy"><p class="eyebrow">{{t('storyEyebrow')}}</p><h1>{{t('storyTitle')}}</h1><p>{{t('storyIntro')}}</p></div>
-    <ol class="setup-navigation" aria-label="Installation progress">@for (label of steps; track label; let index = $index) {
+    <ol class="setup-navigation" [attr.aria-label]="t('progress')">@for (label of steps; track label; let index = $index) {
       <li [class.current]="step===index" [class.complete]="step>index" [attr.aria-current]="step===index?'step':null"><span>{{step>index?'✓':index+1}}</span><div>{{label}}<small>{{descriptions[index]}}</small></div></li>
     }</ol>
     <p class="setup-story-footer">{{t('storyFooter')}}</p>
