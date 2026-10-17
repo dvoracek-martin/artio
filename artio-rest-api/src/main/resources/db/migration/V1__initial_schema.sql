@@ -254,8 +254,12 @@ CREATE INDEX pricing_discount_redemptions_order_idx ON pricing_discount_redempti
 CREATE TABLE order_shipments (
     id UUID PRIMARY KEY,
     order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    tracking_number VARCHAR(255) NOT NULL,
+    tracking_number VARCHAR(255),
     shipment_reference VARCHAR(255),
+    shipping_method_id VARCHAR(120),
+    label_url TEXT,
+    idempotency_key VARCHAR(128),
+    request_fingerprint CHAR(64) CHECK (request_fingerprint IS NULL OR request_fingerprint ~ '^[a-f0-9]{64}$'),
     provider_instance_id UUID,
     provider_release_id BIGINT,
     provider_configuration_generation INTEGER CHECK (provider_configuration_generation >= 0),
@@ -263,10 +267,13 @@ CREATE TABLE order_shipments (
     provider_scope JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(provider_scope) = 'object'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (order_id, tracking_number),
+    CHECK (tracking_number IS NULL OR btrim(tracking_number) <> ''),
+    CHECK ((idempotency_key IS NULL AND request_fingerprint IS NULL) OR (idempotency_key IS NOT NULL AND request_fingerprint IS NOT NULL)),
     CHECK ((provider_instance_id IS NULL AND provider_release_id IS NULL AND provider_configuration_generation IS NULL)
         OR (provider_instance_id IS NOT NULL AND provider_release_id IS NOT NULL AND provider_configuration_generation IS NOT NULL))
 );
 CREATE INDEX order_shipments_order_idx ON order_shipments(order_id, created_at, id);
+CREATE UNIQUE INDEX uq_order_shipments_idempotency ON order_shipments(order_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE TABLE order_shipment_items (
     shipment_id UUID NOT NULL REFERENCES order_shipments(id) ON DELETE CASCADE,
     order_item_id UUID NOT NULL REFERENCES order_items(id),

@@ -62,6 +62,9 @@ class CatalogApiIntegrationTests {
     private static final AtomicReference<RuntimeException> PROVIDER_CHECKOUT_FAILURE = new AtomicReference<>();
     private static final AtomicReference<Map<String, String>> PROVIDER_WEBHOOK_HEADERS = new AtomicReference<>(Map.of());
     private static final AtomicBoolean SHIPPING_QUOTES_ENABLED = new AtomicBoolean();
+    private static final AtomicBoolean SHIPPING_LABELS_ENABLED = new AtomicBoolean();
+    private static final AtomicBoolean SHIPPING_TRACKING_ENABLED = new AtomicBoolean();
+    private static final java.util.concurrent.atomic.AtomicInteger SHIPPING_LABEL_CREATION_COUNT = new java.util.concurrent.atomic.AtomicInteger();
 
     @Autowired
     private TestRestTemplate http;
@@ -210,6 +213,9 @@ class CatalogApiIntegrationTests {
         PROVIDER_CHECKOUT_FAILURE.set(null);
         PROVIDER_WEBHOOK_HEADERS.set(Map.of());
         SHIPPING_QUOTES_ENABLED.set(false);
+        SHIPPING_LABELS_ENABLED.set(false);
+        SHIPPING_TRACKING_ENABLED.set(false);
+        SHIPPING_LABEL_CREATION_COUNT.set(0);
         UUID userId = UUID.randomUUID();
         adminUserId = userId;
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) "
@@ -393,6 +399,63 @@ class CatalogApiIntegrationTests {
         assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("SHIPPED");
         assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement().satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("0");assertThat(stock.reserved()).isEqualByComparingTo("0");});
+    }
+
+    @Test
+    void partialShipmentCanCreateCarrierLabelAndReplayItsIdempotencyKey() {
+        SHIPPING_LABELS_ENABLED.set(true);
+        UUID orderId=UUID.randomUUID(),sellableId=UUID.randomUUID(),orderItemId=UUID.randomUUID();
+        var warehouse=inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "LBL-"+orderId.toString().substring(0,8).toUpperCase(java.util.Locale.ROOT),"Label test","CH-ZH"));
+        inventory.receive(warehouse.id(),sellableId,new BigDecimal("2"));
+        inventory.reserve(new io.artio.api.inventory.InventoryApplicationService.ReserveRequest(orderId,warehouse.id(),sellableId,new BigDecimal("2")));
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key,shipping_parcel_weight_kg) "
+                +"VALUES (?,?,'PAID',20,0,0,20,'CHF','{\"countryCode\":\"CH\",\"postalCode\":\"8000\",\"locality\":\"Zurich\",\"addressLine1\":\"Main 1\",\"recipientName\":\"Test Buyer\"}','address',now(),'CH','CH','CH','{}'::jsonb,?,2.5)",
+                orderId,adminUserId,"partial-label-"+orderId);
+        jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,2,10,'CHF',NULL)",orderItemId,orderId,sellableId);
+
+        String key="label-shipment-"+orderId;
+        var first=partialCarrierShipment(orderId,key,orderItemId,1);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(first.getBody().get("trackingNumber").toString()).startsWith("track-");
+        assertThat(first.getBody().get("labelUrl")).isEqualTo("data:application/pdf;base64,JVBERi0xLjQ=");
+        assertThat(first.getBody().get("orderStatus")).isEqualTo("PARTIALLY_SHIPPED");
+        UUID shipmentId=UUID.fromString(first.getBody().get("id").toString());
+        var replay=partialCarrierShipment(orderId,key,orderItemId,1);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(replay.getBody().get("id")).isEqualTo(shipmentId.toString());
+        assertThat(partialCarrierShipment(orderId,key,orderItemId,2).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(SHIPPING_LABEL_CREATION_COUNT.get()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM order_shipments WHERE order_id=?",Integer.class,orderId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM order_shipment_items WHERE shipment_id=?",Integer.class,shipmentId)).isEqualTo(1);
+        var labelHeaders=new HttpHeaders();labelHeaders.setBearerAuth(adminToken);
+        var label=http.exchange("/api/v1/admin/orders/{orderId}/shipments/{shipmentId}/label",HttpMethod.GET,
+                new HttpEntity<>(labelHeaders),byte[].class,orderId,shipmentId);
+        assertThat(label.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(label.getBody()).startsWith("%PDF".getBytes(StandardCharsets.US_ASCII));
+
+        var second=partialCarrierShipment(orderId,"label-shipment-second-"+orderId,orderItemId,1);
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(second.getBody().get("orderStatus")).isEqualTo("SHIPPED");
+        assertThat(SHIPPING_LABEL_CREATION_COUNT.get()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM order_shipments WHERE order_id=?",Integer.class,orderId)).isEqualTo(2);
+        assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement()
+                .satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("0");assertThat(stock.reserved()).isEqualByComparingTo("0");});
+        SHIPPING_TRACKING_ENABLED.set(true);
+        assertThat(adminExchange("/api/v1/admin/orders/{orderId}/shipments/{shipmentId}/tracking/refresh",HttpMethod.POST,
+                Map.of(),Map.class,orderId,shipmentId).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("SHIPPED");
+        UUID secondShipmentId=UUID.fromString(second.getBody().get("id").toString());
+        assertThat(adminExchange("/api/v1/admin/orders/{orderId}/shipments/{shipmentId}/tracking/refresh",HttpMethod.POST,
+                Map.of(),Map.class,orderId,secondShipmentId).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?",String.class,orderId)).isEqualTo("DELIVERED");
+    }
+
+    private ResponseEntity<Map> partialCarrierShipment(UUID orderId,String key,UUID orderItemId,int quantity){
+        var request=Map.of("shippingMethodId","test-carrier:test-flat","parcelWeightKg",new BigDecimal("1.25"),
+                "items",List.of(Map.of("orderItemId",orderItemId,"quantity",quantity)));
+        HttpHeaders headers=new HttpHeaders();headers.setBearerAuth(adminToken);headers.set("Idempotency-Key",key);
+        return http.exchange("/api/v1/admin/orders/{orderId}/shipments",HttpMethod.POST,new HttpEntity<>(request,headers),Map.class,orderId);
     }
 
     @Test
@@ -1081,6 +1144,8 @@ class CatalogApiIntegrationTests {
                 new io.artio.extensions.PluginManifestV2.CapabilityDeclaration("payment.provider.v1",
                         List.of("listMethods", "createCheckout", "capture", "verifyWebhook"),
                         List.of("payments.methods.read", "payment.process"), Map.of()),
+                new io.artio.extensions.PluginManifestV2.CapabilityDeclaration("shipping.provider.v1",
+                        List.of("createShipment"), List.of("shipping.label"), Map.of()),
                 new io.artio.extensions.PluginManifestV2.CapabilityDeclaration("catalog.enrichment.v1",
                         List.of("enrich"), List.of("catalog.read"), Map.of()),
                 new io.artio.extensions.PluginManifestV2.CapabilityDeclaration("storage.object.v1",
@@ -1214,6 +1279,10 @@ class CatalogApiIntegrationTests {
                 Map.of("capabilityId", "payment.provider.v1", "operationName", "verifyWebhook",
                         "scope", Map.of("country", "CH"), "priority", 20), Map.class, pluginId);
         assertThat(webhookBinding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var shipmentBinding=adminExchange("/api/v1/admin/extensions/{id}/bindings",HttpMethod.POST,
+                Map.of("capabilityId","shipping.provider.v1","operationName","createShipment","scope",Map.of("destinationCountry","CH"),
+                        "priority",20,"instanceId",instanceId),Map.class,pluginId);
+        assertThat(shipmentBinding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         for (UUID storageInstance : List.of(instanceId, secondInstanceId, thirdInstanceId)) {
             var storageBinding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
                     Map.of("capabilityId", "storage.object.v1", "operationName", "put", "scope", Map.of(),
@@ -1267,6 +1336,34 @@ class CatalogApiIntegrationTests {
         assertThat(selectedCheckout.response().path("providerReference").asText()).isEqualTo("selected-session");
         assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE capability_id='payment.provider.v1' "
                 + "AND operation_name='createCheckout' AND idempotency_key='attempt-selected'", String.class)).isEqualTo("SUCCEEDED");
+
+        var labelInvocationCount=new java.util.concurrent.atomic.AtomicInteger();
+        var labelInvocationKeys=new java.util.concurrent.CopyOnWriteArrayList<String>();
+        org.mockito.Mockito.when(aggregateRuntime.invoke(org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq("shipping.provider.v1"),org.mockito.ArgumentMatchers.eq("createShipment"),
+                org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Duration.class))).thenAnswer(call->{
+            labelInvocationKeys.add(call.getArgument(4));
+            if(labelInvocationCount.incrementAndGet()==1)return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(503,"{}");
+            return new io.artio.extensions.ExtensionRuntimePort.InvocationResult(200,
+                    "{\"shipmentReference\":\"carrier-ref-1\",\"trackingReference\":\"carrier-track-1\",\"labelUrl\":null}");
+        });
+        var labelPayload=Map.of("orderId","order-parcel-1","methodId","priority","idempotencyKey","carrier-label-key-1");
+        assertThatThrownBy(()->aggregateInvoker.invokeSelected("shipping.provider.v1","createShipment",
+                Map.of("destinationCountry","CH","currency","CHF"),instanceId,"carrier-label-op-1",labelPayload))
+                .isInstanceOf(io.artio.api.extensions.CommerceCapabilityInvoker.OutcomeUnknownException.class);
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE capability_id='shipping.provider.v1' AND operation_name='createShipment' AND idempotency_key='carrier-label-op-1'",String.class))
+                .isEqualTo("UNKNOWN");
+        var recoveredLabel=aggregateInvoker.invokeSelected("shipping.provider.v1","createShipment",
+                Map.of("destinationCountry","CH","currency","CHF"),instanceId,"carrier-label-op-1",labelPayload);
+        assertThat(recoveredLabel.owner().instanceId()).isEqualTo(instanceId);
+        assertThat(recoveredLabel.response().path("trackingReference").asText()).isEqualTo("carrier-track-1");
+        assertThat(labelInvocationCount.get()).isEqualTo(2);
+        assertThat(labelInvocationKeys).hasSize(2).allMatch("carrier-label-op-1"::equals);
+        assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE capability_id='shipping.provider.v1' AND operation_name='createShipment' AND idempotency_key='carrier-label-op-1'",String.class))
+                .isEqualTo("SUCCEEDED");
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM extension_operation_attempts WHERE capability_id='shipping.provider.v1' AND operation_name='createShipment' AND idempotency_key='carrier-label-op-1'",Integer.class))
+                .isEqualTo(2);
 
         var aggregate = aggregateInvoker.aggregateRead("payment.provider.v1", "listMethods", Map.of("country", "CH"), Map.of("country", "CH", "currency", "CHF"));
         assertThat(aggregate.results()).hasSize(2);
@@ -1517,7 +1614,7 @@ class CatalogApiIntegrationTests {
                 .findFirst().orElseThrow();
         assertThat(pluginSummary.get("compatibilityModes")).isEqualTo("CAPABILITY_V2");
         assertThat(pluginSummary.get("instanceCount")).isEqualTo(3);
-        assertThat(pluginSummary.get("bindingCount")).isEqualTo(9);
+        assertThat(pluginSummary.get("bindingCount")).isEqualTo(10);
         assertThat(pluginSummary.get("subscriptionCount")).isEqualTo(3);
 
         UUID deadDeliveryId = UUID.randomUUID();
@@ -3818,16 +3915,21 @@ class CatalogApiIntegrationTests {
         io.artio.extensions.commerce.ShippingProvider shippingVatTestProvider() {
             return new io.artio.extensions.commerce.ShippingProvider() {
                 @Override public ShippingCapabilities capabilities() {
-                    return new ShippingCapabilities(SHIPPING_QUOTES_ENABLED.get(), false, false, false, List.of("CH"));
+                    return new ShippingCapabilities(SHIPPING_QUOTES_ENABLED.get(), SHIPPING_LABELS_ENABLED.get(), SHIPPING_LABELS_ENABLED.get(), SHIPPING_TRACKING_ENABLED.get(), List.of("CH"));
                 }
                 @Override public List<ShippingMethod> methods(Address destination, String currency) {
-                    return List.of(new ShippingMethod("test-flat", "Test delivery", null, Map.of()));
+                    return List.of(new ShippingMethod(SHIPPING_LABELS_ENABLED.get()?"test-carrier:test-flat":"test-flat", "Test delivery", null, Map.of()));
                 }
                 @Override public ShippingQuote quote(ShippingRequest request) {
                     return new ShippingQuote(request.methodId(), new BigDecimal("15.00"), "CHF", "Test quote");
                 }
-                @Override public ShipmentResult createShipment(ShipmentRequest request) { throw new UnsupportedOperationException(); }
-                @Override public TrackingResult track(String trackingReference) { throw new UnsupportedOperationException(); }
+                @Override public ShipmentResult createShipment(ShipmentRequest request) {
+                    SHIPPING_LABEL_CREATION_COUNT.incrementAndGet();
+                    return new ShipmentResult("ref-"+request.idempotencyKey(),"track-"+request.idempotencyKey(),"data:application/pdf;base64,JVBERi0xLjQ=");
+                }
+                @Override public TrackingResult track(String trackingReference) {
+                    return new TrackingResult(trackingReference,"DELIVERED","Zurich",java.time.Instant.now().toString());
+                }
             };
         }
     }

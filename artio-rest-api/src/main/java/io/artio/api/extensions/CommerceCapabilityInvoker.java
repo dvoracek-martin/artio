@@ -26,7 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class CommerceCapabilityInvoker {
     private static final TypeReference<Map<String, Object>> OBJECTS = new TypeReference<>() { };
     private static final TypeReference<Map<String, String>> STRINGS = new TypeReference<>() { };
-    private static final Set<String> RETRYABLE_STORAGE_OPERATIONS = Set.of("put", "get", "head", "delete");
+    private static final Set<String> RETRYABLE_UNKNOWN_OPERATIONS = Set.of("storage.object.v1/put", "storage.object.v1/get",
+            "storage.object.v1/head", "storage.object.v1/delete", "shipping.provider.v1/createShipment");
     private static final Duration DEADLINE = Duration.ofSeconds(15);
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -83,7 +84,7 @@ public class CommerceCapabilityInvoker {
         if (existing != null) {
             if (!existing.fingerprint().equals(fingerprint)) throw new IdempotencyConflictException();
             if ("SUCCEEDED".equals(existing.state())) return new Invocation(pluginPayload(existing.resultJson()), existing.owner());
-            if (("UNKNOWN".equals(existing.state()) && !retryableStorageOperation(capabilityId, operationName))
+            if (("UNKNOWN".equals(existing.state()) && !retryableUnknownOperation(capabilityId, operationName))
                     || "RECONCILING".equals(existing.state())
                     || ("IN_PROGRESS".equals(existing.state()) && existing.leaseUntil() != null
                     && existing.leaseUntil().isAfter(java.time.Instant.now()))) throw new OutcomeUnknownException(existing.owner());
@@ -142,7 +143,7 @@ public class CommerceCapabilityInvoker {
         if (jdbc.update("UPDATE extension_operation_attempts SET attempt_state='IN_PROGRESS',lease_token=?,lease_until=now()+interval '45 seconds',"
                         + "attempt_count=attempt_count+1,updated_at=now() WHERE attempt_id=? AND (attempt_state IN ('PENDING','FAILED') "
                         + "OR (attempt_state='IN_PROGRESS' AND lease_until<now()) OR (attempt_state='UNKNOWN' AND ?))",
-                lease, attemptId, retryableStorageOperation(capabilityId, operationName)) == 0) {
+                lease, attemptId, retryableUnknownOperation(capabilityId, operationName)) == 0) {
             Attempt latest = findAttempt(capabilityId, operationName, idempotencyKey);
             throw new OutcomeUnknownException(latest.owner());
         }
@@ -195,8 +196,8 @@ public class CommerceCapabilityInvoker {
         }
     }
 
-    private static boolean retryableStorageOperation(String capabilityId, String operationName) {
-        return "storage.object.v1".equals(capabilityId) && RETRYABLE_STORAGE_OPERATIONS.contains(operationName);
+    private static boolean retryableUnknownOperation(String capabilityId, String operationName) {
+        return RETRYABLE_UNKNOWN_OPERATIONS.contains(capabilityId + "/" + operationName);
     }
 
     private com.fasterxml.jackson.databind.JsonNode invokeStorageTargets(ExtensionRuntimePort runtime, List<Target> targets,
