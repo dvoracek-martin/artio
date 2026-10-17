@@ -38,4 +38,30 @@ describe('SearchSelectComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.select-selection-bar')?.textContent).toContain(oneSelected);
   });
+
+  it('keeps keyboard focus inside the searchable list and returns focus to its trigger on Escape', async () => {
+    const fixture = TestBed.createComponent(SearchSelectComponent);
+    fixture.componentInstance.label = 'Store country';
+    fixture.componentInstance.options = [
+      { value: 'ch', label: 'Switzerland' },
+      { value: 'de-disabled', label: 'Disabled option', disabled: true },
+      { value: 'de', label: 'Germany' },
+    ];
+    fixture.componentInstance.open = true;
+    fixture.detectChanges();
+
+    const options = fixture.nativeElement.querySelectorAll('.select-option') as NodeListOf<HTMLButtonElement>;
+    options[0].focus();
+    options[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(options[2]);
+
+    options[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(document.activeElement).toBe(options[0]);
+
+    const search = fixture.nativeElement.querySelector('input[type="search"]') as HTMLInputElement;
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open).toBe(false);
+    expect(document.activeElement).toBe(fixture.nativeElement.querySelector('.search-select-trigger'));
+  });
 });
