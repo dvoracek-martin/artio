@@ -32,6 +32,8 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
           ? { items: route === '/checkout' ? [{ itemId: 'cart-item-1', variantId: 'variant-1', quantity: 1, unitPrice: 25.5, currency: 'CHF' }] : [] }
           : url === '/api/v1/cart/orders'
             ? orders
+        : /^\/api\/v1\/orders\/[^/]+\/items$/.test(url)
+          ? [{ orderItemId: 'order-item-1', variantId: 'variant-1', returnableQuantity: 1 }]
             : []
     )),
     post: vi.fn((url: string, _body?: unknown, _options?: unknown) => url === '/api/v1/payments/methods'
@@ -150,6 +152,34 @@ describe('Storefront payment return', () => {
 
     expect(fixture.nativeElement.querySelector('[aria-labelledby="cancel-order-title"]')).toBeTruthy();
     expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain('This action conflicts with the current state.');
+  });
+
+  it('contains keyboard focus in the customer return dialog and restores it on Escape', async () => {
+    const { fixture } = createComponent('SHIPPED', true, '/orders');
+    const buttons = () => [...fixture.nativeElement.querySelectorAll('button')] as HTMLButtonElement[];
+    buttons().find(button => button.textContent?.trim() === 'Returns & history')?.click();
+    fixture.detectChanges();
+    buttons().find(button => button.textContent?.trim() === 'Request a return')?.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const dialog = fixture.nativeElement.querySelector('[role="dialog"][aria-labelledby="return-title"]') as HTMLElement;
+    expect(dialog).toBeTruthy();
+    const closeButton = dialog.querySelector('.return-close') as HTMLButtonElement;
+    expect(document.activeElement).toBe(closeButton);
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    fixture.detectChanges();
+    const submitButton = [...dialog.querySelectorAll('button')].find(button => button.type === 'submit') as HTMLButtonElement;
+    expect(document.activeElement).toBe(submitButton);
+    submitButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(closeButton);
+
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('[aria-labelledby="return-title"]')).toBeNull();
+    expect(document.activeElement?.textContent?.trim()).toBe('Request a return');
   });
 
   it('does not trust a success redirect when the customer session is missing', () => {
