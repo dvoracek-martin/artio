@@ -101,6 +101,9 @@ class ExtensionControllerApplicationTests {
         var manifest = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "1.0.0",
                 "Provider", "0.1.0", "9.0.0", "ghcr.io/artio/payments@sha256:" + "a".repeat(64),
                 java.util.List.of(), java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
+        var replacement = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "2.0.0",
+                "Provider", "0.1.0", "9.0.0", "ghcr.io/artio/payments@sha256:" + "b".repeat(64),
+                java.util.List.of(), java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
         when(runtime.healthInstance("instance-123", manifest)).thenReturn(new ExtensionRuntimePort.RuntimeHealth(true, "HEALTHY"));
         var headers = jsonHeaders();
         headers.setBearerAuth("integration-controller-token-value-at-least-32-characters");
@@ -109,6 +112,9 @@ class ExtensionControllerApplicationTests {
         assertThat(http.postForEntity("/internal/v1/extensions/instances/install",
                 new HttpEntity<>(new ExtensionRuntimeController.InstanceManifestRequest(identity, manifest, 1), headers), Void.class)
                 .getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(http.postForEntity("/internal/v1/extensions/instances/update",
+                new HttpEntity<>(new ExtensionRuntimeController.InstanceUpdateRequest(identity, manifest, replacement,
+                        java.util.Map.of()), headers), Void.class).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(http.postForEntity("/internal/v1/extensions/instances/enable",
                 new HttpEntity<>(new ExtensionRuntimeController.InstanceEnableRequest(identity, manifest, 2,
                         java.util.Map.of("account", "eu")), headers), Void.class).getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
@@ -123,6 +129,7 @@ class ExtensionControllerApplicationTests {
                 .getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
 
         verify(runtime).installInstance(identity, manifest, java.util.Map.of());
+        verify(runtime).updateInstance(identity, manifest, replacement, java.util.Map.of());
         verify(runtime).enableInstance(identity, manifest, 2, java.util.Map.of("account", "eu"));
         verify(runtime).healthInstance(identity, manifest);
         verify(runtime).disableInstance(identity, manifest.id());

@@ -104,19 +104,24 @@ class RemoteExtensionRuntimeTests {
         var manifest = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "1.0.0",
                 "Provider", "0.1.0", "9.0.0", "ghcr.io/artio/payments@sha256:" + "a".repeat(64),
                 java.util.List.of(), java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
+        var replacement = new io.artio.extensions.PluginManifest("1", "payments.example", "Payments", "Artio", "2.0.0",
+                "Provider", "0.1.0", "9.0.0", "ghcr.io/artio/payments@sha256:" + "b".repeat(64),
+                java.util.List.of(), java.util.List.of(), java.util.Map.of(), java.util.List.of(), "/health", "/diagnostics");
 
         runtime.installInstance("instance-123", manifest);
+        runtime.updateInstance("instance-123", manifest, replacement, java.util.Map.of());
         runtime.enableInstance("instance-123", manifest, 2, java.util.Map.of("account", "eu"));
         runtime.healthInstance("instance-123", manifest);
         runtime.disableInstance("instance-123", manifest.id());
         runtime.uninstallInstance("instance-123", manifest.id());
 
-        assertThat(requests).hasSize(5);
+        assertThat(requests).hasSize(6);
         assertThat(requests.get(0)).contains("/instances/install", "instance-123");
-        assertThat(requests.get(1)).contains("/instances/enable", "instance-123", "\"account\":\"eu\"");
-        assertThat(requests.get(2)).contains("/instances/instance-123/health");
-        assertThat(requests.get(3)).contains("/instances/instance-123/disable", "payments.example");
-        assertThat(requests.get(4)).contains("/instances/instance-123/uninstall", "payments.example");
+        assertThat(requests.get(1)).contains("/instances/update", "instance-123", "\"version\":\"1.0.0\"", "\"version\":\"2.0.0\"");
+        assertThat(requests.get(2)).contains("/instances/enable", "instance-123", "\"account\":\"eu\"");
+        assertThat(requests.get(3)).contains("/instances/instance-123/health");
+        assertThat(requests.get(4)).contains("/instances/instance-123/disable", "payments.example");
+        assertThat(requests.get(5)).contains("/instances/instance-123/uninstall", "payments.example");
     }
 
     @Test

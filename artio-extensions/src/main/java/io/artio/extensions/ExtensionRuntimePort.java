@@ -37,6 +37,11 @@ public interface ExtensionRuntimePort {
     default void update(PluginManifest manifest, Map<String, RegistryAuth> registryCredentials) {
         update(manifest);
     }
+    /** Replace a stopped instance's release while keeping its stable runtime identity and owned data. */
+    default void updateInstance(String runtimeIdentity, PluginManifest current, PluginManifest replacement,
+            Map<String, RegistryAuth> registryCredentials) {
+        throw new ExtensionUnavailableException("Per-instance release updates are unavailable");
+    }
     void enable(PluginManifest manifest);
     default void enable(PluginManifest manifest, int credentialGeneration) { enable(manifest); }
     default void enable(PluginManifest manifest, int credentialGeneration, Map<String, String> configuration) {

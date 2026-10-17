@@ -179,6 +179,37 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         removeStoppedManagedContainer(manifest.id());
     }
 
+    @Override
+    public void updateInstance(String runtimeIdentity, PluginManifest current, PluginManifest replacement,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        validateRuntimeIdentity(runtimeIdentity);
+        if (current == null || replacement == null || !current.id().equals(replacement.id())) {
+            throw new IllegalArgumentException("An instance update must retain its plugin identity");
+        }
+        // Pull every immutable target image before touching the current instance containers.
+        install(replacement, registryCredentials);
+        var serviceIds = new java.util.LinkedHashSet<String>();
+        services(current).forEach(service -> serviceIds.add(service.id()));
+        services(replacement).forEach(service -> serviceIds.add(service.id()));
+        var stopped = new java.util.ArrayList<String>();
+        for (String serviceId : serviceIds) {
+            String name = serviceName(runtimeIdentity, serviceId);
+            try {
+                InspectContainerResponse container = docker.inspectContainerCmd(name).exec();
+                requireManaged(container, current.id(), runtimeIdentity);
+                if (Boolean.TRUE.equals(container.getState().getRunning())) {
+                    throw new ExtensionRuntimePort.ExtensionUnavailableException(
+                            "Disable the plugin instance before changing its release");
+                }
+                stopped.add(container.getId());
+            } catch (NotFoundException missing) {
+                // The instance may be installed but not yet enabled.
+            }
+        }
+        // Remove only this instance's stopped service containers. Persistent service volumes are retained.
+        for (String containerId : stopped) docker.removeContainerCmd(containerId).withForce(false).exec();
+    }
+
     public void enable(PluginManifest manifest) {
         enable(manifest, 1);
     }

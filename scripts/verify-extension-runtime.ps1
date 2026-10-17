@@ -133,6 +133,7 @@ try {
             $labels = $inspect[0].Config.Labels
             $extensionId = [string]$labels.'io.artio.extension'
             if ($extensionId.StartsWith("runtime.e2e$runSuffix") -or $extensionId.StartsWith("secret.e2e$runSuffix") -or
+                    $extensionId.StartsWith("runtime.v2.update$runSuffix") -or
                     $extensionId.StartsWith("runtime.egress$runSuffix") -or
                     $extensionId.StartsWith("controller.e2e$runSuffix") -or $labels.'io.artio.test.egress' -eq $runSuffix -or
                     $labels.'io.artio.test.run' -eq $runSuffix) {
@@ -149,8 +150,10 @@ try {
             $fixtureIdentity = [string]$labels.'io.artio.test.fixture'
             $runtimeIdentity = [string]$labels.'io.artio.extension.runtime'
             if (($extensionId.StartsWith("runtime.e2e$runSuffix") -or $extensionId.StartsWith("secret.e2e$runSuffix") -or
+                    $extensionId.StartsWith("runtime.v2.update$runSuffix") -or
                     $extensionId.StartsWith("runtime.egress$runSuffix") -or
-                    $extensionId.StartsWith("controller.e2e$runSuffix")) -or $runtimeIdentity.StartsWith("runtime.e2e$runSuffix") -or
+                    $extensionId.StartsWith("controller.e2e$runSuffix")) -or
+                    $runtimeIdentity.StartsWith("runtime.e2e$runSuffix") -or $runtimeIdentity.StartsWith("runtime.v2.update$runSuffix") -or
                     $fixtureIdentity.StartsWith($runSuffix)) {
                 docker volume rm $volumeName | Out-Null
             }

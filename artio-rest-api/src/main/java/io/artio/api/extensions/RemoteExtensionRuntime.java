@@ -82,6 +82,12 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     @Override public void update(PluginManifest manifest, Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         post("internal/v1/extensions/update", new ManifestRequest(manifest, 1, registryCredentials), Duration.ofSeconds(150), Void.class);
     }
+    @Override public void updateInstance(String runtimeIdentity, PluginManifest current, PluginManifest replacement,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        post("internal/v1/extensions/instances/update",
+                new InstanceUpdateRequest(runtimeIdentity, current, replacement, registryCredentials),
+                Duration.ofSeconds(150), Void.class);
+    }
     @Override public void enable(PluginManifest manifest) { enable(manifest, 1); }
     @Override public void enable(PluginManifest manifest, int generation) {
         enable(manifest, generation, Map.of());
@@ -206,6 +212,10 @@ public final class RemoteExtensionRuntime implements ExtensionRuntimePort {
     private record InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,
             Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
         private InstanceManifestRequest { registryCredentials = registryCredentials == null ? Map.of() : Map.copyOf(registryCredentials); }
+    }
+    private record InstanceUpdateRequest(String runtimeIdentity, PluginManifest current, PluginManifest replacement,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        private InstanceUpdateRequest { registryCredentials = registryCredentials == null ? Map.of() : Map.copyOf(registryCredentials); }
     }
     private record PluginIdentityRequest(String pluginId) { }
     private record InstanceEnableRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,

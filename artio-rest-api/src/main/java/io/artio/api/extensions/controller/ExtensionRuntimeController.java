@@ -95,6 +95,14 @@ final class ExtensionRuntimeController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/instances/update")
+    ResponseEntity<Void> updateInstance(@RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody InstanceUpdateRequest request) {
+        security.authorize(authorization);
+        runtime.updateInstance(request.runtimeIdentity(), request.current(), request.replacement(), request.registryCredentials());
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/enable")
     ResponseEntity<Void> enable(@RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody EnableRequest request) {
@@ -199,6 +207,10 @@ final class ExtensionRuntimeController {
         InstanceManifestRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration) {
             this(runtimeIdentity, manifest, credentialGeneration, Map.of());
         }
+    }
+    record InstanceUpdateRequest(String runtimeIdentity, PluginManifest current, PluginManifest replacement,
+            Map<String, ExtensionRuntimePort.RegistryAuth> registryCredentials) {
+        InstanceUpdateRequest { registryCredentials = registryCredentials == null ? Map.of() : Map.copyOf(registryCredentials); }
     }
     record PluginIdentityRequest(String pluginId) { }
     record InstanceEnableRequest(String runtimeIdentity, PluginManifest manifest, int credentialGeneration,

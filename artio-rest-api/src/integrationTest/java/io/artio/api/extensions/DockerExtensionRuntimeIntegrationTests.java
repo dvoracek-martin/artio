@@ -70,6 +70,62 @@ class DockerExtensionRuntimeIntegrationTests {
     }
 
     @Test
+    void updatesAndRollsBackOneV2RuntimeIdentityWithoutChangingItsSibling() throws Exception {
+        String firstImage = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V1");
+        String secondImage = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V2");
+        assumeTrue(firstImage != null && secondImage != null,
+                "Run scripts/verify-extension-runtime.ps1 to provide pinned fixture images");
+
+        DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        var transport = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost())
+                .sslConfig(config.getSSLConfig()).maxConnections(10).connectionTimeout(Duration.ofSeconds(5))
+                .responseTimeout(Duration.ofSeconds(120)).build();
+        try (DockerClient docker = DockerClientImpl.getInstance(config, transport)) {
+            String network = "artio-ext-v2-it-" + UUID.randomUUID().toString().substring(0, 8);
+            String pluginId = testPluginId("runtime.v2.update");
+            String firstInstance = pluginId + "-merchant-a";
+            String secondInstance = pluginId + "-merchant-b";
+            docker.createNetworkCmd().withName(network).withDriver("bridge")
+                    .withLabels(Map.of("io.artio.test.run", testRunId())).exec();
+            var runtime = new DockerExtensionRuntime(docker, network, 8080,
+                    new ExtensionCredentialService("integration-test-key-material-that-is-at-least-32-bytes"), true);
+            PluginManifest current = manifest(pluginId, firstImage, "1.0.0", true);
+            PluginManifest replacement = manifest(pluginId, secondImage, "2.0.0", true);
+            try {
+                runtime.installInstance(firstInstance, current);
+                runtime.installInstance(secondInstance, current);
+                runtime.enableInstance(firstInstance, current, 1, Map.of());
+                runtime.enableInstance(secondInstance, current, 1, Map.of());
+                assertInvocation(runtime, firstInstance, 1, "1");
+                assertInvocation(runtime, secondInstance, 1, "1");
+                execPython(docker, firstInstance,
+                        "from pathlib import Path; Path('/var/lib/artio-reference/proof').write_text('merchant-a-proof')");
+
+                runtime.disableInstance(firstInstance, pluginId);
+                runtime.updateInstance(firstInstance, current, replacement, Map.of());
+                runtime.enableInstance(firstInstance, replacement, 1, Map.of());
+                assertInvocation(runtime, firstInstance, 1, "2");
+                assertPersistentProof(docker, firstInstance, "merchant-a-proof");
+                assertInvocation(runtime, secondInstance, 1, "1");
+                assertThat(runtime.healthInstance(secondInstance, current).healthy()).isTrue();
+
+                runtime.disableInstance(firstInstance, pluginId);
+                runtime.updateInstance(firstInstance, replacement, current, Map.of());
+                runtime.enableInstance(firstInstance, current, 1, Map.of());
+                assertInvocation(runtime, firstInstance, 1, "1");
+                assertPersistentProof(docker, firstInstance, "merchant-a-proof");
+                assertInvocation(runtime, secondInstance, 1, "1");
+            } finally {
+                try { runtime.disableInstance(firstInstance, pluginId); } catch (RuntimeException ignored) { }
+                try { runtime.disableInstance(secondInstance, pluginId); } catch (RuntimeException ignored) { }
+                try { runtime.uninstallInstance(firstInstance, pluginId); } catch (RuntimeException ignored) { }
+                try { runtime.uninstallInstance(secondInstance, pluginId); } catch (RuntimeException ignored) { }
+                docker.removeNetworkCmd(network).exec();
+            }
+        }
+    }
+
+    @Test
     void marketplaceDigestBanStopsTheLivePluginAndPersistsContainmentWithoutRewritingLifecycle() throws Exception {
         String image = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V1");
         assumeTrue(image != null, "Run scripts/verify-extension-runtime.ps1 to provide the pinned fixture image");
@@ -418,6 +474,11 @@ class DockerExtensionRuntimeIntegrationTests {
 
     private static void assertPersistentProof(DockerClient docker, String pluginId) throws Exception {
         execPython(docker, pluginId, "from pathlib import Path; assert Path('/var/lib/artio-reference/proof').read_text() == 'durable-proof'");
+    }
+
+    private static void assertPersistentProof(DockerClient docker, String runtimeIdentity, String expected) throws Exception {
+        execPython(docker, runtimeIdentity,
+                "from pathlib import Path; assert Path('/var/lib/artio-reference/proof').read_text() == '" + expected + "'");
     }
 
     private static void execPython(DockerClient docker, String pluginId, String code) throws Exception {
