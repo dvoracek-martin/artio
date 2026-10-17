@@ -191,6 +191,23 @@ describe('Storefront payment return', () => {
     expect(sessionCalls.map(([, body]) => body)).toEqual([{ methodReference: 'paypal-ref' }, { methodReference: 'paypal-ref' }]);
   });
 
+  it('requests payment methods for the selected market and clears a no-longer-eligible choice', () => {
+    const { fixture, http } = createComponent(undefined, true, '/checkout');
+    http.post.mockImplementation((url: string) => url === '/api/v1/payments/methods'
+      ? of({ methods: [{ reference: 'us-card', displayName: 'US card' }, { reference: 'us-wallet', displayName: 'US wallet' }], partialFailure: false })
+      : of({}));
+
+    const component = fixture.componentInstance;
+    component.paymentMethodId = 'paypal-ref';
+    component.shippingCountry = 'US';
+    component.loadPaymentMethods();
+
+    const call = http.post.mock.calls.filter(([url]) => url === '/api/v1/payments/methods').at(-1);
+    expect(call?.[1]).toEqual({ country: 'US', currency: 'USD' });
+    expect(component.paymentMethods.map(method => method.reference)).toEqual(['us-card', 'us-wallet']);
+    expect(component.paymentMethodId).toBe('');
+  });
+
   it('ignores stale Core payment methods after the customer changes market', () => {
     const { fixture, http } = createComponent(undefined, true, '/checkout');
     const stale = new Subject<{ methods: any[]; partialFailure: boolean }>();
