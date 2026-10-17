@@ -632,6 +632,20 @@ class CatalogApiIntegrationTests {
         io.artio.api.extensions.DockerExtensionRuntime liveRuntime = null;
         try {
             docker = com.github.dockerjava.core.DockerClientImpl.getInstance(dockerConfig, dockerTransport);
+            var preexistingPluginContainers = docker.listContainersCmd().withShowAll(true).exec().stream()
+                    .filter(container -> container.getLabels() != null
+                            && marketplacePluginId.equals(container.getLabels().get("io.artio.extension")))
+                    .toList();
+            List<com.github.dockerjava.api.command.InspectVolumeResponse> currentVolumes = docker.listVolumesCmd().exec().getVolumes();
+            var preexistingPluginVolumes = (currentVolumes == null
+                    ? List.<com.github.dockerjava.api.command.InspectVolumeResponse>of() : currentVolumes).stream()
+                    .filter(volume -> volume.getLabels() != null
+                            && marketplacePluginId.equals(volume.getLabels().get("io.artio.extension")))
+                    .toList();
+            assertThat(preexistingPluginContainers).as("Marketplace acceptance plugin containers are test-owned")
+                    .isEmpty();
+            assertThat(preexistingPluginVolumes).as("Marketplace acceptance plugin volumes are test-owned")
+                    .isEmpty();
             liveRuntime = new io.artio.api.extensions.DockerExtensionRuntime(docker, "artio-extensions", 8080,
                     new io.artio.api.security.ExtensionCredentialService(ACTIVE_TEST_ENCRYPTION_KEY),
                     "http://extension-egress:3128");
@@ -662,11 +676,48 @@ class CatalogApiIntegrationTests {
             assertThat(installedManifest.manifestVersion()).isEqualTo("1");
             assertThat(installedManifest.image()).isEqualTo(v2Image);
             docker.inspectImageCmd(installedManifest.image()).exec();
+
+            UUID marketplaceInstanceId = jdbc.queryForObject(
+                    "SELECT instance_id FROM extension_plugin_instances WHERE plugin_id=? AND instance_key='default'",
+                    UUID.class, marketplacePluginId);
+            String runtimeIdentity = jdbc.queryForObject(
+                    "SELECT runtime_identity FROM extension_plugin_instances WHERE instance_id=?", String.class, marketplaceInstanceId);
+            assertThat(jdbc.queryForObject("SELECT compatibility_mode FROM extension_plugin_instances WHERE instance_id=?",
+                    String.class, marketplaceInstanceId)).isEqualTo("CAPABILITY_V2");
+            var binding = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                    Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                            "scope", Map.of("country", "CH"), "priority", 20, "instanceId", marketplaceInstanceId),
+                    Map.class, marketplacePluginId);
+            assertThat(binding.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+            liveRuntime.enableInstance(runtimeIdentity, installedManifest, 1, Map.of());
+            assertThat(liveRuntime.healthInstance(runtimeIdentity, installedManifest).healthy()).isTrue();
+            jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='ENABLED',updated_at=now() WHERE instance_id=?",
+                    marketplaceInstanceId);
+            var runtimeBeans = new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                    Map.of("marketplaceRuntime", liveRuntime));
+            var marketplaceInvoker = new io.artio.api.extensions.CommerceCapabilityInvoker(jdbc,
+                    new com.fasterxml.jackson.databind.ObjectMapper(), encryption,
+                    runtimeBeans.getBeanProvider(io.artio.extensions.ExtensionRuntimePort.class));
+            String orderId = UUID.randomUUID().toString();
+            String invocationIdempotencyKey = UUID.randomUUID().toString();
+            var invocation = marketplaceInvoker.invoke("payment.provider.v1", "createCheckout", Map.of("country", "CH"),
+                    null, true, invocationIdempotencyKey, Map.of("orderId", orderId, "amount", "12.50"));
+            assertThat(invocation.owner().instanceId()).isEqualTo(marketplaceInstanceId);
+            assertThat(invocation.response().path("runtimeVersion").asText()).isEqualTo("2");
+            assertThat(invocation.response().path("extensionPoint").asText()).isEqualTo("payment.provider.v1");
+            assertThat(invocation.response().path("operation").asText()).isEqualTo("createCheckout");
+            assertThat(invocation.response().path("payload").path("orderId").asText()).isEqualTo(orderId);
+            assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE capability_id=? "
+                            + "AND operation_name=? AND idempotency_key=?", String.class,
+                    "payment.provider.v1", "createCheckout", invocationIdempotencyKey)).isEqualTo("SUCCEEDED");
         } finally {
             try {
                 if (liveRuntime != null) {
-                    try { liveRuntime.disable(marketplacePluginId); }
-                    finally { liveRuntime.uninstall(marketplacePluginId); }
+                    String runtimeIdentity = jdbc.queryForObject(
+                            "SELECT runtime_identity FROM extension_plugin_instances WHERE plugin_id=?", String.class, marketplacePluginId);
+                    try { liveRuntime.disableInstance(runtimeIdentity, marketplacePluginId); }
+                    finally { liveRuntime.uninstallInstance(runtimeIdentity, marketplacePluginId); }
                 }
                 var removed = adminExchange("/api/v1/admin/extensions/{id}", HttpMethod.DELETE, null, Map.class, marketplacePluginId);
                 assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -674,6 +725,14 @@ class CatalogApiIntegrationTests {
             } finally {
                 if (docker != null) {
                     try {
+                        var remainingVolumes = docker.listVolumesCmd().exec().getVolumes();
+                        if (remainingVolumes != null) for (var volume : remainingVolumes) {
+                            Map<String, String> labels = volume.getLabels() == null ? Map.of() : volume.getLabels();
+                            if (marketplacePluginId.equals(labels.get("io.artio.extension"))
+                                    && marketplacePluginId.equals(labels.get("io.artio.extension.runtime"))) {
+                                docker.removeVolumeCmd(volume.getName()).exec();
+                            }
+                        }
                         for (String image : downloadedImages) {
                             try { docker.removeImageCmd(image).exec(); }
                             catch (com.github.dockerjava.api.exception.NotFoundException alreadyMissing) { }
