@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { setBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
+import { loadBackofficeLocale, setBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 import { SearchSelectComponent } from './search-select.component';
 
 describe('SearchSelectComponent', () => {
@@ -12,7 +12,8 @@ describe('SearchSelectComponent', () => {
     ['de', 'Geschäftsland', 'Geschäftsland suchen', 'geschäftsland durchsuchen…', 'Optionen werden geladen…', 'Keine passenden Optionen gefunden.', 'Nichts ausgewählt', 'Auswahl löschen', 'Fertig · 0 ausgewählt', '1 ausgewählt'],
     ['it', 'Paese del negozio', 'Cerca Paese del negozio', 'Cerca paese del negozio…', 'Caricamento delle opzioni…', 'Nessuna opzione corrispondente.', 'Nessuna selezione', 'Cancella selezione', 'Fatto · 0 selezionati', '1 selezionati'],
     ['fr', 'Pays du magasin', 'Rechercher Pays du magasin', 'Rechercher pays du magasin…', 'Chargement des options…', 'Aucune option correspondante.', 'Aucune sélection', 'Effacer la sélection', 'Terminé · 0 éléments sélectionnés', '1 éléments sélectionnés']
-  ] as const)('localizes searchable multi-select states in %s', (locale, label, searchLabel, placeholder, loading, noResults, noneSelected, clear, done, oneSelected) => {
+  ] as const)('localizes searchable multi-select states in %s', async (locale, label, searchLabel, placeholder, loading, noResults, noneSelected, clear, done, oneSelected) => {
+    await loadBackofficeLocale(locale as BackofficeLocale);
     setBackofficeLocale(locale as BackofficeLocale);
     const fixture = TestBed.createComponent(SearchSelectComponent);
     fixture.componentInstance.label = label;
