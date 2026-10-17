@@ -84,7 +84,7 @@
           </div><div class="detail-copy"><p class="eyebrow">{{ t('sku') }} · {{ product.sku }}</p><h1>{{ product.seoTitle || product.name }}</h1><p class="detail-description">{{ product.seoDescription || product.description }}</p>
             @if (product.variants?.length) { <label class="variant-select detail-option"><span>{{ t('chooseOption') }}</span><select [ngModel]="selectedVariants[product.id]" [ngModelOptions]="{standalone:true}" (ngModelChange)="selectProductVariant($event)">@for (variant of product.variants; track variant.id) { <option [value]="variant.id">{{ variant.name }}</option> }</select></label> }
             @if (productQuote; as quote) { <p class="detail-price">{{ quote.total.amount }} {{ moneyCurrency(quote.total.currency) }}</p> }
-            <button class="button button-dark detail-buy" (click)="add(product)">{{ t('add') }} <span aria-hidden="true">＋</span></button><p class="detail-footnote">Prices and availability are confirmed at checkout.</p>
+            <button class="button button-dark detail-buy" (click)="add(product)">{{ t('add') }} <span aria-hidden="true">＋</span></button><p class="detail-footnote">{{ t('productPriceDisclaimer') }}</p>
           </div></div>
         }
       </section>

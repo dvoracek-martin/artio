@@ -149,6 +149,7 @@ describe('Storefront payment return', () => {
 
     expect(fixture.nativeElement.textContent).toContain('Keramiktasse');
     expect(fixture.nativeElement.textContent).toContain('Handgefertigte Keramiktasse');
+    expect(fixture.nativeElement.querySelector('.detail-footnote')?.textContent).toContain('Preise und Verfügbarkeit werden an der Kasse bestätigt.');
     expect(fixture.nativeElement.querySelector('.variant-select select')?.value).toBe('variant-1');
     expect(fixture.nativeElement.textContent).toContain('25.5 CHF');
     expect(http.get).toHaveBeenCalledWith('/api/v1/public/products/tasse?locale=de');

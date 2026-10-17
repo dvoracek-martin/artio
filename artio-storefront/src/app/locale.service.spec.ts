@@ -15,6 +15,15 @@ describe('LocaleService', () => {
   });
 
   it.each([
+    ['en', 'Prices and availability are confirmed at checkout.'],
+    ['de', 'Preise und Verfügbarkeit werden an der Kasse bestätigt.'],
+    ['fr', 'Les prix et la disponibilité sont confirmés lors du paiement.'],
+    ['it', 'Prezzi e disponibilità sono confermati al checkout.']
+  ] as const)('returns the product price disclaimer in %s', (language, expected) => {
+    expect(locale.translate('productPriceDisclaimer', language as StoreLocale)).toBe(expected);
+  });
+
+  it.each([
     ['de-CH', 'de'],
     ['fr_CH', 'fr'],
     ['it', 'it'],
