@@ -1,74 +1,34 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-
-where docker >nul 2>nul
-if errorlevel 1 (
-    echo Docker CLI was not found. Install Docker Desktop and try again.
-    pause
-    exit /b 1
-)
-
-echo Starting a clean Artio developer instance and Backoffice...
+where docker >nul 2>nul || (echo Docker CLI was not found.& pause & exit /b 1)
+echo Starting the Artio developer instance, Backoffice, and local Marketplace...
 set "ARTIO_API_SPRING_PROFILES_ACTIVE=dev"
 set "ARTIO_SETUP_SKIP=false"
 set "ARTIO_SETUP_TOKEN=ArtioLocalDevSetupTokenOnly2026!"
 set "ARTIO_CATALOG_MEDIA_STORAGE=plugins"
 set "MARKETPLACE_ROOT=%~dp0..\Artio-Marketplace"
-if not exist "%MARKETPLACE_ROOT%\scripts\start-local-marketplace.ps1" (
-    echo The sibling Artio-Marketplace worktree is required for the development extension catalog.
-    echo Expected: %MARKETPLACE_ROOT%
-    pause
-    exit /b 1
-)
-echo Starting the local Artio Marketplace for extension discovery...
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%MARKETPLACE_ROOT%\scripts\start-local-marketplace.ps1"
-if errorlevel 1 (
-    echo Marketplace could not be started. Artio will not have an extension catalog.
-    pause
-    exit /b 1
-)
-for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\connection.txt'; $line = Get-Content -LiteralPath $path | Where-Object { $_ -like 'Marketplace API:*' } | Select-Object -First 1; if (-not $line) { exit 1 }; $uri = [uri](($line -replace '^Marketplace API:\s*', '').Trim()); if (-not $uri.IsAbsoluteUri -or $uri.Port -lt 1) { exit 1 }; Write-Output ('http://host.docker.internal:' + $uri.Port)"`) do set "ARTIO_MARKETPLACE_BASE_URL=%%A"
-if not defined ARTIO_MARKETPLACE_BASE_URL (
-    echo Could not resolve the local Marketplace API endpoint.
-    pause
-    exit /b 1
-)
-for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\release-trusted-key.txt'; if (-not (Test-Path -LiteralPath $path)) { exit 1 }; $key = (Get-Content -Raw -LiteralPath $path).Trim(); if ($key -notmatch '^[A-Za-z0-9._-]+=[A-Za-z0-9_-]+$') { exit 1 }; Write-Output $key"`) do set "ARTIO_MARKETPLACE_TRUSTED_KEYS=%%A"
-if not defined ARTIO_MARKETPLACE_TRUSTED_KEYS (
-    echo Could not resolve the local Marketplace release verification key.
-    echo Review %MARKETPLACE_ROOT%\.local-marketplace\release-trusted-key.txt
-    pause
-    exit /b 1
-)
-for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\advisory-trusted-key.txt'; if (-not (Test-Path -LiteralPath $path)) { exit 1 }; $key = (Get-Content -Raw -LiteralPath $path).Trim(); if ($key -notmatch '^[A-Za-z0-9._-]+=[A-Za-z0-9_-]+$') { exit 1 }; Write-Output $key"`) do set "ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS=%%A"
-if not defined ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS (
-    echo Could not resolve the local Marketplace advisory verification key.
-    echo Review %MARKETPLACE_ROOT%\.local-marketplace\advisory-trusted-key.txt
-    pause
-    exit /b 1
-)
-for /f "usebackq delims=" %%A in (`powershell.exe -NoLogo -NoProfile -Command "$path = Join-Path '%MARKETPLACE_ROOT%' '.local-marketplace\connection.txt'; $line = Get-Content -LiteralPath $path | Where-Object { $_ -like 'Public OCI registry:*' } | Select-Object -First 1; if (-not $line) { exit 1 }; $registry = ($line -replace '^Public OCI registry:\s*', '').Trim(); if ($registry -notmatch '^localhost:[0-9]{4,5}$') { exit 1 }; Write-Output $registry"`) do set "ARTIO_EXTENSION_TRUSTED_REGISTRIES=%%A"
-if not defined ARTIO_EXTENSION_TRUSTED_REGISTRIES (
-    echo Could not resolve the local Marketplace OCI registry trust host.
-    pause
-    exit /b 1
-)
+call :prepare_marketplace -RequireMarketplace
+if errorlevel 1 exit /b 1
 call :stop_artio
 if errorlevel 1 exit /b 1
 docker compose up --build -d --wait --wait-timeout 300
-if errorlevel 1 (
-    echo Artio could not be started. Review the Docker Compose output above.
-    pause
-    exit /b 1
-)
-
+if errorlevel 1 (echo Artio could not be started.& pause & exit /b 1)
 echo.
-echo Backoffice: http://localhost:4201
-echo API:        http://localhost:8080
-echo Developer setup is prefilled. Credentials: admin@example.test / ArtioLocalAdmin!2026
+echo Backoffice:       http://localhost:4201
+echo API:              http://localhost:8080
+echo Marketplace admin: see Marketplace API port in %MARKETPLACE_ROOT%\.local-marketplace\connection.txt followed by /dev-admin/
+echo Zot UI:           see the Zot registry UI endpoint in the Marketplace connection file
+echo Developer setup: admin@example.test / ArtioLocalAdmin!2026
 start "" http://localhost:4201
 pause
+exit /b 0
+
+:prepare_marketplace
+set "MARKETPLACE_HELPER_OK="
+for /f "tokens=1,* delims==" %%A in ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-local-marketplace.ps1" %*') do set "%%A=%%B"
+if not defined MARKETPLACE_HELPER_OK (echo Marketplace could not be prepared. Artio will not start without its required development catalog.& pause & exit /b 1)
+if not "%MARKETPLACE_ENABLED%"=="1" (echo Marketplace is required for this developer launcher.& exit /b 1)
 exit /b 0
 
 :stop_artio

@@ -23,5 +23,14 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo Artio services stopped. Persistent data volumes were kept.
+set "MARKETPLACE_ROOT=%~dp0..\Artio-Marketplace"
+if exist "%~dp0scripts\stop-owned-local-marketplace.ps1" (
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-owned-local-marketplace.ps1" -MarketplaceRoot "%MARKETPLACE_ROOT%"
+    if errorlevel 1 (
+        echo Artio stopped, but its launcher-owned Marketplace did not stop cleanly. Persistent data was retained.
+        pause
+        exit /b 1
+    )
+)
+echo Artio stopped. Only a local Marketplace started by an Artio launcher was stopped; persistent data volumes were kept.
 pause
