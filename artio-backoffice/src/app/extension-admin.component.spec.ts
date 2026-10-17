@@ -131,7 +131,19 @@ describe('ExtensionAdminComponent', () => {
     const secondParams = new URLSearchParams(second.request.url.split('?')[1]);
     expect(secondParams.get('afterStorageKey')).toBe('abc.jpg');
     expect(secondParams.get('repairRunId')).toBe(runId);
-    second.flush({ inspected: 1, repaired: 1, failed: 0, complete: true, nextCursor: 'xyz.png', failures: [] });
+    second.flush({ inspected: 1, repaired: 0, failed: 1, complete: false, nextCursor: 'abc.jpg', failures: [{ storageKey: 'failed.png', code: 'IllegalStateException' }] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ storageMode: 'plugins', activePluginObjects: 2, pendingMigration: 0, migrationAvailable: true, canManageStorage: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Some copies could not be checked. Retry this batch; if it keeps failing, check the storage plugin health and saved placement.');
+
+    [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Continue storage repair'))?.click();
+    const retry = http.match(request => request.url.startsWith('/api/v1/admin/catalog/media/storage-repair?'))[0];
+    const retryParams = new URLSearchParams(retry.request.url.split('?')[1]);
+    expect(retryParams.get('afterStorageKey')).toBe('abc.jpg');
+    expect(retryParams.get('repairRunId')).toBe(runId);
+    retry.flush({ inspected: 1, repaired: 1, failed: 0, complete: true, nextCursor: 'xyz.png', failures: [] });
     http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ storageMode: 'plugins', activePluginObjects: 2, pendingMigration: 0, migrationAvailable: true, canManageStorage: true });
     await fixture.whenStable();
     fixture.detectChanges();
