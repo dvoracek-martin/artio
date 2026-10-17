@@ -20,20 +20,22 @@ $portReservation.Stop()
 $createdImageReferences = [System.Collections.Generic.List[string]]::new()
 $temporaryBaseImages = [System.Collections.Generic.List[string]]::new()
 $registryStarted = $false
-$registryImagePreexisting = $false
-
-docker image inspect registry:2 *> $null
-if ($LASTEXITCODE -eq 0) { $registryImagePreexisting = $true }
+$initialImageReferences = @(
+    docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}'
+    docker image ls --digests --no-trunc --format '{{.Repository}}@{{.Digest}}'
+)
+$registryImagePreexisting = $initialImageReferences -contains 'registry:2'
 
 # Build/test base images are removed only when this run had to add their exact immutable reference.
 foreach ($baseImage in @(
         'python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4',
         'eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64',
         'alpine:3.20',
-        'postgres:16-alpine'
+        'postgres:16-alpine',
+        'apache/kafka:3.8.0',
+        'testcontainers/ryuk:0.14.0'
     )) {
-    docker image inspect $baseImage *> $null
-    if ($LASTEXITCODE -ne 0) { $temporaryBaseImages.Add($baseImage) }
+    if ($initialImageReferences -notcontains $baseImage) { $temporaryBaseImages.Add($baseImage) }
 }
 
 try {
@@ -183,7 +185,11 @@ try {
     }
 
     foreach ($imageReference in $createdImageReferences) {
-        docker image rm $imageReference 2>$null | Out-Null
+        $localReferences = @(
+            docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}'
+            docker image ls --digests --no-trunc --format '{{.Repository}}@{{.Digest}}'
+        )
+        if ($localReferences -contains $imageReference) { docker image rm $imageReference 2>$null | Out-Null }
     }
     foreach ($imageReference in @(docker image ls --format '{{.Repository}}:{{.Tag}}' |
             Where-Object { $_ -like "artio/controller-it:$runSuffix*" })) {
@@ -191,13 +197,18 @@ try {
     }
 
     foreach ($imageReference in $temporaryBaseImages) {
-        $imageId = docker image inspect $imageReference --format '{{.Id}}' 2>$null
-        if ($LASTEXITCODE -eq 0 -and $imageId) {
-            docker image rm --force $imageId.Trim() 2>$null | Out-Null
-        }
+        # Remove only the exact tag/digest that was absent before this run. Removing by
+        # image ID can also delete pre-existing local aliases of the same image.
+        $localReferences = @(
+            docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}'
+            docker image ls --digests --no-trunc --format '{{.Repository}}@{{.Digest}}'
+        )
+        if ($localReferences -contains $imageReference) { docker image rm $imageReference 2>$null | Out-Null }
     }
 
-    if (-not $registryImagePreexisting -and @(docker ps -aq --filter ancestor=registry:2).Count -eq 0) {
+    $localTags = @(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}')
+    if (-not $registryImagePreexisting -and $localTags -contains 'registry:2' -and
+            @(docker ps -aq --filter ancestor=registry:2).Count -eq 0) {
         docker image rm registry:2 2>$null | Out-Null
     }
 }
