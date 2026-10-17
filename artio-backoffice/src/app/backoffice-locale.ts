@@ -1,5 +1,11 @@
 export type BackofficeLocale = 'de' | 'it' | 'fr' | 'en';
 
+export function defineBackofficeLocaleCopy<const T extends Record<BackofficeLocale, Record<string, string>>>(
+  copy: T & { [locale in BackofficeLocale]: Record<keyof T['en'], string> },
+): T {
+  return copy;
+}
+
 const COPY = {
   en: { loadingProductMedia:'Loading product media…', loadingCatalogData:'Loading catalog data…', loadingInventory:'Loading inventory…', loadingGiftCards:'Loading gift cards…',
     selectSearch: 'Search {label}', selectSearchPlaceholder: 'Search {label}…', selectLoading: 'Loading options…', selectSelected: '{count} selected', selectClear: 'Clear', selectNoResults: 'No matching options.', selectDone: 'Done · {count} selected', selectNothingSelected: 'Nothing selected',
