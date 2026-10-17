@@ -4,12 +4,23 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 import { ExtensionAdminComponent } from './extension-admin.component';
+import { extensionAdminText, type ExtensionAdminTextKey } from './extension-admin-locale';
 
 describe('ExtensionAdminComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({ imports: [ExtensionAdminComponent], providers: [provideHttpClient(), provideHttpClientTesting()] }).compileComponents();
   });
   afterEach(() => localStorage.removeItem('artio-backoffice-language'));
+
+  it.each([
+    ['en', 'Release', 'Configuration generation'],
+    ['de', 'Version', 'Konfigurationsgeneration'],
+    ['it', 'Release', 'Generazione della configurazione'],
+    ['fr', 'Version', 'Génération de la configuration'],
+  ] as const)('localizes instance release metadata in %s', (locale, release, generation) => {
+    expect(extensionAdminText(locale, 'instanceRelease' as ExtensionAdminTextKey)).toBe(release);
+    expect(extensionAdminText(locale, 'configurationGeneration' as ExtensionAdminTextKey)).toBe(generation);
+  });
 
   it.each([
     ['en', 'Register trusted extensions', 'Regional catalog', 'No plugins are recommended', 'No extensions are registered.', 'Discover published plugins'],
@@ -173,6 +184,7 @@ describe('ExtensionAdminComponent', () => {
     const page = fixture.nativeElement.textContent as string;
     expect(page).toContain('INSTANCE COMPOSITION');
     expect(page).toContain('primary');
+    expect(page).toContain('Release 4 · Configuration generation 2');
     expect(page).toContain('storage.object.v1');
     expect(page).toContain('order.paid v1');
     expect(page).toContain('Create instance');
