@@ -47,6 +47,45 @@ describe('AdminComponent setup detection', () => {
     http.expectNone('/api/v1/admin/orders?page=0&size=1&sort=createdAt&direction=desc');
   });
 
+  it('keeps regional settings unavailable until loaded, offers recovery after failure, and saves only once', () => {
+    const fixture = TestBed.createComponent(AdminComponent);
+    fixture.detectChanges();
+    http.expectOne('/api/v1/setup/status').flush({ required: false, developerMode: false });
+    const component = fixture.componentInstance;
+    component.token = `header.${btoa(JSON.stringify({ role: 'SUPERADMIN' }))}.signature`;
+    component.tab = 'system';
+    component.loadSystemSettings();
+    component.saveSystemSettings();
+    expect(component.systemSettingsLoaded).toBe(false);
+    http.expectOne('/api/v1/admin/system/distribution/plugins').flush([]);
+    http.expectOne('/api/v1/admin/system/settings/audit').flush([]);
+    http.expectOne('/api/v1/admin/system/settings').flush({ message: 'Temporarily unavailable' }, { status: 503, statusText: 'Unavailable' });
+    fixture.detectChanges();
+    expect(component.systemSettingsLoaded).toBe(false);
+    expect(fixture.nativeElement.querySelector('.system-settings-form')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Temporarily unavailable');
+
+    fixture.nativeElement.querySelector('button.secondary').click();
+    http.expectOne('/api/v1/admin/system/distribution/plugins').flush([]);
+    http.expectOne('/api/v1/admin/system/settings/audit').flush([]);
+    http.expectOne('/api/v1/admin/system/settings').flush({ storeName: 'Loaded Store', countryCode: 'CH', currencyCode: 'CHF', locale: 'de-CH', timezone: 'Europe/Zurich', externalBaseUrl: '', distributionId: 'switzerland-v1', availableLanguages: ['de', 'fr'] });
+    fixture.detectChanges();
+    expect(component.systemSettingsLoaded).toBe(true);
+    expect(fixture.nativeElement.querySelector('.system-settings-form')).not.toBeNull();
+
+    component.saveSystemSettings();
+    expect(component.systemSettingsSaving).toBe(true);
+    component.saveSystemSettings();
+    const saves = http.match('/api/v1/admin/system/settings');
+    expect(saves).toHaveLength(1);
+    expect(saves[0].request.body.storeName).toBe('Loaded Store');
+    saves[0].flush({ storeName: 'Saved Store', countryCode: 'CH', currencyCode: 'CHF', locale: 'de-CH', timezone: 'Europe/Zurich', externalBaseUrl: '', distributionId: 'switzerland-v1', availableLanguages: ['de', 'fr'] });
+    expect(component.systemSettingsSaving).toBe(false);
+    http.expectOne('/api/v1/admin/system/distribution/plugins').flush([]);
+    http.expectOne('/api/v1/admin/system/settings/audit').flush([]);
+    http.expectOne('/api/v1/admin/system/settings').flush({ storeName: 'Saved Store', countryCode: 'CH', currencyCode: 'CHF', locale: 'de-CH', timezone: 'Europe/Zurich', externalBaseUrl: '', distributionId: 'switzerland-v1', availableLanguages: ['de', 'fr'] });
+  });
+
   it('clears a stale saved session and still shows setup when the installation is clean', () => {
     localStorage.setItem('artio-admin-token', 'stale-session');
     localStorage.setItem('artio-admin-email', 'old@example.test');
