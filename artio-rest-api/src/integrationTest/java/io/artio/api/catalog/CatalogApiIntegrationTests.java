@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.HexFormat;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -17,6 +18,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -50,7 +52,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "artio.payments.extension-plugin-id=integration-test")
 @AutoConfigureTestRestTemplate
-@Import(CatalogApiIntegrationTests.LocalCacheConfiguration.class)
+@Import({CatalogApiIntegrationTests.LocalCacheConfiguration.class, CatalogApiIntegrationTests.ShippingVatConfiguration.class})
 class CatalogApiIntegrationTests {
     private static final String ACTIVE_TEST_ENCRYPTION_KEY = "integration-test-encryption-key-value-32-bytes-minimum";
     private static final String PREVIOUS_TEST_ENCRYPTION_KEY = "previous-test-encryption-key-value-32-bytes-minimum";
@@ -59,6 +61,7 @@ class CatalogApiIntegrationTests {
     private static final AtomicReference<String> PROVIDER_RESPONSE = new AtomicReference<>("{\"status\":\"open\",\"payment_status\":\"unpaid\",\"amount\":\"12.50\",\"currency\":\"CHF\"}");
     private static final AtomicReference<RuntimeException> PROVIDER_CHECKOUT_FAILURE = new AtomicReference<>();
     private static final AtomicReference<Map<String, String>> PROVIDER_WEBHOOK_HEADERS = new AtomicReference<>(Map.of());
+    private static final AtomicBoolean SHIPPING_QUOTES_ENABLED = new AtomicBoolean();
 
     @Autowired
     private TestRestTemplate http;
@@ -206,6 +209,7 @@ class CatalogApiIntegrationTests {
                 jdbc, inventory, orderUpdates, transactionManager, paymentProviders);
         PROVIDER_CHECKOUT_FAILURE.set(null);
         PROVIDER_WEBHOOK_HEADERS.set(Map.of());
+        SHIPPING_QUOTES_ENABLED.set(false);
         UUID userId = UUID.randomUUID();
         adminUserId = userId;
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,role,created_at) "
@@ -2708,6 +2712,110 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void checkoutAllocatesGrossShippingAcrossSwissTaxClassesAndPersistsTheSnapshot() throws Exception {
+        SHIPPING_QUOTES_ENABLED.set(true);
+        var suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+        var standardProduct = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Standard rate item", null, "SHIP-STD-" + suffix), ProductResponse.class);
+        var reducedProduct = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Reduced rate item", null, "SHIP-RED-" + suffix), ProductResponse.class);
+        var standardVariant = adminExchange("/api/v1/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Standard", "SHIP-STD-V-" + suffix), VariantResponse.class, standardProduct.getBody().id());
+        var reducedVariant = adminExchange("/api/v1/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Reduced", "SHIP-RED-V-" + suffix), VariantResponse.class, reducedProduct.getBody().id());
+        for (var priced : List.of(standardVariant.getBody(), reducedVariant.getBody())) {
+            var response = adminExchange("/api/v1/prices", HttpMethod.POST,
+                    new io.artio.api.pricing.PricingApplicationService.PriceRequest(priced.id(), "CH", "WEB",
+                            priced.id().equals(standardVariant.getBody().id()) ? new BigDecimal("100.00") : new BigDecimal("50.00"),
+                            "CHF", java.time.Instant.now().minusSeconds(60), null), String.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        }
+        adminExchange("/api/v1/tax-rules/sellables/{sellableId}/category", HttpMethod.PUT,
+                new io.artio.api.pricing.PricingController.TaxCategoryRequest(io.artio.pricing.TaxCategory.REDUCED),
+                io.artio.api.pricing.PricingController.TaxCategoryView.class, reducedVariant.getBody().id());
+
+        var warehouseResponse = adminExchange("/api/v1/warehouses", HttpMethod.POST,
+                new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest("SHIP-" + suffix, "Shipping tax test", "CH"), String.class);
+        assertThat(warehouseResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        var warehouse = readWarehouse(warehouseResponse.getBody());
+        for (var priced : List.of(standardVariant.getBody(), reducedVariant.getBody())) {
+            var receipt = adminExchange("/api/v1/warehouses/{warehouseId}/stock/{sellableId}/receipts", HttpMethod.POST,
+                    new io.artio.api.inventory.InventoryController.QuantityRequest(new BigDecimal("5")),
+                    io.artio.api.inventory.InventoryApplicationService.StockView.class, warehouse.id(), priced.id());
+            assertThat(receipt.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+
+        String customerToken = registerCustomerToken("shipping-tax");
+        HttpHeaders customerHeaders = new HttpHeaders();
+        customerHeaders.setBearerAuth(customerToken);
+        for (var priced : List.of(standardVariant.getBody(), reducedVariant.getBody())) {
+            var added = http.exchange("/api/v1/cart/items", HttpMethod.POST,
+                    new HttpEntity<>(new io.artio.api.orders.CartController.AddItemRequest(priced.id(), BigDecimal.ONE, "CH", "WEB", "CH"), customerHeaders), String.class);
+            assertThat(added.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+
+        customerHeaders.set("Idempotency-Key", "shipping-tax-" + suffix);
+        String giftCardCode = "SHIPGIFT" + suffix;
+        String giftCardHash = HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(giftCardCode.getBytes(StandardCharsets.UTF_8)));
+        UUID giftCardId = UUID.randomUUID();
+        jdbc.update("INSERT INTO gift_cards(id,code_hash,initial_balance,balance,currency,active) VALUES (?,?,25,25,'CHF',true)",
+                giftCardId, giftCardHash);
+        var checkout = new io.artio.api.orders.CartController.CheckoutRequest("Main 1, 8000 Zürich", null, "CH", "de-CH",
+                "test-flat", new io.artio.api.orders.CartController.ShippingAddressDetails("Ada Example", "8000", "Zürich", "Main 1", null),
+                BigDecimal.ONE, giftCardCode);
+        var response = http.exchange("/api/v1/cart/checkout", HttpMethod.POST, new HttpEntity<>(checkout, customerHeaders), String.class);
+
+        assertThat(response.getStatusCode()).withFailMessage("Checkout response: %s", response.getBody()).isEqualTo(HttpStatus.CREATED);
+        var order = readOrder(response.getBody());
+        assertThat(order.subtotal()).isEqualByComparingTo("150.00");
+        assertThat(order.tax()).isEqualByComparingTo("10.28");
+        assertThat(order.shipping()).isEqualByComparingTo("14.12");
+        assertThat(order.total()).isEqualByComparingTo("174.40");
+        JsonNode snapshot = mapper.valueToTree(order.taxSnapshot());
+        assertThat(snapshot.path("shippingGrossAmount").decimalValue()).isEqualByComparingTo("15.00");
+        assertThat(snapshot.path("shippingTaxAmount").decimalValue()).isEqualByComparingTo("0.88");
+        assertThat(snapshot.path("shippingTaxAllocationBasis").asText()).isEqualTo("TAXABLE_ITEM_VALUE");
+        assertThat(snapshot.path("shippingTaxAllocations").get(0).path("taxCategory").asText()).isEqualTo("REDUCED");
+        assertThat(snapshot.path("shippingTaxAllocations").get(0).path("grossAmount").decimalValue()).isEqualByComparingTo("5.00");
+        assertThat(snapshot.path("shippingTaxAllocations").get(1).path("taxCategory").asText()).isEqualTo("STANDARD");
+        assertThat(snapshot.path("shippingTaxAllocations").get(1).path("grossAmount").decimalValue()).isEqualByComparingTo("10.00");
+        assertThat(jdbc.queryForObject("SELECT subtotal+tax+shipping=total FROM orders WHERE id=?", Boolean.class, order.orderId())).isTrue();
+        assertThat(jdbc.queryForObject("SELECT balance FROM gift_cards WHERE id=?", BigDecimal.class, giftCardId)).isEqualByComparingTo("0.00");
+        assertThat(jdbc.queryForObject("SELECT amount FROM payments WHERE order_id=? AND method='GIFT_CARD'", BigDecimal.class, order.orderId()))
+                .isEqualByComparingTo("25.00");
+    }
+
+    @Test
+    void checkoutRejectsPriceCurrencyThatDoesNotMatchTheShippingMarket() {
+        var suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+        var product = adminExchange("/api/v1/products", HttpMethod.POST,
+                new ProductRequest("Currency mismatch item", null, "CUR-MISMATCH-" + suffix), ProductResponse.class);
+        var variant = adminExchange("/api/v1/products/{id}/variants", HttpMethod.POST,
+                new VariantRequest("Standard", "CUR-MISMATCH-V-" + suffix), VariantResponse.class, product.getBody().id());
+        var price = adminExchange("/api/v1/prices", HttpMethod.POST,
+                new io.artio.api.pricing.PricingApplicationService.PriceRequest(variant.getBody().id(), "CH", "WEB",
+                        new BigDecimal("10.00"), "EUR", java.time.Instant.now().minusSeconds(60), null), String.class);
+        assertThat(price.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        String customerToken = registerCustomerToken("currency-mismatch");
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(customerToken);
+        var added = http.exchange("/api/v1/cart/items", HttpMethod.POST,
+                new HttpEntity<>(new io.artio.api.orders.CartController.AddItemRequest(variant.getBody().id(), BigDecimal.ONE, "CH", "WEB", "CH"), headers), String.class);
+        assertThat(added.getStatusCode()).isEqualTo(HttpStatus.OK);
+        headers.set("Idempotency-Key", "currency-mismatch-" + UUID.randomUUID());
+
+        var checkout = new io.artio.api.orders.CartController.CheckoutRequest("Main 1, 8000 Zürich", null, "CH", "en-CH");
+        var response = http.exchange("/api/v1/cart/checkout", HttpMethod.POST, new HttpEntity<>(checkout, headers), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).contains("Cart currency does not match shipping country");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM orders WHERE user_id=(SELECT id FROM users WHERE email LIKE 'currency-mismatch-%@example.test')",
+                Integer.class)).isZero();
+    }
+
+    @Test
     void bundleApiQuotesMultipleSelectionGroupsAndBothBundlePriceModes() {
         var suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
         var product = adminExchange("/api/v1/products", HttpMethod.POST,
@@ -3609,6 +3717,27 @@ class CatalogApiIntegrationTests {
                         return Optional.empty();
                     } catch (RuntimeException invalid) { return Optional.empty(); }
                 }
+            };
+        }
+    }
+
+    @TestConfiguration
+    static class ShippingVatConfiguration {
+        @Bean
+        @Primary
+        io.artio.extensions.commerce.ShippingProvider shippingVatTestProvider() {
+            return new io.artio.extensions.commerce.ShippingProvider() {
+                @Override public ShippingCapabilities capabilities() {
+                    return new ShippingCapabilities(SHIPPING_QUOTES_ENABLED.get(), false, false, false, List.of("CH"));
+                }
+                @Override public List<ShippingMethod> methods(Address destination, String currency) {
+                    return List.of(new ShippingMethod("test-flat", "Test delivery", null, Map.of()));
+                }
+                @Override public ShippingQuote quote(ShippingRequest request) {
+                    return new ShippingQuote(request.methodId(), new BigDecimal("15.00"), "CHF", "Test quote");
+                }
+                @Override public ShipmentResult createShipment(ShipmentRequest request) { throw new UnsupportedOperationException(); }
+                @Override public TrackingResult track(String trackingReference) { throw new UnsupportedOperationException(); }
             };
         }
     }

@@ -4,7 +4,7 @@ This Docker plugin implements Artio's `shipping.provider.v1` contract for domest
 
 ## Configuration
 
-Register the client with Swiss Post Digital Commerce and request the `DCAPI_BARCODE_READ` scope. Configure the issued client ID/secret, franking licence and sender address in the Artio extension settings. Artio stores the secret encrypted. The operator supplies the ECO/PRI checkout prices in CHF. By default `printPreview` is enabled and Swiss Post marks created labels as specimens; disable it only after the merchant's credentials and workflow are accepted for live label generation.
+Register the client with Swiss Post Digital Commerce and request the `DCAPI_BARCODE_READ` scope. Configure the issued client ID/secret, franking licence and sender address in the Artio extension settings. Artio stores the secret encrypted. The operator supplies the ECO/PRI customer-facing gross checkout prices in CHF, including any applicable VAT. Core allocates shipping VAT from the accepted gross price across the taxable item classes in the order. By default `printPreview` is enabled and Swiss Post marks created labels as specimens; disable it only after the merchant's credentials and workflow are accepted for live label generation.
 
 Swiss Post's client credentials authorize access to a registered client; actual API products and franking licence are subject to the merchant's Swiss Post contract. The published API documentation describes OAuth client credentials and `POST /barcode/v1/generateAddressLabel`. It also says the client must be registered by Swiss Post and a franking licence is required. No provider credentials or test environment are included in this repository.
 

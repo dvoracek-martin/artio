@@ -226,9 +226,15 @@ public class CartController {
             validateShippingQuote(providerQuote, shippingMethodId, currency.getCurrencyCode());
             shippingAmount = providerQuote.amount();
         }
-        Money shipping=new Money(shippingAmount,currency);
+        var shippingTax=ShippingTaxAllocation.allocate(shippingAmount,currency,taxLines.stream()
+                .map(line->new ShippingTaxAllocation.TaxableBasis(line.taxCategory(),line.taxRatePercent(),
+                        line.taxableAmount().multiply(line.bundleAdjustmentFactor()==null?BigDecimal.ONE:line.bundleAdjustmentFactor())))
+                .toList());
+        tax=tax.add(shippingTax.taxAmount());
+        Money shipping=new Money(shippingTax.netAmount(),currency);
         var order=Order.checkout(orderId,userId,orderItems,persistedShippingAddress,persistedBillingAddress,new Money(subtotal,currency),new Money(tax,currency),shipping);
         Map<String,Object> taxSnapshot=new HashMap<>();taxSnapshot.put("schemaVersion",2);taxSnapshot.put("calculatedAt",Instant.now());taxSnapshot.put("shippingCountry",request.shippingCountry().toUpperCase(java.util.Locale.ROOT));taxSnapshot.put("market",market.market());taxSnapshot.put("jurisdiction",market.jurisdiction());taxSnapshot.put("currency",currency.getCurrencyCode());taxSnapshot.put("lines",List.copyOf(taxLines));taxSnapshot.put("bundles",List.copyOf(bundleSnapshots));
+        taxSnapshot.put("shippingAmount",shippingTax.grossAmount());taxSnapshot.put("shippingNetAmount",shippingTax.netAmount());taxSnapshot.put("shippingTaxAmount",shippingTax.taxAmount());taxSnapshot.put("shippingGrossAmount",shippingTax.grossAmount());taxSnapshot.put("shippingTaxIncluded",true);taxSnapshot.put("shippingTaxAllocationBasis","TAXABLE_ITEM_VALUE");taxSnapshot.put("shippingTaxAllocations",shippingTax.allocations());
         if(providerQuote!=null){taxSnapshot.put("shippingMethodId",providerQuote.methodId());taxSnapshot.put("shippingAmount",providerQuote.amount());taxSnapshot.put("shippingCurrency",providerQuote.currency());taxSnapshot.put("shippingEstimatedDelivery",providerQuote.estimatedDelivery());taxSnapshot.put("shippingParcelWeightKg",parcelWeight);}
         String taxSnapshotJson;try{taxSnapshotJson=mapper.writeValueAsString(taxSnapshot);}catch(com.fasterxml.jackson.core.JsonProcessingException e){throw new IllegalStateException("Order tax snapshot could not be serialized",e);}
         boolean loyaltyEligible=licensing.allows(io.artio.api.licensing.EnterpriseFeature.LOYALTY);

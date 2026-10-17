@@ -16,6 +16,8 @@ function createComponent(orderStatus: string | undefined, authenticated = true, 
         ? { googleOidcEnabled: false, countryCode: 'CH', currencyCode: 'CHF', locale: 'en', availableLanguages: ['en','de'] }
         : url === '/api/v1/users/me/preferences'
           ? { preferredLocale, defaultLocale: 'en', availableLanguages: ['en','de'] }
+        : url.startsWith('/api/v1/bundles/localized?') || url === '/api/v1/categories' || url === '/api/v1/brands'
+          ? []
         : url.startsWith('/api/v1/public/products/')
           ? publicProduct
         : url === '/api/v1/products'
@@ -187,5 +189,33 @@ describe('Storefront payment return', () => {
     const sessionCalls = http.post.mock.calls.filter(([url]) => String(url).includes('/checkout-session'));
     expect(sessionCalls).toHaveLength(2);
     expect(sessionCalls.map(([, body]) => body)).toEqual([{ methodReference: 'paypal-ref' }, { methodReference: 'paypal-ref' }]);
+  });
+});
+
+describe('Storefront currency formatting', () => {
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    localStorage.removeItem('artio-token');
+    localStorage.removeItem('artio-locale');
+    history.replaceState({}, '', '/');
+    document.querySelector('link[rel="canonical"]')?.remove();
+    document.querySelector('script[data-artioSeo="website"]')?.remove();
+    document.querySelector('script[data-artioSeo="products"]')?.remove();
+  });
+
+  it('formats CHF amounts using each supported storefront locale', () => {
+    const { fixture } = createComponent(undefined, false, '/cart');
+    const item = { itemId: 'line-1', variantId: 'variant-1', quantity: 1, unitPrice: 12345.5, currency: 'CHF' };
+    const expected: Record<string, string> = {
+      en: 'CHF\u00a012,345.50',
+      de: '12.345,50\u00a0CHF',
+      fr: '12\u202f345,50\u00a0CHF',
+      it: '12.345,50\u00a0CHF',
+    };
+
+    for (const locale of ['en', 'de', 'fr', 'it'] as const) {
+      fixture.componentInstance.setPreferredLocale(locale);
+      expect(fixture.componentInstance.lineTotal(item)).toBe(expected[locale]);
+    }
   });
 });
