@@ -581,7 +581,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         containers.sort(java.util.Comparator.comparingInt(DockerExtensionRuntime::startupOrder).reversed());
         for (InspectContainerResponse current : containers) {
             requireManaged(current, pluginId, runtimeIdentity);
-            if (Boolean.TRUE.equals(current.getState().getRunning())) docker.stopContainerCmd(current.getId()).withTimeout(10).exec();
+            if (Boolean.TRUE.equals(current.getState().getRunning())) {
+                try { docker.stopContainerCmd(current.getId()).withTimeout(10).exec(); }
+                catch (NotFoundException disappeared) { /* Already stopped and removed by its owner. */ }
+            }
         }
     }
 
@@ -630,7 +633,10 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
                 throw new IllegalStateException("Refusing to remove an unmanaged extension volume");
             }
         }
-        for (InspectContainerResponse current : containers) docker.removeContainerCmd(current.getId()).withForce(false).exec();
+        for (InspectContainerResponse current : containers) {
+            try { docker.removeContainerCmd(current.getId()).withForce(false).exec(); }
+            catch (NotFoundException disappeared) { /* Already uninstalled by its owner. */ }
+        }
         for (var volume : volumes) docker.removeVolumeCmd(volume.getName()).exec();
     }
 
@@ -972,7 +978,11 @@ public final class DockerExtensionRuntime implements ExtensionRuntimePort {
         return docker.listContainersCmd().withShowAll(true).exec().stream()
                 .filter(container -> container.getLabels() != null
                         && runtimeIdentity.equals(container.getLabels().get("io.artio.extension.runtime")))
-                .map(container -> docker.inspectContainerCmd(container.getId()).exec()).toList();
+                .map(container -> {
+                    try { return docker.inspectContainerCmd(container.getId()).exec(); }
+                    catch (NotFoundException disappeared) { return null; }
+                })
+                .filter(java.util.Objects::nonNull).toList();
     }
 
     private static void requireManaged(InspectContainerResponse container, String pluginId) {

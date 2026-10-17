@@ -147,8 +147,10 @@ class PackagedExtensionControllerIntegrationTests {
                     assertInvocation(remote, mapper, pluginId, 1, "1");
                     var primary = docker.inspectContainerCmd(DockerExtensionRuntime.containerName(pluginId)).exec();
                     var sidecar = docker.inspectContainerCmd(DockerExtensionRuntime.serviceName(pluginId, "companion")).exec();
-                    assertThat(primary.getHostConfig().getPortBindings().getBindings()).isEmpty();
-                    assertThat(sidecar.getHostConfig().getPortBindings().getBindings()).isEmpty();
+                    assertThat(primary.getHostConfig().getPortBindings() == null
+                            || primary.getHostConfig().getPortBindings().getBindings().isEmpty()).isTrue();
+                    assertThat(sidecar.getHostConfig().getPortBindings() == null
+                            || sidecar.getHostConfig().getPortBindings().getBindings().isEmpty()).isTrue();
                     remote.rotateCredentials(current, 2, true, Map.of());
                     assertInvocation(remote, mapper, pluginId, 2, "1");
                     remote.disable(pluginId);

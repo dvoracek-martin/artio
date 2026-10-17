@@ -18,6 +18,10 @@ $registryPort = $portReservation.LocalEndpoint.Port
 $portReservation.Stop()
 $createdImageReferences = [System.Collections.Generic.List[string]]::new()
 $registryStarted = $false
+$registryImagePreexisting = $false
+
+docker image inspect registry:2 *> $null
+if ($LASTEXITCODE -eq 0) { $registryImagePreexisting = $true }
 
 try {
     docker run --detach --name $registryName --publish "127.0.0.1:${registryPort}:5000" registry:2 | Out-Null
@@ -168,5 +172,9 @@ try {
     foreach ($imageReference in @(docker image ls --format '{{.Repository}}:{{.Tag}}' |
             Where-Object { $_ -like "artio/controller-it:$runSuffix*" })) {
         docker image rm $imageReference 2>$null | Out-Null
+    }
+
+    if (-not $registryImagePreexisting -and @(docker ps -aq --filter ancestor=registry:2).Count -eq 0) {
+        docker image rm registry:2 2>$null | Out-Null
     }
 }

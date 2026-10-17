@@ -105,7 +105,11 @@ class PluginEventDeliveryDockerIntegrationTests {
         String firstSecret = encryption.encrypt("first-subscriber-secret");
         String secondSecret = encryption.encrypt("second-subscriber-secret");
 
-        insertSubscribers(pluginId, image, firstIdentity, secondIdentity, firstInstance, secondInstance,
+        PluginManifest manifest = new PluginManifest("2", pluginId, "Event Acceptance", "Artio", "2.0.0",
+                "Durable isolated subscriber fixture", "0.1.0", "9.0.0", image, List.of(), List.of(), Map.of(),
+                List.of("events.subscriber.v1"), "/health", "/diagnostics", PluginManifest.GeographicAvailability.global(),
+                List.of(), List.of("/var/lib/artio-reference"), Map.of());
+        insertSubscribers(manifest, firstIdentity, secondIdentity, firstInstance, secondInstance,
                 firstSubscription, secondSubscription, firstSecret, secondSecret);
         jdbc.update("INSERT INTO users(id,email,password_hash,first_name,last_name,created_at) VALUES (?,?,?,?,?,now())",
                 userId, "docker-event-" + userId + "@example.test", "unused-test-hash", "Event", "Docker");
@@ -121,10 +125,6 @@ class PluginEventDeliveryDockerIntegrationTests {
                     "http://extension-egress:3128", runId);
             var secondRuntime = new DockerExtensionRuntime(docker, network, 8080, credentials, true,
                     "http://extension-egress:3128", runId);
-            PluginManifest manifest = new PluginManifest("2", pluginId, "Event Acceptance", "Artio", "2.0.0",
-                    "Durable isolated subscriber fixture", "0.1.0", "9.0.0", image, List.of(), List.of(), Map.of(),
-                    List.of("events.subscriber.v1"), "/health", "/diagnostics", PluginManifest.GeographicAvailability.global(),
-                    List.of(), List.of("/var/lib/artio-reference"), Map.of());
             try {
                 firstRuntime.installInstance(firstIdentity, manifest);
                 secondRuntime.installInstance(secondIdentity, manifest);
@@ -175,7 +175,8 @@ class PluginEventDeliveryDockerIntegrationTests {
                     awaitAssignment(rebalanceMember, 3);
                     listener.start();
                     Instant rebalanceDeadline = Instant.now().plusSeconds(20);
-                    while (rebalanceMember.assignment().size() == 3 && Instant.now().isBefore(rebalanceDeadline)) {
+                    while ((rebalanceMember.assignment().size() < 1 || rebalanceMember.assignment().size() > 2)
+                            && Instant.now().isBefore(rebalanceDeadline)) {
                         rebalanceMember.poll(Duration.ofMillis(100));
                     }
                     assertThat(rebalanceMember.assignment()).hasSizeBetween(1, 2);
@@ -240,8 +241,12 @@ class PluginEventDeliveryDockerIntegrationTests {
                 var worker = new PluginEventDeliveryWorker(jdbc, mapper, encryption,
                         factory.getBeanProvider(ExtensionRuntimePort.class));
                 worker.deliverPending();
-                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=? AND state='DELIVERED'",
-                        Integer.class, eventId)).isEqualTo(2);
+                Integer deliveredCount = jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM extension_event_deliveries WHERE inbox_event_id=? AND state='DELIVERED'",
+                        Integer.class, eventId);
+                assertThat(deliveredCount).withFailMessage("Expected both Docker subscribers to acknowledge delivery; rows: %s",
+                        jdbc.queryForList("SELECT runtime_identity,state,last_error_code,attempt_count FROM extension_event_deliveries "
+                                + "WHERE inbox_event_id=? ORDER BY runtime_identity", eventId)).isEqualTo(2);
 
                 String frozenPayload = jdbc.queryForObject("SELECT payload_snapshot::text FROM extension_event_deliveries WHERE delivery_id=?",
                         String.class, firstDelivery);
@@ -288,18 +293,20 @@ class PluginEventDeliveryDockerIntegrationTests {
         }
     }
 
-    private void insertSubscribers(String pluginId, String image, String firstIdentity, String secondIdentity,
+    private void insertSubscribers(PluginManifest manifest, String firstIdentity, String secondIdentity,
             UUID firstInstance, UUID secondInstance, UUID firstSubscription, UUID secondSubscription,
             String firstSecret, String secondSecret) throws Exception {
-        String releaseManifest = "{\"id\":\"" + pluginId + "\",\"version\":\"2.0.0\"}";
+        String pluginId = manifest.id();
+        String image = manifest.image();
+        String releaseManifest = mapper.writeValueAsString(manifest);
         jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state,public_configuration) "
                         + "VALUES (?,?::jsonb,?,'ENABLED',?::jsonb)", pluginId, releaseManifest, image, "{\"region\":\"eu\"}");
         long releaseId = jdbc.queryForObject("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) "
                         + "VALUES (?, '2.0.0', ?, ?::jsonb) RETURNING release_id", Long.class, pluginId, image, releaseManifest);
+        var v2Manifest = new io.artio.extensions.PluginManifestV2(manifest, List.of(),
+                List.of(new io.artio.extensions.PluginManifestV2.EventSubscription("order.created", 1, List.of())));
         jdbc.update("INSERT INTO extension_plugin_v2_releases(release_id,plugin_id,manifest) VALUES (?, ?, ?::jsonb)",
-                releaseId, pluginId, "{\"packageManifest\":{\"manifestVersion\":\"2\",\"id\":\"" + pluginId
-                        + "\",\"version\":\"2.0.0\"},\"subscriptions\":[{\"eventType\":\"order.created\","
-                        + "\"schemaVersion\":1,\"permissions\":[]}],\"capabilities\":[]}");
+                releaseId, pluginId, mapper.writeValueAsString(v2Manifest));
         jdbc.update("INSERT INTO extension_plugin_instances(instance_id,plugin_id,instance_key,release_id,compatibility_mode,"
                         + "lifecycle_state,runtime_identity,configuration_generation,public_configuration,encrypted_secrets) "
                         + "VALUES (?,?,'primary',?,'CAPABILITY_V2','ENABLED',?,1,'{\"region\":\"eu\"}'::jsonb,?::jsonb)",
