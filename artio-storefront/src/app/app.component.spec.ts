@@ -214,6 +214,42 @@ describe('Storefront payment return', () => {
     expect(component.paymentMethodsPartialFailure).toBe(false);
     expect(component.paymentMethodsLoading).toBe(false);
   });
+
+  it('ignores stale Core shipping services after the delivery address changes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture, http } = createComponent(undefined, true, '/checkout');
+      const stale = new Subject<{ methods: any[]; partialFailure: boolean }>();
+      const current = new Subject<{ methods: any[]; partialFailure: boolean }>();
+      let request = 0;
+      http.get.mockImplementation((url: string) => url.startsWith('/api/v1/cart/shipping-methods?')
+        ? (request++ === 0 ? stale : current) as any
+        : of([]) as any);
+
+      const component = fixture.componentInstance;
+      component.shippingCountry = 'CH';
+      component.shippingAddress = 'Old address';
+      component.loadShippingMethods();
+      await vi.advanceTimersByTimeAsync(250);
+      component.shippingCountry = 'US';
+      component.shippingAddress = 'Current address';
+      component.loadShippingMethods();
+      await vi.advanceTimersByTimeAsync(250);
+
+      current.next({ methods: [{ methodId: 'us-ground', name: 'US Ground' }], partialFailure: false });
+      stale.next({ methods: [{ methodId: 'ch-post', name: 'Swiss Post' }], partialFailure: true });
+
+      expect(component.shippingMethods).toEqual([{ methodId: 'us-ground', name: 'US Ground' }]);
+      expect(component.shippingMethodId).toBe('us-ground');
+      expect(component.shippingMethodsPartialFailure).toBe(false);
+      expect(component.shippingMethodsLoading).toBe(false);
+      const queries = http.get.mock.calls.map(([url]) => String(url)).filter(url => url.startsWith('/api/v1/cart/shipping-methods?'));
+      expect(queries.map(query => new URLSearchParams(query.split('?')[1]).get('country'))).toEqual(['CH', 'US']);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('Storefront currency formatting', () => {
