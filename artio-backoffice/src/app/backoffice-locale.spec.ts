@@ -5,6 +5,17 @@ describe('shared Backoffice loading copy', () => {
   afterEach(() => localStorage.removeItem('artio-backoffice-language'));
 
   it.each([
+    ['en', 'Account settings', 'Dismiss'],
+    ['de', 'Kontoeinstellungen', 'Schließen'],
+    ['it', 'Impostazioni account', 'Chiudi'],
+    ['fr', 'Paramètres du compte', 'Fermer'],
+  ] as const)('provides localized accessible shell actions in %s', (locale, accountSettings, dismiss) => {
+    const language = locale as BackofficeLocale;
+    expect(backofficeText(language, 'shellAccountSettings')).toBe(accountSettings);
+    expect(backofficeText(language, 'shellDismiss')).toBe(dismiss);
+  });
+
+  it.each([
     ['en', 'Loading product media…', 'Loading catalog data…', 'Loading inventory…', 'Loading gift cards…'],
     ['de', 'Produktmedien werden geladen…', 'Katalogdaten werden geladen…', 'Bestand wird geladen…', 'Geschenkkarten werden geladen…'],
     ['it', 'Caricamento immagini prodotto…', 'Caricamento dati catalogo…', 'Caricamento inventario…', 'Caricamento gift card…'],
