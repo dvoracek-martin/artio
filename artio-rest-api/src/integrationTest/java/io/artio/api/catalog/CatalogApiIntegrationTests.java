@@ -2874,6 +2874,10 @@ class CatalogApiIntegrationTests {
                 new io.artio.api.orders.CartController.AddBundleRequest(bundleResponse.getBody().id(), Map.of(),
                         new BigDecimal("2"), "US", "WEB", "US"),
                 io.artio.api.orders.CartController.CartView.class);
+        adminExchange("/api/v1/prices/{id}", HttpMethod.PUT,
+                new io.artio.api.pricing.PricingApplicationService.PriceUpdateRequest(new BigDecimal("60.00"),"USD"),
+                io.artio.api.pricing.PricingApplicationService.PriceView.class,
+                jdbc.queryForObject("SELECT id FROM pricing_price WHERE sellable_id=? ORDER BY valid_from DESC LIMIT 1",UUID.class,variant.getBody().id()));
 
         String key = UUID.randomUUID().toString();
         var headers = new HttpHeaders();
@@ -2883,12 +2887,13 @@ class CatalogApiIntegrationTests {
         var first = http.exchange("/api/v1/cart/checkout", HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
         assertThat(first.getStatusCode()).withFailMessage("Checkout response: %s", first.getBody()).isEqualTo(HttpStatus.CREATED);
         var firstBody = readOrder(first.getBody());
-        assertThat(firstBody.tax()).isEqualByComparingTo("8.25");
+        assertThat(firstBody.tax()).isEqualByComparingTo("9.90");
         assertThat(firstBody.taxSnapshot()).containsEntry("jurisdiction", "US");
         assertThat(firstBody.taxSnapshot()).containsKey("bundles");
         JsonNode taxSnapshot = mapper.valueToTree(firstBody.taxSnapshot());
         assertThat(taxSnapshot.path("schemaVersion").asInt()).isEqualTo(2);
         assertThat(taxSnapshot.path("lines").get(0).path("taxCategory").asText()).isEqualTo("STANDARD");
+        assertThat(taxSnapshot.path("lines").get(0).path("unitListPrice").decimalValue()).isEqualByComparingTo("60.00");
         assertThat(mapper.writeValueAsString(firstBody.taxSnapshot().get("bundles")))
                 .contains(bundleResponse.getBody().id().toString(), variant.getBody().id().toString(), "configuredTotal", "componentAdjustmentFactor");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_outbox WHERE aggregate_id=? AND event_type='ORDER_CREATED'", Integer.class,
