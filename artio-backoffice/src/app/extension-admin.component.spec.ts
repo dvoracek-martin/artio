@@ -66,6 +66,38 @@ describe('ExtensionAdminComponent', () => {
     expect(page).toContain('Compatibility: CAPABILITY_V2 · 2 instance(s) · 3 binding(s) · 1 subscription(s)');
   });
 
+  it('selects immutable releases per instance and emits update or rollback actions by semantic version', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const component = fixture.componentInstance;
+    component.extensionsLoading = false;
+    component.selectedExtension = { compatibilityModes: 'CAPABILITY_V2', manifest: { id: 'payments.example', extensionPoints: [], configuration: {} } };
+    component.extensionInstances = [{ instanceId: 'instance-a', instanceKey: 'europe', releaseId: 10,
+      compatibilityMode: 'CAPABILITY_V2', lifecycleState: 'DISABLED', publicConfiguration: {} }];
+    component.extensionReleases = [
+      { releaseId: 10, version: '1.9.0' },
+      { releaseId: 11, version: '2.0.0' },
+      { releaseId: 12, version: '1.8.0' }
+    ];
+    component.selectedReleaseByInstance['instance-a'] = 11;
+    const actions: any[] = [];
+    component.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+    const update = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Update instance')) as HTMLButtonElement;
+    expect(update).toBeTruthy();
+    update.click();
+    expect(actions[0]).toMatchObject({ type: 'instanceReleaseChange', targetReleaseId: 11, operation: 'update' });
+
+    component.selectedReleaseByInstance['instance-a'] = 12;
+    fixture.detectChanges();
+    const rollback = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Roll back instance')) as HTMLButtonElement;
+    expect(rollback).toBeTruthy();
+    rollback.click();
+    expect(actions[1]).toMatchObject({ type: 'instanceReleaseChange', targetReleaseId: 12, operation: 'rollback' });
+  });
+
   it('renders a compatible marketplace release and emits an installation action', () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
@@ -80,6 +112,22 @@ describe('ExtensionAdminComponent', () => {
       .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Install from Marketplace')) as HTMLButtonElement;
     button.click();
     expect(actions).toEqual([{ type: 'marketplaceInstall', item: fixture.componentInstance.marketplacePlugins[0], country: 'CH' }]);
+  });
+
+  it('offers to register a newer published release for an installed v2 plugin', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.componentInstance.extensionsLoading = false;
+    fixture.componentInstance.extensions = [{ id: 'shipping.demo', name: 'Demo Shipping', version: '1.0.0', lifecycleState: 'INSTALLED', configuredSecrets: [], compatibilityModes: 'CAPABILITY_V2', instanceCount: 1, bindingCount: 0, subscriptionCount: 0 }];
+    fixture.componentInstance.marketplacePlugins = [{ pluginId: 'shipping.demo', version: '1.1.0', vendor: 'Demo', metadata: { title: 'Demo Shipping' } }];
+    const actions: any[] = [];
+    fixture.componentInstance.action.subscribe(action => actions.push(action));
+    fixture.detectChanges();
+    const button = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((candidate: HTMLButtonElement) => candidate.textContent?.includes('Register Marketplace release')) as HTMLButtonElement;
+    expect(button).toBeTruthy();
+    button.click();
+    expect(actions).toEqual([{ type: 'marketplaceRegisterRelease', item: fixture.componentInstance.marketplacePlugins[0] }]);
   });
 
   it('blocks a revoked Marketplace release while preserving uninstall', () => {

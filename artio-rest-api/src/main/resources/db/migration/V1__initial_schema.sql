@@ -1097,7 +1097,12 @@ CREATE TABLE extension_installation_jobs (
     instance_id UUID,
     runtime_identity VARCHAR(256) NOT NULL,
     source_kind VARCHAR(16) NOT NULL CHECK (source_kind IN ('REGISTERED','MARKETPLACE','CUSTOM','ARCHIVE')),
+    operation_kind VARCHAR(16) NOT NULL DEFAULT 'INSTALL' CHECK (operation_kind IN ('INSTALL','UPDATE','ROLLBACK')),
     source_release_id BIGINT,
+    previous_release_id BIGINT,
+    previous_manifest_snapshot JSONB,
+    previous_lifecycle_state VARCHAR(16),
+    configuration_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(configuration_snapshot)='object'),
     release_digest CHAR(64),
     requested_by UUID NOT NULL,
     idempotency_key VARCHAR(128) NOT NULL CHECK (length(idempotency_key) BETWEEN 8 AND 128),
@@ -1105,7 +1110,7 @@ CREATE TABLE extension_installation_jobs (
     permission_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(permission_snapshot)='object'),
     image_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(image_snapshot)='array'),
     state VARCHAR(32) NOT NULL CHECK (state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS',
-        'REGISTERING_RELEASE','INSTALLED','CONFIGURATION_REQUIRED','READY','FAILED','CANCELLED','SECURITY_BLOCKED')),
+        'REGISTERING_RELEASE','WAITING_FOR_OBLIGATIONS','INSTALLED','CONFIGURATION_REQUIRED','READY','FAILED','CANCELLED','SECURITY_BLOCKED')),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     lease_token UUID,
     lease_until TIMESTAMPTZ,
@@ -1115,12 +1120,17 @@ CREATE TABLE extension_installation_jobs (
     completed_at TIMESTAMPTZ,
     FOREIGN KEY (instance_id,plugin_id) REFERENCES extension_plugin_instances(instance_id,plugin_id),
     FOREIGN KEY (source_release_id,plugin_id) REFERENCES extension_plugin_releases(release_id,plugin_id),
+    FOREIGN KEY (previous_release_id,plugin_id) REFERENCES extension_plugin_releases(release_id,plugin_id),
     CHECK ((lease_token IS NULL) = (lease_until IS NULL)),
     CHECK (release_digest IS NULL OR release_digest ~ '^[a-f0-9]{64}$'),
+    CHECK ((operation_kind='INSTALL' AND previous_release_id IS NULL AND previous_manifest_snapshot IS NULL AND previous_lifecycle_state IS NULL)
+        OR (operation_kind IN ('UPDATE','ROLLBACK') AND instance_id IS NOT NULL AND previous_release_id IS NOT NULL
+            AND jsonb_typeof(previous_manifest_snapshot)='object'
+            AND previous_lifecycle_state IN ('ENABLED','DRAINING','DISABLED','INSTALLED'))),
     UNIQUE (requested_by,idempotency_key)
 );
 CREATE INDEX extension_installation_jobs_queue_idx ON extension_installation_jobs(state,created_at)
-    WHERE state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
+    WHERE state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE','WAITING_FOR_OBLIGATIONS');
 CREATE INDEX extension_installation_jobs_plugin_idx ON extension_installation_jobs(plugin_id,created_at DESC);
 CREATE TABLE extension_local_installation_archives (
     job_id UUID PRIMARY KEY REFERENCES extension_installation_jobs(job_id) ON DELETE CASCADE,
@@ -1131,9 +1141,9 @@ CREATE TABLE extension_local_installation_archives (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX extension_installation_jobs_one_active_plugin_idx ON extension_installation_jobs(plugin_id)
-    WHERE instance_id IS NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
+    WHERE instance_id IS NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE','WAITING_FOR_OBLIGATIONS');
 CREATE UNIQUE INDEX extension_installation_jobs_one_active_instance_idx ON extension_installation_jobs(plugin_id,instance_id)
-    WHERE instance_id IS NOT NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE');
+    WHERE instance_id IS NOT NULL AND state IN ('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE','WAITING_FOR_OBLIGATIONS');
 
 -- Private-registry credentials are operator-approved and encrypted with the active Core key.
 CREATE TABLE extension_registry_credentials (

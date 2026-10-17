@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.artio.extensions.ExtensionRuntimePort;
 import io.artio.extensions.PluginManifest;
+import io.artio.api.security.EncryptionService;
 import java.util.List;
 import java.util.Map;
 import java.nio.file.Files;
@@ -39,6 +40,7 @@ public class ExtensionInstallationJobWorker {
     private final ObjectMapper mapper;
     private final ObjectProvider<ExtensionRuntimePort> runtimeProvider;
     private final ExtensionRegistryCredentialService registryCredentials;
+    private final EncryptionService encryption;
     private final OciArchiveInspector archiveInspector;
     private final OciArchiveQuarantineStore quarantine;
     private final long leaseDurationMillis;
@@ -54,6 +56,19 @@ public class ExtensionInstallationJobWorker {
             PlatformTransactionManager transactionManager,
             @Value("${artio.extensions.installations.lease-duration-ms:1800000}") long leaseDurationMillis,
             @Value("${artio.extensions.installations.lease-renewal-ms:300000}") long leaseRenewalMillis) {
+        this(jdbc, mapper, runtimeProvider, registryCredentials, null, archiveInspector, quarantine,
+                transactionManager, leaseDurationMillis, leaseRenewalMillis);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ExtensionInstallationJobWorker(JdbcTemplate jdbc, ObjectMapper mapper,
+            ObjectProvider<ExtensionRuntimePort> runtimeProvider,
+            ExtensionRegistryCredentialService registryCredentials, EncryptionService encryption,
+            OciArchiveInspector archiveInspector,
+            OciArchiveQuarantineStore quarantine,
+            PlatformTransactionManager transactionManager,
+            @Value("${artio.extensions.installations.lease-duration-ms:1800000}") long leaseDurationMillis,
+            @Value("${artio.extensions.installations.lease-renewal-ms:300000}") long leaseRenewalMillis) {
         if (leaseDurationMillis < 1_000 || leaseRenewalMillis < 250 || leaseRenewalMillis * 2 >= leaseDurationMillis) {
             throw new IllegalArgumentException("Installation job lease renewal must run at least twice before lease expiry");
         }
@@ -61,6 +76,7 @@ public class ExtensionInstallationJobWorker {
         this.mapper = mapper;
         this.runtimeProvider = runtimeProvider;
         this.registryCredentials = registryCredentials;
+        this.encryption = encryption;
         this.archiveInspector = archiveInspector;
         this.quarantine = quarantine;
         this.leaseDurationMillis = leaseDurationMillis;
@@ -82,21 +98,28 @@ public class ExtensionInstallationJobWorker {
     @Scheduled(fixedDelayString = "${artio.extensions.installations.poll-interval-ms:1000}")
     public void runPending() {
         List<InstallJob> jobs = jdbc.query("""
-                UPDATE extension_installation_jobs SET state='POLICY_CHECK',attempt_count=attempt_count+1,
+                UPDATE extension_installation_jobs SET state='POLICY_CHECK',
+                    attempt_count=attempt_count+CASE WHEN state='WAITING_FOR_OBLIGATIONS' THEN 0 ELSE 1 END,
                     lease_token=md5(job_id::text || clock_timestamp()::text || random()::text)::uuid,
                     lease_until=now()+(? * interval '1 millisecond'),updated_at=now()
                 WHERE job_id IN (
                     SELECT job_id FROM extension_installation_jobs
-                    WHERE state='REQUESTED' OR (state IN ('POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE') AND lease_until<now())
+                    WHERE state IN ('REQUESTED','WAITING_FOR_OBLIGATIONS')
+                       OR (state IN ('POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE') AND lease_until<now())
                     ORDER BY created_at LIMIT 4 FOR UPDATE SKIP LOCKED
                 )
                 RETURNING job_id,plugin_id,instance_id,runtime_identity,manifest_snapshot::text,permission_snapshot::text,image_snapshot::text,lease_token,source_kind,
+                    operation_kind,source_release_id,previous_release_id,previous_manifest_snapshot::text,previous_lifecycle_state,
+                    configuration_snapshot::text,
                     (SELECT quarantine_name FROM extension_local_installation_archives a WHERE a.job_id=extension_installation_jobs.job_id) AS quarantine_name,
                     (SELECT archive_sha256 FROM extension_local_installation_archives a WHERE a.job_id=extension_installation_jobs.job_id) AS archive_sha256
                 """, (rs, row) -> new InstallJob(rs.getObject("job_id", UUID.class), rs.getString("plugin_id"),
                 rs.getObject("instance_id", UUID.class), rs.getString("runtime_identity"), rs.getString("manifest_snapshot"),
                 rs.getString("permission_snapshot"), rs.getString("image_snapshot"), rs.getObject("lease_token", UUID.class),
-                rs.getString("source_kind"), rs.getString("quarantine_name"), rs.getString("archive_sha256")), leaseDurationMillis);
+                rs.getString("source_kind"), rs.getString("operation_kind"), (Long) rs.getObject("source_release_id"),
+                (Long) rs.getObject("previous_release_id"), rs.getString("previous_manifest_snapshot"),
+                rs.getString("previous_lifecycle_state"), rs.getString("configuration_snapshot"),
+                rs.getString("quarantine_name"), rs.getString("archive_sha256")), leaseDurationMillis);
         var heartbeats = jobs.stream()
                 .map(job -> leaseRenewals.scheduleWithFixedDelay(
                         () -> renewLease(job), leaseRenewalMillis, leaseRenewalMillis, TimeUnit.MILLISECONDS))
@@ -125,6 +148,7 @@ public class ExtensionInstallationJobWorker {
 
     private void installClaimed(InstallJob job) {
         PluginManifest manifest = null;
+        boolean replacementApplied = false;
         try {
             manifest = mapper.readValue(job.manifestJson(), PluginManifest.class);
             if (!job.pluginId().equals(manifest.id())) throw new IllegalStateException("Installation manifest identity changed");
@@ -143,7 +167,32 @@ public class ExtensionInstallationJobWorker {
                 throw new IllegalStateException("Installation image snapshot is invalid or changed");
             }
             if (!transition(job, "DOWNLOADING_OR_IMPORTING")) return;
-            if ("ARCHIVE".equals(job.sourceKind())) {
+            if (!"INSTALL".equals(job.operationKind())) {
+                PluginManifest previous = mapper.readValue(job.previousManifestJson(), PluginManifest.class);
+                if (job.instanceId() == null || job.previousReleaseId() == null || job.releaseId() == null
+                        || !job.pluginId().equals(previous.id())) {
+                    throw new IllegalStateException("Plugin release operation snapshot is incomplete");
+                }
+                Long installedRelease = jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances "
+                        + "WHERE instance_id=? AND plugin_id=?", Long.class, job.instanceId(), job.pluginId());
+                if (!job.previousReleaseId().equals(installedRelease)) {
+                    throw new IllegalStateException("Plugin instance release changed before its queued operation");
+                }
+                if (unresolvedObligations(job.instanceId()) > 0) {
+                    waitForObligations(job);
+                    return;
+                }
+                runtime.disableInstance(job.runtimeIdentity(), job.pluginId());
+                var auth = registryCredentials.credentialsFor(manifest);
+                runtime.updateInstance(job.runtimeIdentity(), previous, manifest, auth);
+                replacementApplied = true;
+                ConfigurationSnapshot snapshot = mapper.readValue(job.configurationJson(), ConfigurationSnapshot.class);
+                int credentialGeneration = jdbc.queryForObject("SELECT credential_generation FROM extension_plugins WHERE plugin_id=?",
+                        Integer.class, job.pluginId());
+                runtime.enableInstance(job.runtimeIdentity(), manifest, credentialGeneration,
+                        runtimeConfiguration(snapshot));
+                runtime.disableInstance(job.runtimeIdentity(), job.pluginId());
+            } else if ("ARCHIVE".equals(job.sourceKind())) {
                 Path archive = archivePath(job.quarantineName());
                 if (!job.archiveSha256().equals(sha256(archive))) throw new IllegalStateException("Quarantined archive digest changed");
                 OciArchiveInspector.Inspection inspection = archiveInspector.inspect(archive, manifest);
@@ -182,7 +231,37 @@ public class ExtensionInstallationJobWorker {
                             + "completed_at=now(),updated_at=now() WHERE job_id=? AND lease_token=?",
                     error, job.jobId(), job.leaseToken());
             if (owned != 1) return;
-            if (job.instanceId() == null) {
+            if (!"INSTALL".equals(job.operationKind()) && job.instanceId() != null) {
+                boolean restored = false;
+                try {
+                    PluginManifest previous = mapper.readValue(job.previousManifestJson(), PluginManifest.class);
+                    ExtensionRuntimePort runtime = runtimeProvider.getIfAvailable();
+                    if (runtime == null) throw new ExtensionRuntimePort.ExtensionUnavailableException("Plugin runtime is unavailable");
+                    runtime.disableInstance(job.runtimeIdentity(), job.pluginId());
+                    if (replacementApplied) {
+                        if (manifest == null) throw new IllegalStateException("Replacement manifest is unavailable for recovery");
+                        runtime.updateInstance(job.runtimeIdentity(), manifest, previous, registryCredentials.credentialsFor(previous));
+                    }
+                    ConfigurationSnapshot oldSnapshot = currentConfigurationSnapshot(job.instanceId());
+                    int credentialGeneration = jdbc.queryForObject("SELECT credential_generation FROM extension_plugins WHERE plugin_id=?",
+                            Integer.class, job.pluginId());
+                    runtime.enableInstance(job.runtimeIdentity(), previous, credentialGeneration,
+                            runtimeConfiguration(oldSnapshot));
+                    runtime.disableInstance(job.runtimeIdentity(), job.pluginId());
+                    restored = true;
+                } catch (Exception recoveryFailure) {
+                    log.error("Plugin release recovery failed for job {} ({})", job.jobId(),
+                            recoveryFailure.getClass().getSimpleName());
+                }
+                if (restored) {
+                    jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state=?,updated_at=now() "
+                                    + "WHERE instance_id=? AND plugin_id=? AND release_id=?",
+                            job.previousLifecycleState(), job.instanceId(), job.pluginId(), job.previousReleaseId());
+                } else {
+                    jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='FAILED',updated_at=now() WHERE instance_id=?",
+                            job.instanceId());
+                }
+            } else if (job.instanceId() == null) {
                 jdbc.update("UPDATE extension_plugins SET lifecycle_state='FAILED',updated_at=now() WHERE plugin_id=?", job.pluginId());
                 jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='FAILED',updated_at=now() "
                         + "WHERE plugin_id=? AND compatibility_mode='LEGACY_V1'", job.pluginId());
@@ -197,6 +276,66 @@ public class ExtensionInstallationJobWorker {
                 state, job.jobId(), job.leaseToken()) == 1;
     }
 
+    private long unresolvedObligations(UUID instanceId) {
+        Long count = jdbc.queryForObject("""
+                SELECT
+                  (SELECT count(*) FROM extension_operation_attempts WHERE instance_id=? AND attempt_state IN ('PENDING','IN_PROGRESS','UNKNOWN','RECONCILING'))
+                + (SELECT count(*) FROM extension_event_deliveries WHERE instance_id=? AND state<>'DELIVERED')
+                + (SELECT count(*) FROM catalog_media_storage_objects WHERE object_state IN ('ACTIVE','DELETE_PENDING')
+                    AND (primary_instance_id=? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(replica_instance_ids) r(instance_id) WHERE r.instance_id=?)))
+                + (SELECT count(*) FROM payments WHERE provider_instance_id=? AND status='PENDING')
+                + (SELECT count(*) FROM order_shipments s JOIN orders o ON o.id=s.order_id WHERE s.provider_instance_id=?
+                    AND o.status IN ('CONFIRMED','PAID','PARTIALLY_SHIPPED','SHIPPED'))
+                + (SELECT count(*) FROM payment_refunds r JOIN payments p ON p.id=r.payment_id
+                    WHERE p.provider_instance_id=? AND r.status='PROCESSING')
+                """, Long.class, instanceId, instanceId, instanceId, instanceId.toString(), instanceId, instanceId, instanceId);
+        return count == null ? 0 : count;
+    }
+
+    private Map<String, String> runtimeConfiguration(ConfigurationSnapshot snapshot) {
+        if (encryption == null) throw new IllegalStateException("Plugin release configuration encryption is unavailable");
+        var values = new java.util.LinkedHashMap<String, String>();
+        snapshot.publicConfiguration().forEach((key, value) -> {
+            if (value != null) values.put(key, value instanceof String text ? text : String.valueOf(value));
+        });
+        snapshot.encryptedSecrets().forEach((key, ciphertext) -> values.put(key, encryption.decrypt(ciphertext)));
+        return Map.copyOf(values);
+    }
+
+    private ConfigurationSnapshot currentConfigurationSnapshot(UUID instanceId) {
+        return jdbc.query("SELECT public_configuration::text,encrypted_secrets::text,configuration_generation "
+                        + "FROM extension_plugin_instances WHERE instance_id=?",
+                rs -> rs.next() ? new ConfigurationSnapshot(
+                        readObjectMap(rs.getString(1)), readStringMap(rs.getString(2)), rs.getInt(3)) : null,
+                instanceId);
+    }
+
+    private Map<String, Object> readObjectMap(String json) {
+        try { return mapper.readValue(json, new TypeReference<>() { }); }
+        catch (Exception failure) { throw new IllegalStateException("Stored plugin configuration is invalid", failure); }
+    }
+
+    private Map<String, String> readStringMap(String json) {
+        try { return mapper.readValue(json, new TypeReference<>() { }); }
+        catch (Exception failure) { throw new IllegalStateException("Stored plugin secrets are invalid", failure); }
+    }
+
+    private ConfigurationSnapshot readConfigurationSnapshot(String json) {
+        try { return mapper.readValue(json, ConfigurationSnapshot.class); }
+        catch (Exception failure) { throw new IllegalStateException("Stored plugin release configuration is invalid", failure); }
+    }
+
+    private String writeJson(Object value) {
+        try { return mapper.writeValueAsString(value); }
+        catch (Exception failure) { throw new IllegalStateException("Plugin release configuration could not be persisted", failure); }
+    }
+
+    private void waitForObligations(InstallJob job) {
+        jdbc.update("UPDATE extension_installation_jobs SET state='WAITING_FOR_OBLIGATIONS',lease_token=NULL,lease_until=NULL,"
+                        + "updated_at=now() WHERE job_id=? AND lease_token=? AND lease_until>now()",
+                job.jobId(), job.leaseToken());
+    }
+
     boolean finalizeInstallation(InstallJob job) {
         Boolean finalized = transactions.execute(status -> {
             int claimed = jdbc.update("UPDATE extension_installation_jobs SET state='REGISTERING_RELEASE',updated_at=now() "
@@ -209,8 +348,24 @@ public class ExtensionInstallationJobWorker {
                 jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
                         + "WHERE plugin_id=? AND compatibility_mode='LEGACY_V1' AND lifecycle_state IN ('VALIDATED','CONFIGURED','FAILED')", job.pluginId());
             } else {
-                jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
-                        + "WHERE instance_id=? AND lifecycle_state IN ('CONFIGURED','FAILED')", job.instanceId());
+                if ("INSTALL".equals(job.operationKind())) {
+                    jdbc.update("UPDATE extension_plugin_instances SET lifecycle_state='INSTALLED',updated_at=now() "
+                            + "WHERE instance_id=? AND lifecycle_state IN ('CONFIGURED','FAILED')", job.instanceId());
+                } else {
+                    ConfigurationSnapshot snapshot = readConfigurationSnapshot(job.configurationJson());
+                    String resultingLifecycleState = "DRAINING".equals(job.previousLifecycleState())
+                            ? "DRAINING" : job.previousLifecycleState();
+                    int switched = jdbc.update("UPDATE extension_plugin_instances SET release_id=?,public_configuration=?::jsonb,"
+                                    + "encrypted_secrets=?::jsonb,configuration_generation=?,lifecycle_state=?,updated_at=now() "
+                                    + "WHERE instance_id=? AND plugin_id=? AND release_id=? AND lifecycle_state IN ('DRAINING','DISABLED','INSTALLED')",
+                            job.releaseId(), writeJson(snapshot.publicConfiguration()),
+                            writeJson(snapshot.encryptedSecrets()), snapshot.configurationGeneration(), resultingLifecycleState,
+                            job.instanceId(), job.pluginId(), job.previousReleaseId());
+                    if (switched != 1) {
+                        status.setRollbackOnly();
+                        return false;
+                    }
+                }
             }
 
             int completed = jdbc.update("UPDATE extension_installation_jobs SET state='INSTALLED',lease_token=NULL,lease_until=NULL,error_code=NULL,"
@@ -249,6 +404,14 @@ public class ExtensionInstallationJobWorker {
 
     record InstallJob(UUID jobId, String pluginId, UUID instanceId, String runtimeIdentity,
             String manifestJson, String permissionJson, String imageJson, UUID leaseToken, String sourceKind,
-            String quarantineName, String archiveSha256) { }
+            String operationKind, Long releaseId, Long previousReleaseId, String previousManifestJson,
+            String previousLifecycleState, String configurationJson, String quarantineName, String archiveSha256) { }
     private record PermissionSnapshot(List<String> permissions) { }
+    record ConfigurationSnapshot(Map<String, Object> publicConfiguration, Map<String, String> encryptedSecrets,
+            int configurationGeneration) {
+        ConfigurationSnapshot {
+            publicConfiguration = Map.copyOf(publicConfiguration);
+            encryptedSecrets = Map.copyOf(encryptedSecrets);
+        }
+    }
 }

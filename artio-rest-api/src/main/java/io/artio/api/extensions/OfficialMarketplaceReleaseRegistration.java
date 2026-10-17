@@ -64,6 +64,62 @@ public final class OfficialMarketplaceReleaseRegistration {
         }
     }
 
+    public RegisteredRelease registerRelease(String pluginId, String version, UUID actorId) {
+        MarketplaceCatalogClient.VerifiedReleaseDescriptor verified = marketplace.verifiedReleaseDescriptor(pluginId, version);
+        JsonNode descriptor = verified.descriptor();
+        JsonNode signedManifest = descriptor.path("manifest");
+        try {
+            if (!signedManifest.has("packageManifest")) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Per-instance Marketplace releases require a signed v2 package manifest");
+            }
+            PluginManifestV2 manifest = mapper.treeToValue(signedManifest, PluginManifestV2.class);
+            return transactions.execute(status -> registerV2Release(pluginId, version, manifest, descriptor,
+                    verified.digest(), actorId));
+        } catch (ResponseStatusException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Verified Marketplace release could not be registered", failure);
+        }
+    }
+
+    private RegisteredRelease registerV2Release(String pluginId, String version, PluginManifestV2 manifest,
+            JsonNode descriptor, String digest, UUID actorId) {
+        PluginManifest source = manifest.packageManifest();
+        requireIdentity(source.id(), source.version(), descriptor);
+        if (!pluginId.equals(source.id()) || !version.equals(source.version())) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Marketplace release identity does not match the requested package");
+        }
+        Boolean registered = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM extension_plugins WHERE plugin_id=? AND lifecycle_state<>'UNINSTALLED')",
+                Boolean.class, pluginId);
+        if (!Boolean.TRUE.equals(registered)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plugin package is not registered");
+        PluginManifest runtimeManifest = asRuntimeManifest(source);
+        ExtensionSecurityPolicy.requireAllowed(jdbc, runtimeManifest);
+        List<String> errors = manifestValidator.validate(manifest, coreVersion, registeredPluginIds());
+        if (!errors.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", errors));
+
+        Long existing = jdbc.query("SELECT release_id FROM extension_plugin_releases WHERE plugin_id=? AND version=?",
+                rs -> rs.next() ? rs.getLong(1) : null, pluginId, version);
+        if (existing != null) {
+            String existingDigest = jdbc.query("SELECT descriptor_digest FROM extension_plugin_release_provenance "
+                            + "WHERE release_id=? AND provenance='OFFICIAL_MARKETPLACE'",
+                    rs -> rs.next() ? rs.getString(1) : null, existing);
+            if (!digest.equals(existingDigest)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Registered plugin release is immutable and has different provenance");
+            }
+            return new RegisteredRelease(pluginId, version, existing, digest, true);
+        }
+
+        jdbc.update("INSERT INTO extension_plugin_releases(plugin_id,version,image_reference,manifest) VALUES (?,?,?,?::jsonb)",
+                pluginId, version, runtimeManifest.image(), write(runtimeManifest));
+        long releaseId = releaseId(pluginId, version);
+        jdbc.update("INSERT INTO extension_plugin_v2_releases(release_id,plugin_id,manifest) VALUES (?,?,?::jsonb)",
+                releaseId, pluginId, write(manifest));
+        persistProvenance(releaseId, digest, descriptor, actorId, pluginId, version);
+        return new RegisteredRelease(pluginId, version, releaseId, digest, false);
+    }
+
     private Installation installV1(PluginManifest manifest, JsonNode descriptor, String digest, UUID actorId, String idempotencyKey) {
         requireIdentity(manifest.id(), manifest.version(), descriptor);
         lockIdempotency(actorId, idempotencyKey);
@@ -183,4 +239,6 @@ public final class OfficialMarketplaceReleaseRegistration {
 
     public record Installation(String pluginId, String version, String descriptorDigest,
             ExtensionInstallationJobOperations.JobView job) { }
+    public record RegisteredRelease(String pluginId, String version, long releaseId, String descriptorDigest,
+            boolean alreadyRegistered) { }
 }

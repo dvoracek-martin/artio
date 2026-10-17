@@ -219,6 +219,15 @@ public class ExtensionManagementController {
         return ResponseEntity.accepted().body(installation);
     }
 
+    @PostMapping("/marketplace/plugins/{pluginId}/releases/{version}/register")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> registerOfficialMarketplaceRelease(@PathVariable String pluginId,
+            @PathVariable String version, JwtAuthenticationToken actor) {
+        UUID actorId = UUID.fromString(actor.getToken().getSubject());
+        var release = officialMarketplaceReleaseRegistration.registerRelease(pluginId, version, actorId);
+        return ResponseEntity.status(release.alreadyRegistered() ? HttpStatus.OK : HttpStatus.CREATED).body(release);
+    }
+
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody PluginManifest manifest, JwtAuthenticationToken actor) {
         ExtensionSecurityPolicy.requireAllowed(jdbc, manifest);
@@ -337,6 +346,21 @@ public class ExtensionManagementController {
                         arraySet(rs.getArray("public_keys")), arraySet(rs.getArray("secret_keys"))), pluginId);
     }
 
+    @GetMapping("/{pluginId}/releases")
+    @Transactional(readOnly = true)
+    public List<PluginReleaseView> releases(@PathVariable String pluginId) {
+        findPlugin(pluginId);
+        return jdbc.query("SELECT r.release_id,r.version,r.image_reference,p.provenance,p.descriptor_digest,"
+                        + "(SELECT count(*) FROM extension_plugin_instances i WHERE i.plugin_id=r.plugin_id AND i.release_id=r.release_id "
+                        + "AND i.lifecycle_state<>'UNINSTALLED') AS installed_instances "
+                        + "FROM extension_plugin_releases r JOIN extension_plugin_v2_releases v ON v.release_id=r.release_id "
+                        + "LEFT JOIN extension_plugin_release_provenance p ON p.release_id=r.release_id "
+                        + "WHERE r.plugin_id=? ORDER BY r.created_at DESC,r.release_id DESC",
+                (rs, row) -> new PluginReleaseView(rs.getLong("release_id"), rs.getString("version"),
+                        rs.getString("image_reference"), rs.getString("provenance"), rs.getString("descriptor_digest"),
+                        rs.getLong("installed_instances")), pluginId);
+    }
+
     @GetMapping("/{pluginId}/instances/{instanceId}/health")
     @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ExtensionRuntimePort.RuntimeHealth instanceHealth(@PathVariable String pluginId, @PathVariable UUID instanceId) {
@@ -375,6 +399,94 @@ public class ExtensionManagementController {
             return new InstanceObligationsView(instanceId, operations, deliveries, media, payments, shipments, refunds,
                     operations + deliveries + media + payments + shipments + refunds);
         }, instanceId, instanceId, instanceId, instanceId.toString(), instanceId, instanceId, instanceId);
+    }
+
+    @PostMapping("/{pluginId}/instances/{instanceId}/update")
+    public ResponseEntity<?> updateInstanceRelease(@PathVariable String pluginId, @PathVariable UUID instanceId,
+            @RequestBody ReleaseChangeRequest request, JwtAuthenticationToken actor) {
+        return queueInstanceReleaseChange(pluginId, instanceId, request, actor, "UPDATE");
+    }
+
+    @PostMapping("/{pluginId}/instances/{instanceId}/rollback")
+    public ResponseEntity<?> rollbackInstanceRelease(@PathVariable String pluginId, @PathVariable UUID instanceId,
+            @RequestBody ReleaseChangeRequest request, JwtAuthenticationToken actor) {
+        return queueInstanceReleaseChange(pluginId, instanceId, request, actor, "ROLLBACK");
+    }
+
+    private ResponseEntity<?> queueInstanceReleaseChange(String pluginId, UUID instanceId,
+            ReleaseChangeRequest request, JwtAuthenticationToken actor, String operationKind) {
+        if (request == null || request.targetReleaseId() == null || request.targetReleaseId() <= 0
+                || request.idempotencyKey() == null
+                || !request.idempotencyKey().matches("[A-Za-z0-9._:-]{8,128}")) {
+            return ResponseEntity.badRequest().body(Map.of("message", "A positive targetReleaseId and an 8 to 128 character idempotencyKey are required"));
+        }
+        InstanceRow instance = lockInstance(pluginId, instanceId);
+        if (!"CAPABILITY_V2".equals(instance.compatibilityMode())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Per-instance release changes require a v2 plugin instance"));
+        }
+        if (!Set.of("DRAINING", "DISABLED", "INSTALLED").contains(instance.lifecycleState())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Drain the instance before changing its release"));
+        }
+        ReleaseSnapshot target = findV2Release(pluginId, request.targetReleaseId());
+        if (target == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Target v2 release was not found"));
+        int versionOrder;
+        try { versionOrder = compareVersions(target.manifest().version(), instance.manifest().version()); }
+        catch (RuntimeException invalidVersion) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Release versions cannot be ordered safely"));
+        }
+        if (("UPDATE".equals(operationKind) && versionOrder <= 0)
+                || ("ROLLBACK".equals(operationKind) && versionOrder >= 0)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Target release version is not valid for this operation"));
+        }
+        requireAllowed(target.manifest());
+        List<String> errors = new java.util.ArrayList<>(manifestValidator.validate(target.v2Manifest(), coreVersion, registeredPluginIds()));
+        errors.addAll(dependencyErrors(target.manifest(), false));
+        Map<String, Object> submittedConfiguration = new LinkedHashMap<>();
+        instance.publicConfiguration().forEach((key, value) -> {
+            if (target.manifest().configuration().containsKey(key)) submittedConfiguration.put(key, value);
+        });
+        if (request.configuration() != null) submittedConfiguration.putAll(request.configuration());
+        var configured = withGeneratedSecrets(target.manifest(), submittedConfiguration,
+                instance.encryptedSecrets().keySet());
+        var configuration = configurationValidator.validate(target.manifest(), configured,
+                instance.encryptedSecrets().keySet());
+        errors.addAll(configuration.errors());
+        if (!errors.isEmpty()) return ResponseEntity.badRequest().body(new ManifestValidationResponse(false, coreVersion, errors));
+        Map<String, String> targetSecrets = new HashMap<>();
+        instance.encryptedSecrets().forEach((key, ciphertext) -> {
+            PluginManifest.ConfigField field = target.manifest().configuration().get(key);
+            if (field != null && "secret".equals(field.type()) && !configuration.newSecrets().containsKey(key)) {
+                targetSecrets.put(key, ciphertext);
+            }
+        });
+        targetSecrets.putAll(encryptSecrets(configuration.newSecrets()));
+        try {
+            validateBoundConfigurationSize(target.manifest(), configuration.publicValues(), configuration.newSecrets(),
+                    targetSecrets);
+        } catch (IllegalArgumentException tooLarge) {
+            return ResponseEntity.badRequest().body(new ConfigurationErrorResponse(List.of(tooLarge.getMessage())));
+        }
+        int targetConfigurationGeneration = instance.configurationGeneration() + 1;
+        MarketplaceProvenance provenance = releaseProvenance(target.releaseId());
+        var job = installationJobs.requestReleaseChange(pluginId, instance.instanceId(), instance.runtimeIdentity(),
+                instance.releaseId(), target.releaseId(), instance.manifest(), target.manifest(), instance.lifecycleState(),
+                configuration.publicValues(), targetSecrets, targetConfigurationGeneration,
+                operationKind, UUID.fromString(actor.getToken().getSubject()), request.idempotencyKey(),
+                provenance == null ? "REGISTERED" : "MARKETPLACE", provenance == null ? null : provenance.descriptorDigest());
+        audit(pluginId, actor, "INSTANCE_RELEASE_" + operationKind + "_REQUESTED", Map.of(
+                "instanceId", instanceId.toString(), "jobId", job.jobId().toString(),
+                "fromReleaseId", instance.releaseId(), "toReleaseId", target.releaseId()));
+        return ResponseEntity.accepted().body(job);
+    }
+
+    private ReleaseSnapshot findV2Release(String pluginId, long releaseId) {
+        return jdbc.query("SELECT r.release_id,r.manifest::text AS runtime_manifest,v.manifest::text AS v2_manifest "
+                        + "FROM extension_plugin_releases r JOIN extension_plugin_v2_releases v ON v.release_id=r.release_id "
+                        + "WHERE r.plugin_id=? AND r.release_id=?",
+                rs -> rs.next() ? new ReleaseSnapshot(rs.getLong("release_id"),
+                        read(rs.getString("runtime_manifest"), PluginManifest.class),
+                        read(rs.getString("v2_manifest"), PluginManifestV2.class)) : null,
+                pluginId, releaseId);
     }
 
     @PostMapping("/{pluginId}/instances/{instanceId}/drain")
@@ -585,8 +697,8 @@ public class ExtensionManagementController {
     public ResponseEntity<?> configureInstance(@PathVariable String pluginId, @PathVariable UUID instanceId,
             @RequestBody Map<String, Object> submitted, JwtAuthenticationToken actor) {
         InstanceRow instance = lockInstance(pluginId, instanceId);
-        if ("ENABLED".equals(instance.lifecycleState())) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the instance before changing its configuration"));
+        if (Set.of("ENABLED", "DRAINING").contains(instance.lifecycleState()) || hasActiveReleaseJob(instanceId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Disable the instance and finish any release operation before changing its configuration"));
         }
         Map<String, Object> resolved = withGeneratedSecrets(instance.manifest(), submitted, instance.encryptedSecrets().keySet());
         var validation = configurationValidator.validate(instance.manifest(), resolved, instance.encryptedSecrets().keySet());
@@ -617,9 +729,9 @@ public class ExtensionManagementController {
             return ResponseEntity.badRequest().body(Map.of("message", "Rotation group must be a lowercase identifier"));
         }
         InstanceRow instance = lockInstance(pluginId, instanceId);
-        if ("ENABLED".equals(instance.lifecycleState())) {
+        if (Set.of("ENABLED", "DRAINING").contains(instance.lifecycleState()) || hasActiveReleaseJob(instanceId)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(Map.of("message", "Disable the instance before rotating generated credentials"));
+                    .body(Map.of("message", "Disable the instance and finish any release operation before rotating generated credentials"));
         }
         List<Map.Entry<String, PluginManifest.ConfigField>> fields = instance.manifest().configuration().entrySet().stream()
                 .filter(entry -> entry.getValue() != null && group.equals(entry.getValue().generatedRotationGroup()))
@@ -647,6 +759,13 @@ public class ExtensionManagementController {
                 "configurationGeneration", generation));
         return ResponseEntity.ok(Map.of("instanceId", instanceId, "configurationGeneration", generation,
                 "lifecycleState", "CONFIGURED", "rotatedFields", fields.stream().map(Map.Entry::getKey).sorted().toList()));
+    }
+
+    private boolean hasActiveReleaseJob(UUID instanceId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM extension_installation_jobs "
+                + "WHERE instance_id=? AND operation_kind IN ('UPDATE','ROLLBACK') AND state IN "
+                + "('REQUESTED','POLICY_CHECK','VERIFYING_SOURCE','DOWNLOADING_OR_IMPORTING','VERIFYING_ARTIFACTS','REGISTERING_RELEASE','WAITING_FOR_OBLIGATIONS'))",
+                Boolean.class, instanceId));
     }
 
     @DeleteMapping("/{pluginId}/instances/{instanceId}")
@@ -1843,7 +1962,11 @@ public class ExtensionManagementController {
                                     Object payload, long deadlineMillis) { }
     public record InstallationRequest(String pluginId, UUID instanceId, String idempotencyKey) { }
     public record MarketplaceInstallationRequest(String idempotencyKey) { }
+    public record ReleaseChangeRequest(Long targetReleaseId, String idempotencyKey, Map<String, Object> configuration) { }
     private record MarketplaceProvenance(String provenance, String descriptorDigest) { }
+    private record ReleaseSnapshot(long releaseId, PluginManifest manifest, PluginManifestV2 v2Manifest) { }
+    public record PluginReleaseView(long releaseId, String version, String imageReference, String provenance,
+            String descriptorDigest, long installedInstances) { }
     public record InvocationResponse(int statusCode, Object payload) { }
     public record BindingRequest(String capabilityId, String operationName, Map<String, String> scope, int priority,
             UUID instanceId) { }
