@@ -686,7 +686,7 @@ CREATE TABLE extension_audit_events (
     id UUID PRIMARY KEY,
     plugin_id VARCHAR(128) NOT NULL,
     actor_user_id UUID NOT NULL,
-    action VARCHAR(32) NOT NULL,
+    action VARCHAR(64) NOT NULL,
     details JSONB NOT NULL DEFAULT '{}'::jsonb,
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

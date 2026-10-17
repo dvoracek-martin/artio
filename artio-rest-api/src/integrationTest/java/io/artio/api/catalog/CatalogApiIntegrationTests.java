@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -585,12 +586,17 @@ class CatalogApiIntegrationTests {
     void importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured() throws Exception {
         String marketplacePluginId = System.getenv("ARTIO_MARKETPLACE_TEST_PLUGIN_ID");
         String marketplaceVersion = System.getenv("ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION");
+        String marketplaceUpdateVersion = System.getenv("ARTIO_MARKETPLACE_UPDATE_PLUGIN_VERSION");
         String marketplaceTrustedKeys = System.getenv("ARTIO_MARKETPLACE_TRUSTED_KEYS");
         assumeTrue(marketplacePluginId != null && !marketplacePluginId.isBlank()
                 && marketplaceVersion != null && !marketplaceVersion.isBlank()
+                && marketplaceUpdateVersion != null && !marketplaceUpdateVersion.isBlank()
                 && System.getenv("ARTIO_MARKETPLACE_BASE_URL") != null
                 && marketplaceTrustedKeys != null && !marketplaceTrustedKeys.isBlank(),
-                "Set Marketplace URL, release identity and trusted signing key for live signed-descriptor acceptance");
+                "Set Marketplace URL, install/update release identities and trusted signing key for live release lifecycle acceptance");
+        String updateImage = System.getenv("ARTIO_TEST_EXTENSION_IMAGE_V3");
+        assumeTrue(updateImage != null && !updateImage.isBlank(),
+                "The signed Marketplace acceptance must provide a third immutable v2 fixture image for release update");
 
         var listing = adminExchange("/api/v1/admin/extensions/marketplace/plugins?q=reference",
                 HttpMethod.GET, null, Map.class);
@@ -718,6 +724,90 @@ class CatalogApiIntegrationTests {
             assertThat(jdbc.queryForObject("SELECT attempt_state FROM extension_operation_attempts WHERE capability_id=? "
                             + "AND operation_name=? AND idempotency_key=?", String.class,
                     "payment.provider.v1", "createCheckout", invocationIdempotencyKey)).isEqualTo("SUCCEEDED");
+
+            var registeredTarget = adminExchange(
+                    "/api/v1/admin/extensions/marketplace/plugins/{id}/releases/{version}/register",
+                    HttpMethod.POST, Map.of(), Map.class, marketplacePluginId, marketplaceUpdateVersion);
+            assertThat(registeredTarget.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(registeredTarget.getBody()).isNotNull().containsEntry("pluginId", marketplacePluginId)
+                    .containsEntry("version", marketplaceUpdateVersion);
+            assertThat(String.valueOf(registeredTarget.getBody().get("descriptorDigest"))).matches("[a-f0-9]{64}");
+            long targetReleaseId = ((Number) registeredTarget.getBody().get("releaseId")).longValue();
+            long originalReleaseId = jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances WHERE instance_id=?",
+                    Long.class, marketplaceInstanceId);
+            var releaseCatalog = adminExchange("/api/v1/admin/extensions/{id}/releases", HttpMethod.GET,
+                    null, io.artio.api.extensions.ExtensionManagementController.PluginReleaseView[].class, marketplacePluginId);
+            assertThat(releaseCatalog.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(releaseCatalog.getBody()).anySatisfy(release -> {
+                assertThat(release.releaseId()).isEqualTo(targetReleaseId);
+                assertThat(release.version()).isEqualTo(marketplaceUpdateVersion);
+                assertThat(release.provenance()).isEqualTo("OFFICIAL_MARKETPLACE");
+            });
+            io.artio.extensions.PluginManifest updateManifest = mapper.readValue(jdbc.queryForObject(
+                    "SELECT manifest::text FROM extension_plugin_releases WHERE release_id=?", String.class, targetReleaseId),
+                    io.artio.extensions.PluginManifest.class);
+            assertThat(updateManifest.image()).isEqualTo(updateImage);
+
+            var controllerFixture = PackagedControllerFixture.start(docker, runtimeNetwork);
+            var remoteRuntime = controllerFixture.runtime();
+            var remoteRuntimeBeans = new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                    Map.of("marketplaceRemoteRuntime", remoteRuntime));
+            @SuppressWarnings("unchecked")
+            org.springframework.beans.factory.ObjectProvider<io.artio.extensions.ExtensionRuntimePort> remoteRuntimeProvider =
+                    remoteRuntimeBeans.getBeanProvider(io.artio.extensions.ExtensionRuntimePort.class);
+            var releaseWorker = new io.artio.api.extensions.ExtensionInstallationJobWorker(jdbc,
+                    new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules(),
+                    remoteRuntimeProvider, extensionRegistryCredentials, encryption, ociArchiveInspector,
+                    archiveQuarantineStore,
+                    new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()),
+                    1_800_000, 300_000);
+            try {
+                var drained = adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}/drain",
+                        HttpMethod.POST, null, Map.class, marketplacePluginId, marketplaceInstanceId);
+                assertThat(drained.getStatusCode()).isEqualTo(HttpStatus.OK);
+                var updateRequest = adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}/update",
+                        HttpMethod.POST, Map.of("targetReleaseId", targetReleaseId,
+                                "idempotencyKey", UUID.randomUUID().toString()),
+                        io.artio.api.extensions.ExtensionInstallationJobOperations.JobView.class,
+                        marketplacePluginId, marketplaceInstanceId);
+                assertThat(updateRequest.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+                assertThat(updateRequest.getBody()).isNotNull();
+                releaseWorker.runPending();
+                assertThat(jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances WHERE instance_id=?",
+                        Long.class, marketplaceInstanceId)).isEqualTo(targetReleaseId);
+                assertThat(jdbc.queryForObject("SELECT release_digest FROM extension_installation_jobs WHERE job_id=?",
+                        String.class, updateRequest.getBody().jobId())).isEqualTo(registeredTarget.getBody().get("descriptorDigest"));
+                remoteRuntime.enableInstance(runtimeIdentity, updateManifest, 1, Map.of());
+                var updatedInvocation = remoteRuntime.invoke(runtimeIdentity, 1, "payment.provider.v1", "createCheckout",
+                        UUID.randomUUID().toString(), "{}", "{\"amount\":\"12.50\"}", Duration.ofSeconds(5));
+                assertThat(new com.fasterxml.jackson.databind.ObjectMapper().readTree(updatedInvocation.responseJson())
+                        .path("runtimeVersion").asText()).isEqualTo("3");
+                remoteRuntime.disableInstance(runtimeIdentity, marketplacePluginId);
+
+                var rollbackRequest = adminExchange("/api/v1/admin/extensions/{id}/instances/{instanceId}/rollback",
+                        HttpMethod.POST, Map.of("targetReleaseId", originalReleaseId,
+                                "idempotencyKey", UUID.randomUUID().toString()),
+                        io.artio.api.extensions.ExtensionInstallationJobOperations.JobView.class,
+                        marketplacePluginId, marketplaceInstanceId);
+                assertThat(rollbackRequest.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+                assertThat(rollbackRequest.getBody()).isNotNull();
+                releaseWorker.runPending();
+                assertThat(jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances WHERE instance_id=?",
+                        Long.class, marketplaceInstanceId)).isEqualTo(originalReleaseId);
+                remoteRuntime.enableInstance(runtimeIdentity, installedManifest, 1, Map.of());
+                var rolledBackInvocation = remoteRuntime.invoke(runtimeIdentity, 1, "payment.provider.v1", "createCheckout",
+                        UUID.randomUUID().toString(), "{}", "{\"amount\":\"12.50\"}", Duration.ofSeconds(5));
+                assertThat(new com.fasterxml.jackson.databind.ObjectMapper().readTree(rolledBackInvocation.responseJson())
+                        .path("runtimeVersion").asText()).isEqualTo("2");
+                remoteRuntime.disableInstance(runtimeIdentity, marketplacePluginId);
+            } finally {
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(releaseWorker, "stopLeaseRenewals");
+                try { controllerFixture.close(); }
+                finally {
+                    try { liveRuntime.disableInstance(runtimeIdentity, marketplacePluginId); }
+                    catch (RuntimeException ignored) { }
+                }
+            }
         } finally {
             try {
                 if (liveRuntime != null) {
@@ -3178,6 +3268,129 @@ class CatalogApiIntegrationTests {
     }
 
     private record LoginResponse(String accessToken, String tokenType, long expiresIn, UUID userId, String email, String role,boolean mfaEnrollmentRequired) { }
+
+    private static final class PackagedControllerFixture implements AutoCloseable {
+        private static final String TOKEN = "marketplace-controller-acceptance-token-at-least-32-bytes";
+        private static final String KEY = "marketplace-controller-acceptance-key-material-at-least-32-bytes";
+
+        private final com.github.dockerjava.api.DockerClient docker;
+        private final String controlNetwork;
+        private final String secrets;
+        private final String identity;
+        private final String imageTag;
+        private final org.testcontainers.containers.GenericContainer<?> controller;
+        private final io.artio.api.extensions.RemoteExtensionRuntime runtime;
+
+        private PackagedControllerFixture(com.github.dockerjava.api.DockerClient docker, String controlNetwork,
+                String secrets, String identity, String imageTag,
+                org.testcontainers.containers.GenericContainer<?> controller,
+                io.artio.api.extensions.RemoteExtensionRuntime runtime) {
+            this.docker = docker;
+            this.controlNetwork = controlNetwork;
+            this.secrets = secrets;
+            this.identity = identity;
+            this.imageTag = imageTag;
+            this.controller = controller;
+            this.runtime = runtime;
+        }
+
+        static PackagedControllerFixture start(com.github.dockerjava.api.DockerClient docker, String pluginNetwork)
+                throws Exception {
+            String runId = UUID.randomUUID().toString().replace("-", "");
+            String identity = runId;
+            String controlNetwork = "artio-marketplace-controller-" + runId.substring(0, 8);
+            String secrets = "artio-marketplace-controller-secrets-" + runId;
+            String imageTag = "artio/controller-marketplace-it:" + runId;
+            Path jar = Path.of(System.getProperty("artio.test.controller-jar"));
+            assertThat(java.nio.file.Files.isRegularFile(jar)).isTrue();
+            Path startScript = Path.of("..", "artio-docker", "start-api.sh").toAbsolutePath().normalize();
+            docker.createNetworkCmd().withName(controlNetwork).withDriver("bridge")
+                    .withLabels(Map.of("io.artio.test.fixture", identity)).exec();
+            var volume = docker.createVolumeCmd().withName(secrets)
+                    .withLabels(Map.of("io.artio.test.fixture", identity)).exec();
+            assertThat(volume.getLabels()).containsEntry("io.artio.test.fixture", identity);
+            var image = new org.testcontainers.images.builder.ImageFromDockerfile(imageTag, true)
+                    .withFileFromPath("controller.jar", jar)
+                    .withFileFromPath("start-api.sh", startScript)
+                    .withFileFromString("Dockerfile", """
+                            FROM eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64
+                            WORKDIR /app
+                            COPY controller.jar /app/extension-controller.jar
+                            COPY start-api.sh /app/start-api.sh
+                            RUN chmod 0755 /app/start-api.sh
+                            ENTRYPOINT ["/app/start-api.sh"]
+                            """);
+            try {
+                try (var seed = new org.testcontainers.containers.GenericContainer<>("alpine:3.20")
+                        .withLabel("io.artio.test.fixture", identity)
+                        .withCopyToContainer(org.testcontainers.images.builder.Transferable.of(
+                                (KEY + "\n").getBytes(StandardCharsets.UTF_8), 0600), "/seed/encryption-key")
+                        .withCopyToContainer(org.testcontainers.images.builder.Transferable.of(
+                                (KEY + "\n").getBytes(StandardCharsets.UTF_8), 0600), "/seed/extension-auth-key")
+                        .withCopyToContainer(org.testcontainers.images.builder.Transferable.of(
+                                (TOKEN + "\n").getBytes(StandardCharsets.UTF_8), 0600), "/seed/extension-controller-token")
+                        .withCreateContainerCmdModifier(command -> command.getHostConfig().withBinds(
+                                new com.github.dockerjava.api.model.Bind(secrets,
+                                        new com.github.dockerjava.api.model.Volume("/secrets"))))
+                        .withCommand("sh", "-ec", "cp /seed/* /secrets/; chmod 700 /secrets; chmod 600 /secrets/*")
+                        .withStartupCheckStrategy(new org.testcontainers.containers.startupcheck.OneShotStartupCheckStrategy()
+                                .withTimeout(Duration.ofSeconds(30)))) {
+                    seed.start();
+                }
+                var controller = new org.testcontainers.containers.GenericContainer<>(image)
+                        .withLabel("io.artio.test.fixture", identity)
+                        .withNetworkMode(controlNetwork).withExposedPorts(8090)
+                        .withEnv("ARTIO_RUNTIME_ROLE", "extension-controller")
+                        .withEnv("ARTIO_EXTENSION_DOCKER_ENABLED", "true")
+                        .withEnv("ARTIO_EXTENSION_DOCKER_MODE", "controller")
+                        .withEnv("ARTIO_EXTENSION_DOCKER_NETWORK", pluginNetwork)
+                        .withEnv("ARTIO_EXTENSIONS_DOCKER_EGRESS_PROXY", "")
+                        .withEnv("PORT", "8090")
+                        .withCreateContainerCmdModifier(command -> {
+                            var ports = new com.github.dockerjava.api.model.Ports();
+                            ports.bind(com.github.dockerjava.api.model.ExposedPort.tcp(8090),
+                                    com.github.dockerjava.api.model.Ports.Binding.bindIp("127.0.0.1"));
+                            command.getHostConfig().withPortBindings(ports).withReadonlyRootfs(true)
+                                    .withCapDrop(com.github.dockerjava.api.model.Capability.ALL)
+                                    .withSecurityOpts(List.of("no-new-privileges:true"))
+                                    .withTmpFs(Map.of("/tmp", "rw,noexec,nosuid,size=64m"))
+                                    .withBinds(new com.github.dockerjava.api.model.Bind("/var/run/docker.sock",
+                                                    new com.github.dockerjava.api.model.Volume("/var/run/docker.sock"),
+                                                    com.github.dockerjava.api.model.AccessMode.rw),
+                                            new com.github.dockerjava.api.model.Bind(secrets,
+                                                    new com.github.dockerjava.api.model.Volume("/run/artio-controller-secrets"),
+                                                    com.github.dockerjava.api.model.AccessMode.ro));
+                        })
+                        .waitingFor(org.testcontainers.containers.wait.strategy.Wait.forHttp("/actuator/health").forPort(8090))
+                        .withStartupTimeout(Duration.ofSeconds(90));
+                controller.start();
+                docker.connectToNetworkCmd().withNetworkId(pluginNetwork).withContainerId(controller.getContainerId()).exec();
+                String controllerUrl = "http://" + controller.getHost() + ":" + controller.getMappedPort(8090) + "/";
+                var runtime = new io.artio.api.extensions.RemoteExtensionRuntime(
+                        new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules(), controllerUrl, TOKEN);
+                return new PackagedControllerFixture(docker, controlNetwork, secrets, identity, imageTag, controller, runtime);
+            } catch (Exception failure) {
+                try { docker.inspectVolumeCmd(secrets).exec(); docker.removeVolumeCmd(secrets).exec(); }
+                catch (RuntimeException ignored) { }
+                try { docker.removeNetworkCmd(controlNetwork).exec(); }
+                catch (RuntimeException ignored) { }
+                try { docker.removeImageCmd(imageTag).withForce(true).exec(); }
+                catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        }
+
+        io.artio.api.extensions.RemoteExtensionRuntime runtime() { return runtime; }
+
+        @Override
+        public void close() {
+            controller.stop();
+            assertThat(docker.inspectVolumeCmd(secrets).exec().getLabels()).containsEntry("io.artio.test.fixture", identity);
+            docker.removeVolumeCmd(secrets).exec();
+            docker.removeNetworkCmd(controlNetwork).exec();
+            docker.removeImageCmd(imageTag).withForce(true).exec();
+        }
+    }
 
     @TestConfiguration
     static class LocalCacheConfiguration {
