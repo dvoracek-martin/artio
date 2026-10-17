@@ -396,6 +396,96 @@ class CatalogApiIntegrationTests {
     }
 
     @Test
+    void returnsRestockOnlyOnceAndCanAlsoBeReceivedWithoutRestocking() throws Exception {
+        UUID orderId = UUID.randomUUID(), sellableId = UUID.randomUUID(), orderItemId = UUID.randomUUID();
+        var warehouse = inventory.createWarehouse(new io.artio.api.inventory.InventoryApplicationService.WarehouseRequest(
+                "RET-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT), "Return test", "CH-ZH"));
+        UUID shipmentId = UUID.randomUUID();
+        jdbc.update("INSERT INTO orders(id,user_id,status,subtotal,tax,shipping,total,currency,shipping_address,billing_address,created_at,shipping_country,market,tax_jurisdiction,tax_snapshot,idempotency_key) "
+                + "VALUES (?,?,'SHIPPED',20,0,0,20,'CHF','address','address',now(),'CH','CH','CH','{}'::jsonb,?)",
+                orderId, adminUserId, "return-test-" + orderId);
+        jdbc.update("INSERT INTO order_items(id,order_id,variant_id,quantity,unit_price,currency,bundle_id) VALUES (?,?,?,2,10,'CHF',NULL)",
+                orderItemId, orderId, sellableId);
+        jdbc.update("INSERT INTO order_shipments(id,order_id,tracking_number) VALUES (?,?,?)", shipmentId, orderId, "RET-TRACK-" + orderId);
+        jdbc.update("INSERT INTO order_shipment_items(shipment_id,order_item_id,quantity) VALUES (?,?,2)", shipmentId, orderItemId);
+
+        String firstKey = "return-" + orderId + "-first";
+        var keyedRequest = returnRequest(orderId, firstKey, orderItemId);
+        assertThat(keyedRequest.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var duplicateRequest = returnRequest(orderId, firstKey, orderItemId);
+        assertThat(duplicateRequest.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(duplicateRequest.getBody().id()).isEqualTo(keyedRequest.getBody().id());
+
+        UUID restockedReturnId = keyedRequest.getBody().id();
+        var approved = adminExchange("/api/v1/admin/orders/{orderId}/returns/{returnId}/review", HttpMethod.POST,
+                Map.of("approve", true, "note", "Approved"), io.artio.api.orders.OrderReturnController.ReturnView.class,
+                orderId, restockedReturnId);
+        assertThat(approved.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var receiveOne = CompletableFuture.supplyAsync(() -> receiveReturn(orderId, restockedReturnId, true, warehouse.id()));
+        var receiveTwo = CompletableFuture.supplyAsync(() -> receiveReturn(orderId, restockedReturnId, true, warehouse.id()));
+        CompletableFuture.allOf(receiveOne, receiveTwo).get(10, TimeUnit.SECONDS);
+        var received = receiveOne.join();
+        assertThat(List.of(receiveOne.join().getStatusCode(), receiveTwo.join().getStatusCode()))
+                .containsOnly(HttpStatus.OK);
+        assertThat(received.getBody().items()).singleElement().satisfies(line -> {
+            assertThat(line.restockWarehouseId()).isEqualTo(warehouse.id());
+            assertThat(line.restockedAt()).isNotNull();
+        });
+        assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement()
+                .satisfies(stock -> assertThat(stock.onHand()).isEqualByComparingTo("1"));
+        assertThat(movementCount(warehouse.id(), sellableId)).isEqualTo(1);
+
+        var repeatedReceive = receiveReturn(orderId, restockedReturnId, true, warehouse.id());
+        assertThat(repeatedReceive.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(movementCount(warehouse.id(), sellableId)).isEqualTo(1);
+
+        String secondKey = "return-" + orderId + "-second";
+        var secondRequest = returnRequest(orderId, secondKey, orderItemId);
+        assertThat(secondRequest.getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID nonRestockedReturnId = secondRequest.getBody().id();
+        var secondApproved = adminExchange("/api/v1/admin/orders/{orderId}/returns/{returnId}/review", HttpMethod.POST,
+                Map.of("approve", true), io.artio.api.orders.OrderReturnController.ReturnView.class,
+                orderId, nonRestockedReturnId);
+        assertThat(secondApproved.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var receivedWithoutRestock = receiveReturn(orderId, nonRestockedReturnId, false, null);
+        assertThat(receivedWithoutRestock.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(receivedWithoutRestock.getBody().items()).singleElement().satisfies(line -> {
+            assertThat(line.restockWarehouseId()).isNull();
+            assertThat(line.restockedAt()).isNull();
+        });
+        assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement()
+                .satisfies(stock -> assertThat(stock.onHand()).isEqualByComparingTo("1"));
+        assertThat(movementCount(warehouse.id(), sellableId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("RETURNED");
+    }
+
+    private ResponseEntity<io.artio.api.orders.OrderReturnController.ReturnView> returnRequest(UUID orderId, String key, UUID orderItemId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(adminToken);
+        headers.set("Idempotency-Key", key);
+        Object body = Map.of("reason", "Customer return", "items", List.of(Map.of("orderItemId", orderItemId, "quantity", 1)));
+        var response = http.exchange("/api/v1/orders/{orderId}/returns", HttpMethod.POST, new HttpEntity<>(body, headers), String.class, orderId);
+        try {
+            return ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders())
+                    .body(mapper.readValue(response.getBody(), io.artio.api.orders.OrderReturnController.ReturnView.class));
+        } catch (Exception invalidResponse) {
+            throw new org.springframework.web.client.RestClientException("Could not decode return request: " + response.getBody(), invalidResponse);
+        }
+    }
+
+    private ResponseEntity<io.artio.api.orders.OrderReturnController.ReturnView> receiveReturn(
+            UUID orderId, UUID returnId, boolean restock, UUID warehouseId) {
+        Object body = restock ? Map.of("restock", true, "warehouseId", warehouseId) : Map.of("restock", false);
+        return adminExchange("/api/v1/admin/orders/{orderId}/returns/{returnId}/receive", HttpMethod.POST,
+                body, io.artio.api.orders.OrderReturnController.ReturnView.class, orderId, returnId);
+    }
+
+    private int movementCount(UUID warehouseId, UUID sellableId) {
+        return jdbc.queryForObject("SELECT count(*) FROM inventory_stock_movement WHERE warehouse_id=? AND sellable_id=?",
+                Integer.class, warehouseId, sellableId);
+    }
+
+    @Test
     void duplicatesProductAsUnpublishedDraftWithFreshIdentityAndSku() throws Exception {
         var source=adminExchange("/api/v1/products",HttpMethod.POST,
                 new io.artio.api.catalog.ProductRequest("Desk lamp","Brass lamp","LAMP-ORIGINAL"),
