@@ -284,28 +284,30 @@ def invoke(operation, payload, idempotency_key, root=None, client=None):
                                 assembled.write(block)
                     if not hmac.compare_digest(digest.hexdigest(), checksum):
                         raise StorageError(422, "object_checksum_mismatch")
-                    if record_path.exists():
+                    tracked_record = record_path.exists()
+                    if tracked_record:
                         existing = json.loads(record_path.read_text(encoding="utf-8"))
                         if existing["sha256"] != checksum or existing["byteLength"] != length:
                             raise StorageError(409, "object_version_conflict")
-                        version = existing["versionId"]
-                    else:
-                        version = None
-                        try:
-                            # Reconcile a prior PUT whose response or local metadata write was lost.
-                            version = _verified_provider_version(s3, bucket, object_key, length, checksum)
-                        except StorageError as failure:
-                            if failure.status != 404:
-                                raise
-                        if version is None:
-                            assembled.seek(0)
-                            response = _s3_call(lambda: s3.put_object(
-                                Bucket=bucket, Key=object_key, Body=assembled, ContentLength=length,
-                                Metadata={"artio-sha256": checksum},
-                            ))
-                            version = response.get("VersionId") or "unversioned"
-                        _atomic_json(record_path, {"key": key, "sha256": checksum, "byteLength": length,
-                                                    "versionId": version})
+                    version = None
+                    try:
+                        # Verify the provider's current bytes too. A local record can outlive
+                        # a lost/deleted/corrupt remote object and must not mask that damage.
+                        version = _verified_provider_version(s3, bucket, object_key, length, checksum)
+                    except StorageError as failure:
+                        if failure.code == "object_version_conflict" and not tracked_record:
+                            raise
+                        if failure.status not in (404, 409) or failure.code not in ("object_not_found", "object_version_conflict"):
+                            raise
+                    if version is None:
+                        assembled.seek(0)
+                        response = _s3_call(lambda: s3.put_object(
+                            Bucket=bucket, Key=object_key, Body=assembled, ContentLength=length,
+                            Metadata={"artio-sha256": checksum},
+                        ))
+                        version = response.get("VersionId") or "unversioned"
+                    _atomic_json(record_path, {"key": key, "sha256": checksum, "byteLength": length,
+                                                "versionId": version})
                     result = {"sha256": checksum, "versionId": version}
                 for item in upload_dir.iterdir():
                     item.unlink(missing_ok=True)

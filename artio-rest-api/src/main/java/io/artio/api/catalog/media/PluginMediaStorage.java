@@ -55,13 +55,34 @@ public final class PluginMediaStorage implements MediaStorage {
                 throw new IllegalStateException("Existing object storage content does not match the requested checksum");
             return;
         }
+        writePlacement(key, content, "put");
+    }
+
+    /** Rewrites every historically selected target from a checksum-verified surviving copy. */
+    public void repair(String key, UUID repairRunId) {
+        if (repairRunId == null) throw new IllegalArgumentException("A repair run ID is required");
+        RepairObject object = jdbc.query("SELECT content_checksum,byte_length FROM catalog_media_storage_objects "
+                        + "WHERE storage_key=? AND object_state='ACTIVE'",
+                (rs, row) -> new RepairObject(rs.getString("content_checksum"), rs.getInt("byte_length")), key)
+                .stream().findFirst().orElseThrow(() -> new IllegalStateException("Active plugin media placement was not found"));
+        byte[] content = read(key);
+        if (content.length != object.byteLength() || !object.checksum().equalsIgnoreCase(sha256(content)))
+            throw new IllegalStateException("Recovered media does not match its persisted checksum and length");
+        writePlacement(key, content, "repair:" + repairRunId + ":" + object.checksum());
+    }
+
+    private void writePlacement(String key, byte[] content, String operation) {
+        String checksum = sha256(content);
         int chunks = Math.max(1, (content.length + CHUNK_BYTES - 1) / CHUNK_BYTES);
         CommerceCapabilityInvoker.Invocation placement = null;
         for (int index = 0; index < chunks; index++) {
             int from = index * CHUNK_BYTES;
             byte[] chunk = java.util.Arrays.copyOfRange(content, from, Math.min(content.length, from + CHUNK_BYTES));
-            var result = invoke("put", stableId("put:" + index, key), Map.of(
-                    "key", key, "routingKey", stableId("put:0", key), "uploadId", stableId("upload", key), "chunkIndex", index, "totalChunks", chunks,
+            String idempotencyKey = "put".equals(operation) ? stableId("put:" + index, key)
+                    : stableId(operation + ":" + index, key);
+            String uploadId = "put".equals(operation) ? stableId("upload", key) : stableId(operation + ":upload", key);
+            var result = invoke("put", idempotencyKey, Map.of(
+                    "key", key, "routingKey", stableId("put:0", key), "uploadId", uploadId, "chunkIndex", index, "totalChunks", chunks,
                     "chunkBase64", Base64.getEncoder().encodeToString(chunk), "sha256", checksum,
                     "complete", index == chunks - 1));
             placement = result;
@@ -218,5 +239,6 @@ public final class PluginMediaStorage implements MediaStorage {
     }
 
     private record ExistingObject(String checksum, String state) { }
+    private record RepairObject(String checksum, int byteLength) { }
     private record PendingDelete(String storageKey, UUID tombstoneId) { }
 }

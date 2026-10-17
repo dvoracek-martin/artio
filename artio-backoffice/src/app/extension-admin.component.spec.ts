@@ -98,6 +98,46 @@ describe('ExtensionAdminComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('All legacy media has been copied and verified. Source data is retained.');
   });
 
+  it('repairs storage placements in resumable batches using one repair run identity', async () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const http = TestBed.inject(HttpTestingController);
+    fixture.detectChanges();
+    http.expectOne('/api/v1/admin/extensions/security/advisories').flush({ releases: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ storageMode: 'plugins', activePluginObjects: 2, pendingMigration: 0, migrationAvailable: true, canManageStorage: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.storageStatus.activePluginObjects).toBe(2);
+    const repairButton = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Check and repair replicas')) as HTMLButtonElement;
+    expect(repairButton).toBeTruthy();
+    expect(repairButton.disabled).toBe(false);
+    repairButton.click();
+    expect(fixture.componentInstance.storageRepairLoading).toBe(true);
+    const first = http.match(request => request.url.startsWith('/api/v1/admin/catalog/media/storage-repair?'))[0];
+    const firstParams = new URLSearchParams(first.request.url.split('?')[1]);
+    expect(firstParams.get('limit')).toBe('50');
+    const runId = firstParams.get('repairRunId');
+    expect(runId).toMatch(/^[0-9a-f-]{36}$/);
+    first.flush({ inspected: 1, repaired: 1, failed: 0, complete: false, nextCursor: 'abc.jpg', failures: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ storageMode: 'plugins', activePluginObjects: 2, pendingMigration: 0, migrationAvailable: true, canManageStorage: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Continue storage repair'))?.click();
+    const second = http.match(request => request.url.startsWith('/api/v1/admin/catalog/media/storage-repair?'))[0];
+    const secondParams = new URLSearchParams(second.request.url.split('?')[1]);
+    expect(secondParams.get('afterStorageKey')).toBe('abc.jpg');
+    expect(secondParams.get('repairRunId')).toBe(runId);
+    second.flush({ inspected: 1, repaired: 1, failed: 0, complete: true, nextCursor: 'xyz.png', failures: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ storageMode: 'plugins', activePluginObjects: 2, pendingMigration: 0, migrationAvailable: true, canManageStorage: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('All plugin media placements were checked and repaired.');
+  });
+
   it('discovers payment methods and saves the Core-validated visibility and order', () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);

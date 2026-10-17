@@ -130,6 +130,18 @@ class MinioAdapterTests(unittest.TestCase):
         self.assertEqual("object_version_conflict", failure.exception.code)
         self.assertEqual(b"x" * len(self.content), self.s3.objects[("artio-media", "products/media/" + self.key)]["body"])
 
+    def test_repeated_put_repairs_missing_or_corrupt_tracked_provider_objects(self):
+        self.invoke("put", self.put_payload(), self.operation_id)
+        provider_key = ("artio-media", "products/media/" + self.key)
+        self.s3.objects[provider_key]["body"] = b"x" * len(self.content)
+        repaired = self.invoke("put", dict(self.put_payload(), uploadId=str(uuid.uuid4())), str(uuid.uuid4()))
+        self.assertEqual({"sha256": self.checksum, "versionId": "version-1"}, repaired)
+        self.assertEqual(self.content, self.s3.objects[provider_key]["body"])
+
+        del self.s3.objects[provider_key]
+        self.invoke("put", dict(self.put_payload(), uploadId=str(uuid.uuid4())), str(uuid.uuid4()))
+        self.assertEqual(self.content, self.s3.objects[provider_key]["body"])
+
     def test_storage_endpoint_cannot_be_changed_while_objects_are_placed(self):
         self.invoke("put", self.put_payload())
         with patch.dict(os.environ, {"ARTIO_S3_ENDPOINT": "https://different-minio.internal"}):
