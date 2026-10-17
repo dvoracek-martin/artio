@@ -98,21 +98,26 @@ class CapabilityRouterTests {
 
     @Test
     void objectPlacementUsesDistinctInstancesInDeterministicPrimaryReplicaOrder() {
-        UUID duplicateInstance = UUID.randomUUID();
-        var firstBinding = storageBinding(duplicateInstance);
-        var duplicateBinding = storageBinding(duplicateInstance);
-        var replica = storageBinding(UUID.randomUUID());
+        UUID primaryInstance = UUID.randomUUID();
+        UUID replicaInstance = UUID.randomUUID();
+        var primary = storageBinding(primaryInstance, 20);
+        var replica = storageBinding(replicaInstance, 10);
+        var duplicatePrimary = storageBinding(primaryInstance, 20);
 
         var plan = router.resolve(new CapabilityRouter.RouteRequest("storage.object.v1", "put", Map.of(), null, true),
-                List.of(replica, duplicateBinding, firstBinding));
+                List.of(replica, duplicatePrimary, primary));
 
         assertThat(plan.instanceIds()).hasSize(2).doesNotHaveDuplicates();
-        assertThat(plan.instanceIds()).isSortedAccordingTo(java.util.Comparator.comparing(UUID::toString));
+        assertThat(plan.instanceIds()).containsExactly(primaryInstance, replicaInstance);
         assertThat(plan.policy()).isEqualTo(CapabilityRegistry.Policy.PRIMARY_REPLICAS);
     }
 
     private static CapabilityRouter.Binding storageBinding(UUID instanceId) {
-        return new CapabilityRouter.Binding(UUID.randomUUID(), instanceId, "storage.object.v1", "put", Map.of(), 0,
+        return storageBinding(instanceId, 0);
+    }
+
+    private static CapabilityRouter.Binding storageBinding(UUID instanceId, int priority) {
+        return new CapabilityRouter.Binding(UUID.randomUUID(), instanceId, "storage.object.v1", "put", Map.of(), priority,
                 Set.of("storage.object.write"), CapabilityRouter.BindingState.ACTIVE,
                 CapabilityRouter.InstanceState.ENABLED, true);
     }

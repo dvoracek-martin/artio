@@ -50,6 +50,23 @@ describe('ExtensionAdminComponent', () => {
     expect(actions).toEqual(['toggleRegistration']);
   });
 
+  it('shows and reorders explicit primary and replica storage bindings', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const component = fixture.componentInstance;
+    const extension = { manifest: { id: 'storage.example' } };
+    component.selectedExtension = extension;
+    const primary = { bindingId: 'b-primary', instanceId: 'instance-primary', capabilityId: 'storage.object.v1', operationName: 'put', scope: {}, priority: 10, eligibilityState: 'ACTIVE' };
+    const replica = { bindingId: 'b-replica', instanceId: 'instance-replica', capabilityId: 'storage.object.v1', operationName: 'put', scope: {}, priority: 0, eligibilityState: 'ACTIVE' };
+    component.storagePlacementBindings = [replica, primary].map(binding => ({ ...binding, pluginId: 'storage.example', instanceKey: binding.instanceId, lifecycleState: 'ENABLED' }));
+    expect(component.placementRole(component.storagePlacementBindings[1])).toBe('Primary');
+    expect(component.placementRole(component.storagePlacementBindings[0])).toBe('Replica');
+    component.moveStorageBinding(replica, -1);
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne({ method: 'PUT', url: '/api/v1/admin/extensions/storage-placement/b-replica' }).flush({ bindingId: 'b-replica', priority: 11 });
+    expect(component.storagePlacementBindings[0].priority).toBe(11);
+  });
+
   it('shows storage placement status and advances verified migration one bounded batch at a time', async () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);

@@ -59,7 +59,12 @@ public final class CapabilityRouter {
                 yield plan(request, operation, prioritized);
             }
             case SELECT_ONE -> plan(request, operation, prioritized.subList(0, 1));
-            case PRIMARY_REPLICAS -> plan(request, operation, prioritized.stream()
+            // Storage bindings use priority as an explicit placement order: highest priority is
+            // primary, followed by replicas. Unlike SELECT_ONE, lower-priority bindings remain
+            // part of the durable replica set. Equal priorities retain the legacy UUID ordering.
+            case PRIMARY_REPLICAS -> plan(request, operation, scoped.stream()
+                    .sorted(Comparator.comparingInt(Binding::priority).reversed()
+                            .thenComparing(binding -> binding.instanceId().toString()))
                     .collect(java.util.stream.Collectors.toMap(Binding::instanceId, binding -> binding,
                             (first, ignored) -> first, java.util.LinkedHashMap::new)).values().stream().toList());
             case PINNED_ONE -> throw new IllegalStateException("Pinned operation handled before candidate selection");

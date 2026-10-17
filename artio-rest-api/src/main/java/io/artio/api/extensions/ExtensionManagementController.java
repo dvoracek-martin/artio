@@ -290,6 +290,18 @@ public class ExtensionManagementController {
                         rs.getInt("priority"), rs.getString("eligibility_state")), pluginId);
     }
 
+    @GetMapping("/storage-placement")
+    @Transactional(readOnly = true)
+    public List<StoragePlacementBindingView> storagePlacementBindings() {
+        return jdbc.query("SELECT i.plugin_id,b.binding_id,b.instance_id,i.instance_key,b.scope,b.priority,b.eligibility_state,i.lifecycle_state "
+                        + "FROM extension_capability_bindings b JOIN extension_plugin_instances i ON i.instance_id=b.instance_id "
+                        + "WHERE b.capability_id='storage.object.v1' AND b.operation_name='put' "
+                        + "ORDER BY b.scope::text,b.priority DESC,i.instance_id",
+                (rs, row) -> new StoragePlacementBindingView(rs.getString("plugin_id"), rs.getObject("binding_id", UUID.class),
+                        rs.getObject("instance_id", UUID.class), rs.getString("instance_key"), read(rs.getString("scope"), STRING_MAP),
+                        rs.getInt("priority"), rs.getString("eligibility_state"), rs.getString("lifecycle_state")));
+    }
+
     @PutMapping("/{pluginId}/bindings/{bindingId}/state")
     public ResponseEntity<?> updateBindingState(@PathVariable String pluginId, @PathVariable UUID bindingId,
             @RequestBody BindingStateRequest request, JwtAuthenticationToken actor) {
@@ -302,6 +314,25 @@ public class ExtensionManagementController {
         if (updated == 0) return ResponseEntity.notFound().build();
         audit(pluginId, actor, "UPDATE_CAPABILITY_BINDING", Map.of("bindingId", bindingId.toString(), "state", request.state()));
         return ResponseEntity.ok(Map.of("bindingId", bindingId, "state", request.state()));
+    }
+
+    @PutMapping("/storage-placement/{bindingId}")
+    public ResponseEntity<?> updateStorageBindingPriority(@PathVariable UUID bindingId,
+            @RequestBody BindingPriorityRequest request, JwtAuthenticationToken actor) {
+        if (actor == null || actor.getAuthorities().stream().noneMatch(a -> "ROLE_SUPERADMIN".equals(a.getAuthority())))
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "SUPERADMIN authority is required"));
+        if (request == null || request.priority() < -10000 || request.priority() > 10000)
+            return ResponseEntity.badRequest().body(Map.of("message", "priority must be between -10000 and 10000"));
+        String pluginId = jdbc.query("SELECT i.plugin_id FROM extension_capability_bindings b JOIN extension_plugin_instances i "
+                        + "ON i.instance_id=b.instance_id WHERE b.binding_id=? AND b.capability_id='storage.object.v1' "
+                        + "AND b.operation_name='put' FOR UPDATE OF b", rs -> rs.next() ? rs.getString(1) : null, bindingId);
+        if (pluginId == null) return ResponseEntity.notFound().build();
+        findPlugin(pluginId);
+        int updated = jdbc.update("UPDATE extension_capability_bindings SET priority=?,updated_at=now() WHERE binding_id=?",
+                request.priority(), bindingId);
+        if (updated != 1) return ResponseEntity.notFound().build();
+        audit(pluginId, actor, "REORDER_STORAGE_BINDING", Map.of("bindingId", bindingId.toString(), "priority", request.priority()));
+        return ResponseEntity.ok(Map.of("bindingId", bindingId, "priority", request.priority()));
     }
 
     @GetMapping("/{pluginId}/subscriptions")
@@ -1971,6 +2002,9 @@ public class ExtensionManagementController {
     public record BindingRequest(String capabilityId, String operationName, Map<String, String> scope, int priority,
             UUID instanceId) { }
     public record BindingStateRequest(String state) { }
+    public record BindingPriorityRequest(int priority) { }
+    public record StoragePlacementBindingView(String pluginId, UUID bindingId, UUID instanceId, String instanceKey,
+            Map<String, String> scope, int priority, String eligibilityState, String lifecycleState) { }
     public record BindingView(UUID bindingId, UUID instanceId, String capabilityId, String operationName,
                               Map<String, String> scope, int priority, String eligibilityState) { }
     public record SubscriptionView(UUID subscriptionId, UUID instanceId, String eventType, int schemaVersion,
