@@ -20,7 +20,7 @@
     @if (page === 'home') {
       <section class="hero">
         <div class="hero-copy"><p class="eyebrow">{{ t('homeEyebrow') }}</p><h1>{{ t('homeHeadingStart') }}<br><em>{{ t('homeHeadingEmphasis') }}</em></h1><p>{{ t('homeDescription') }}</p><a class="button button-dark" href="/shop">{{ t('explore') }} <span aria-hidden="true">↗</span></a><div class="hero-index"><span>01</span><span class="index-line"></span><span>{{ t('homeCollectionIndex') }}</span></div></div>
-        <div class="hero-visual" aria-label="Artio collection">
+        <div class="hero-visual" role="group" [attr.aria-label]="t('homeCatalogHeading')">
           @if (products[0]?.media?.[0]; as image) { <img class="hero-photo" [src]="image.contentUrl" [alt]="image.altText || products[0].name"> }
           @if (!products[0]?.media?.[0]) { <div class="still-life" aria-hidden="true"><div class="still-disc"></div><span class="still-mark">A</span><span class="still-caption">{{ t('homeStillCaption') }}</span></div> }
           @if (products[0]; as featured) { <a class="feature-note" [href]="productHref(featured)"><span>{{ t('homeFeatureLabel') }}</span><strong>{{ featured.name }}</strong><span aria-hidden="true">↗</span></a> }

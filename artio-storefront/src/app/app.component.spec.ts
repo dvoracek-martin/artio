@@ -203,17 +203,18 @@ describe('Storefront payment return', () => {
   });
 
   it.each([
-    ['en', 'Make room for', 'THE ARTIO EDIT', 'Main navigation', 'Categories'],
-    ['de', 'Mehr Raum für', 'DIE ARTIO AUSWAHL', 'Hauptnavigation', 'Kategorien'],
-    ['fr', 'Faites place à', 'LA SÉLECTION ARTIO', 'Navigation principale', 'Catégories'],
-    ['it', 'Fai spazio a', 'LA SELEZIONE ARTIO', 'Navigazione principale', 'Categorie']
-  ] as const)('renders the storefront home copy and navigation accessibly in %s', (locale, heading, eyebrow, navigationLabel, categoriesLabel) => {
+    ['en', 'Make room for', 'THE ARTIO EDIT', 'Main navigation', 'Categories', 'Find your everyday.'],
+    ['de', 'Mehr Raum für', 'DIE ARTIO AUSWAHL', 'Hauptnavigation', 'Kategorien', 'Finden Sie Ihre Alltagsbegleiter.'],
+    ['fr', 'Faites place à', 'LA SÉLECTION ARTIO', 'Navigation principale', 'Catégories', 'Pour votre quotidien.'],
+    ['it', 'Fai spazio a', 'LA SELEZIONE ARTIO', 'Navigazione principale', 'Categorie', 'Per ogni giorno.']
+  ] as const)('renders the storefront home copy and navigation accessibly in %s', (locale, heading, eyebrow, navigationLabel, categoriesLabel, catalogHeading) => {
     const { fixture } = createComponent(undefined, false, `/?locale=${locale}`);
 
     expect(fixture.nativeElement.querySelector('h1')?.textContent).toContain(heading);
     expect(fixture.nativeElement.querySelector('.hero .eyebrow')?.textContent).toContain(eyebrow);
     expect(fixture.nativeElement.querySelector('nav.desktop-nav')?.getAttribute('aria-label')).toBe(navigationLabel);
     expect(fixture.nativeElement.querySelector('.category-pills')?.getAttribute('aria-label')).toBe(categoriesLabel);
+    expect(fixture.nativeElement.querySelector('.hero-visual')?.getAttribute('aria-label')).toBe(catalogHeading);
   });
 
   it('gives checkout address and payment controls visible accessible labels', () => {
