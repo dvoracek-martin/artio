@@ -1,8 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BackofficeLocale } from './backoffice-locale';
 import { ordersAdminText } from './orders-admin-locale';
+import { paymentReconciliationText, type PaymentReconciliationTextKey } from './payment-reconciliation-locale';
 
 export type OrdersAdminAction =
   | { type: 'search' } | { type: 'export' } | { type: 'page'; page: number }
@@ -16,7 +18,7 @@ export type OrdersAdminAction =
 @Component({
   selector: 'artio-orders-admin', standalone: true, imports: [CommonModule, FormsModule],
   template: `
-<section><div class="panel"><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p class="muted">{{t('intro')}}</p>
+<section><div class="panel"><div class="panel-heading"><div><p class="eyebrow">{{paymentT('paymentReview')}}</p><h2>{{paymentT('paymentReviewTitle')}}</h2></div><button type="button" class="link-button" (click)="loadPaymentCases()" [disabled]="paymentCasesLoading">{{paymentT('refreshReview')}}</button></div><p class="muted">{{paymentT('paymentReviewHelp')}}</p>@if(paymentCasesLoading){<p class="muted" role="status">{{paymentT('paymentReviewLoading')}}</p>}@if(paymentCasesError){<p class="error" role="alert">{{paymentCasesError}}</p>}@if(!paymentCasesLoading&&!paymentCasesError&&!paymentCases.length){<p class="empty" role="status">{{paymentT('paymentReviewEmpty')}}</p>}@for (item of paymentCases; track item.caseId) {<div class="row"><span class="row-main"><strong>{{paymentCaseTypeText(item.type)}} · {{item.orderId}}</strong><small>{{paymentT('paymentExpected')}} {{item.expectedAmount}} {{item.expectedCurrency}} · {{paymentT('paymentCaptured')}} {{item.capturedAmount}} {{item.capturedCurrency}} · {{item.createdAt | date:'medium'}}</small></span><button type="button" class="link-button" (click)="emit({type:'view',order:{id:item.orderId}})">{{paymentT('openReviewOrder')}}</button></div>}</div><div class="panel"><p class="eyebrow">{{t('eyebrow')}}</p><h2>{{t('title')}}</h2><p class="muted">{{t('intro')}}</p>
 <form class="toolbar" (ngSubmit)="emit({type:'search'})"><input [ngModel]="query" (ngModelChange)="queryChange.emit($event)" name="orderQuery" maxlength="200" [placeholder]="t('query')" [attr.aria-label]="t('query')"><select [ngModel]="status" (ngModelChange)="statusChange.emit($event)" name="orderStatus" [attr.aria-label]="t('allStatuses')"><option value="">{{t('allStatuses')}}</option>@for (value of statuses; track value) { <option [value]="value">{{t('status_'+value)}}</option> }</select><button class="primary">{{t('search')}}</button><button type="button" class="link-button" (click)="emit({type:'export'})">{{t('export')}}</button></form>
 @if (loading) { <p class="muted" role="status">{{t('loading')}}</p> }
 @if (error) { <p class="error" role="alert">{{error}}</p> }
@@ -34,7 +36,10 @@ export type OrdersAdminAction =
 @if (!returns.length) { <p class="muted">{{t('noReturns')}}</p> }<details><summary>{{t('taxSnapshot')}}</summary><pre>{{selectedOrder.taxSnapshot | json}}</pre></details><h3>{{t('timeline')}}</h3>@for (event of timeline; track event.id) { <div class="row"><span class="row-main"><strong>{{event.eventType}}</strong><small>{{event.message}} · {{event.occurredAt | date:'medium'}}</small></span><span class="muted">{{event.customerVisible?t('customerVisible'):t('internal')}}</span></div> }<form class="toolbar" (ngSubmit)="addNote()"><input [ngModel]="note" (ngModelChange)="noteChange.emit($event)" name="orderNote" maxlength="2000" [placeholder]="t('internalNote')" [attr.aria-label]="t('internalNote')"><button class="primary" [disabled]="!note.trim()">{{t('addNote')}}</button></form></div> }
 </section>`,
 })
-export class OrdersAdminComponent {
+export class OrdersAdminComponent implements OnInit {
+  constructor(private readonly http: HttpClient) { }
+  ngOnInit(): void { this.loadPaymentCases(); }
+  paymentCases: any[] = []; paymentCasesLoading = true; paymentCasesError = '';
   @Input() locale: BackofficeLocale = 'en'; @Input() orders: any[] = []; @Input() loading = false; @Input() error = '';
   @Input() page = 0; @Input() total = 0; @Input() pages = 0; @Input() statuses: string[] = [];
   @Input() selectedOrder: any = null; @Input() detailLoading = false; @Input() shipments: any[] = []; @Input() returns: any[] = []; @Input() warehouses: any[] = []; @Input() timeline: any[] = [];
@@ -42,6 +47,9 @@ export class OrdersAdminComponent {
   @Input() trackingNumber = ''; @Output() trackingNumberChange = new EventEmitter<string>(); @Input() note = ''; @Output() noteChange = new EventEmitter<string>(); @Output() action = new EventEmitter<OrdersAdminAction>();
   emit(action: OrdersAdminAction): void { this.action.emit(action); }
   t(key: string, values: Record<string, string | number> = {}): string { return ordersAdminText(this.locale, key, values); }
+  paymentT(key: PaymentReconciliationTextKey): string { return paymentReconciliationText(this.locale, key); }
+  paymentCaseTypeText(type: string): string { return paymentReconciliationText(this.locale, ('case_' + type) as PaymentReconciliationTextKey); }
+  loadPaymentCases(): void { this.paymentCasesLoading = true; this.paymentCasesError = ''; this.http.get<any[]>('/api/v1/admin/payments/reconciliation-cases').subscribe({ next: cases => { this.paymentCases = cases; this.paymentCasesLoading = false; }, error: error => { this.paymentCases = []; this.paymentCasesLoading = false; this.paymentCasesError = error.error?.message ?? error.error?.detail ?? this.paymentT('paymentReviewFailure'); } }); }
   createShipment(): void { this.emit({ type: 'createShipment', trackingNumber: this.trackingNumber.trim(), lines: (this.selectedOrder?.lines ?? []).filter((line: any) => Number(line.shipQuantity) > 0) }); }
   addNote(): void { if (this.note.trim()) this.emit({ type: 'note', note: this.note.trim() }); }
   returnAction(item: any, action: 'review' | 'receive', approve: boolean, restock: boolean): void { this.emit({ type: 'return', item, action, approve, restock }); }
