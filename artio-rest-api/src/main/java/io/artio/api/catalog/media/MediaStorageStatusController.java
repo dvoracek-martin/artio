@@ -40,7 +40,8 @@ public class MediaStorageStatusController {
                 : 0;
         return new StorageStatus(media.isUploadAvailable(), "storage", storageMode, migrationSource,
                 counts.mediaCount(), counts.activeCount(), pendingMigration, counts.deletePending(), counts.tombstoned(),
-                "plugins".equals(storageMode), auth != null && "SUPERADMIN".equals(auth.getToken().getClaimAsString("role")));
+                "plugins".equals(storageMode), auth != null && auth.getAuthorities().stream()
+                        .anyMatch(authority -> "ROLE_SUPERADMIN".equals(authority.getAuthority())));
     }
 
     private record Counts(long mediaCount, long activeCount, long deletePending, long tombstoned) { }

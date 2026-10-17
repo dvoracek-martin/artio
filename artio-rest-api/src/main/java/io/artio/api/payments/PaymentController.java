@@ -49,15 +49,17 @@ public class PaymentController {
     private final InventoryApplicationService inventory;
     private final OrderUpdatePublisher orderUpdates;
     private final ObjectProvider<PaymentProvider> provider;
+    private final PaymentMethodPreferences paymentMethodPreferences;
     private final CheckoutFailureCompensation checkoutFailureCompensation;
     private final String extensionProviderId;
     private final String storefrontUrl;
 
     public PaymentController(JdbcTemplate jdbc, InventoryApplicationService inventory, OrderUpdatePublisher orderUpdates,
-            ObjectProvider<PaymentProvider> provider, CheckoutFailureCompensation checkoutFailureCompensation,
+            ObjectProvider<PaymentProvider> provider, PaymentMethodPreferences paymentMethodPreferences,
+            CheckoutFailureCompensation checkoutFailureCompensation,
             @Value("${artio.payments.extension-plugin-id:}") String extensionProviderId,
             @Value("${artio.storefront-url:http://localhost:4200}") String storefrontUrl) {
-        this.jdbc=jdbc; this.inventory=inventory; this.orderUpdates=orderUpdates; this.provider=provider; this.checkoutFailureCompensation=checkoutFailureCompensation; this.extensionProviderId=extensionProviderId; this.storefrontUrl=storefrontUrl;
+        this.jdbc=jdbc; this.inventory=inventory; this.orderUpdates=orderUpdates; this.provider=provider; this.paymentMethodPreferences=paymentMethodPreferences; this.checkoutFailureCompensation=checkoutFailureCompensation; this.extensionProviderId=extensionProviderId; this.storefrontUrl=storefrontUrl;
     }
 
     @PostMapping("/orders/{orderId}/checkout-session")
@@ -90,8 +92,9 @@ public class PaymentController {
         BigDecimal amount = request.amount();
         PaymentProvider.PaymentMethodDiscovery discovery = extension.discoverMethods(
                 new PaymentProvider.PaymentDiscoveryRequest(normalizedCountry, normalizedCurrency, amount));
+        var visibleMethods = paymentMethodPreferences.visibleInOrder(discovery.methods());
         jdbc.update("DELETE FROM payment_method_references WHERE expires_at < now()");
-        java.util.List<PaymentMethodOption> options = discovery.methods().stream().map(method -> {
+        java.util.List<PaymentMethodOption> options = visibleMethods.stream().map(method -> {
             UUID reference = UUID.randomUUID();
             jdbc.update("INSERT INTO payment_method_references(reference_id,method_id,provider_plugin_id,provider_instance_id,provider_release_id,configuration_generation,country,currency,amount,expires_at) VALUES (?,?,?,?,?,?,?,?,?,now()+interval '10 minutes')",
                     reference, method.methodId(), method.providerPluginId(), method.providerInstanceId(), method.releaseId(),
@@ -122,6 +125,9 @@ public class PaymentController {
         PaymentProvider.PaymentMethodDiscovery discovery = extension.discoverMethods(new PaymentProvider.PaymentDiscoveryRequest(
                 order.country() == null ? "" : order.country().trim().toUpperCase(java.util.Locale.ROOT),
                 order.currency().toUpperCase(java.util.Locale.ROOT), order.total()));
+        var eligibleMethods = paymentMethodPreferences.visibleInOrder(discovery.methods());
+        if (!discovery.methods().isEmpty() && eligibleMethods.isEmpty())
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "No payment methods are enabled for this market");
         PaymentProvider.AvailablePaymentMethod selectedMethod = null;
         if (selection != null && selection.methodReference() != null && !selection.methodReference().isBlank()) {
             UUID referenceId;
@@ -136,7 +142,7 @@ public class PaymentController {
             if (!reference.country().equals(country) || !reference.currency().equals(order.currency().toUpperCase(java.util.Locale.ROOT))
                     || reference.amount() != null && reference.amount().compareTo(order.total()) != 0)
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Payment method reference does not match this order");
-            selectedMethod = discovery.methods().stream().filter(candidate -> candidate.methodId().equals(reference.methodId())
+            selectedMethod = eligibleMethods.stream().filter(candidate -> candidate.methodId().equals(reference.methodId())
                     && candidate.providerPluginId().equals(reference.pluginId())
                     && java.util.Objects.equals(candidate.providerInstanceId(), reference.instanceId())
                     && java.util.Objects.equals(candidate.releaseId(), reference.releaseId())
@@ -145,8 +151,8 @@ public class PaymentController {
         }
         if (selectedMethod == null && selection != null && selection.methodReference() != null && !selection.methodReference().isBlank())
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Selected payment method is no longer available");
-        if (selectedMethod == null && discovery.methods().size() == 1) selectedMethod = discovery.methods().getFirst();
-        if (discovery.methods().size() > 1 && selectedMethod == null)
+        if (selectedMethod == null && eligibleMethods.size() == 1) selectedMethod = eligibleMethods.getFirst();
+        if (eligibleMethods.size() > 1 && selectedMethod == null)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a payment method before starting checkout");
         if (selectedMethod != null && !selectedMethod.hostedCheckout())
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Selected payment method cannot create hosted checkout");

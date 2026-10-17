@@ -1301,6 +1301,23 @@ ALTER TABLE payment_method_references ADD CONSTRAINT payment_method_references_r
     FOREIGN KEY (provider_release_id) REFERENCES extension_plugin_releases(release_id) ON DELETE CASCADE;
 CREATE INDEX payment_method_references_expiry_idx ON payment_method_references(expires_at);
 
+-- Merchant payment-method visibility/order is scoped to the actual provider instance and method,
+-- not the display label or temporary checkout reference. Development maintains one current V1 snapshot.
+CREATE TABLE payment_method_preferences (
+    provider_plugin_id VARCHAR(128) NOT NULL,
+    provider_instance_id UUID,
+    method_id VARCHAR(64) NOT NULL CHECK (method_id ~ '^[a-z][a-z0-9._-]{0,63}$'),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    display_order INTEGER NOT NULL CHECK (display_order BETWEEN 0 AND 10000),
+    updated_by UUID NOT NULL REFERENCES users(id),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (provider_instance_id IS NULL OR provider_instance_id <> '00000000-0000-0000-0000-000000000000'::uuid),
+    FOREIGN KEY (provider_instance_id, provider_plugin_id)
+        REFERENCES extension_plugin_instances(instance_id, plugin_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX payment_method_preferences_identity_uq ON payment_method_preferences(
+    provider_plugin_id, COALESCE(provider_instance_id, '00000000-0000-0000-0000-000000000000'::uuid), method_id);
+
 -- v2 declarations are immutable release metadata; the package release row remains the common runtime identity.
 CREATE TABLE extension_plugin_v2_releases (
     release_id BIGINT PRIMARY KEY,

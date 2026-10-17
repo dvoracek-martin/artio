@@ -1,0 +1,11 @@
+# Payment-method settings V1
+
+Core remains authoritative for which payment methods a provider currently supports. SUPERADMIN can control visibility and display order for the methods returned by live provider discovery without replacing provider eligibility or exposing provider credentials.
+
+The Backoffice Plugin Manager previews methods for an ISO country and currency through `GET /api/v1/admin/payments/method-settings?country=CH&currency=CHF`. Its response includes provider availability, partial failures, per-method provider package and instance identity, enabled state, order and whether the caller may change settings. Country and currency select the discovery preview; saved preferences apply to that provider instance and method in every market where the provider advertises it.
+
+`PUT` to the same URL accepts the complete discovered method list with `methodId`, `providerPluginId`, nullable `providerInstanceId`, `enabled` and a unique bounded `displayOrder`. Core rediscovers the catalog before saving, rejects incomplete provider discovery, duplicate or unknown identities, and non-SUPERADMIN callers. The current V1 schema stores preferences against provider instance plus method ID; the legacy single-provider adapter uses its package ID and a null instance identity. The schema remains one consolidated development snapshot in `V1__initial_schema.sql`; this work does not add migration history.
+
+Public `POST /api/v1/payments/methods` applies enabled state and order before issuing short-lived opaque references to Storefront. Checkout rediscovers providers and rechecks the currently enabled set before accepting the reference, so hiding a method invalidates an already-issued reference for a new checkout. If provider discovery is partial, the public list retains successful providers and reports the failures; Backoffice refuses to save a partial catalog. If all discovered methods have been hidden, checkout fails with a retryable service-unavailable response instead of silently choosing a disabled method.
+
+Backoffice presents loading, empty, partial-provider, and API failure states in EN/DE/IT/FR. Method display names remain provider supplied and are not translated or edited by Core.

@@ -81,6 +81,43 @@ describe('ExtensionAdminComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('All legacy media has been copied and verified. Source data is retained.');
   });
 
+  it('discovers payment methods and saves the Core-validated visibility and order', () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    const http = TestBed.inject(HttpTestingController);
+    fixture.detectChanges();
+    http.expectOne('/api/v1/admin/extensions/security/advisories').flush({ releases: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({ storageMode: 'local' });
+    const discover = [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Discover methods')) as HTMLButtonElement;
+    discover.click();
+    http.expectOne('/api/v1/admin/payments/method-settings?country=CH&currency=CHF').flush({ country: 'CH', currency: 'CHF', providerAvailable: true, partialFailure: false, canManage: true, failures: [], methods: [
+      { methodId: 'card', displayName: 'Card', providerPluginId: 'payments.cards', providerInstanceId: 'instance-card', enabled: true, displayOrder: 0 },
+      { methodId: 'twint', displayName: 'TWINT', providerPluginId: 'payments.twint', providerInstanceId: 'instance-twint', enabled: true, displayOrder: 1 },
+    ] });
+
+    fixture.detectChanges();
+    [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.getAttribute('aria-label') === 'Move Card later')?.click();
+    fixture.detectChanges();
+    const toggles = [...fixture.nativeElement.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+    toggles[1].checked = false;
+    toggles[1].dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    [...fixture.nativeElement.querySelectorAll('button')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Save payment settings'))?.click();
+    const save = http.expectOne('/api/v1/admin/payments/method-settings?country=CH&currency=CHF');
+    expect(save.request.method).toBe('PUT');
+    expect(save.request.body).toEqual({ methods: [
+      { methodId: 'twint', providerPluginId: 'payments.twint', providerInstanceId: 'instance-twint', enabled: true, displayOrder: 0 },
+      { methodId: 'card', providerPluginId: 'payments.cards', providerInstanceId: 'instance-card', enabled: false, displayOrder: 1 },
+    ] });
+    save.flush({ country: 'CH', currency: 'CHF', providerAvailable: true, partialFailure: false, canManage: true, failures: [], methods: [
+      { methodId: 'twint', displayName: 'TWINT', providerPluginId: 'payments.twint', providerInstanceId: 'instance-twint', enabled: true, displayOrder: 0 },
+      { methodId: 'card', displayName: 'Card', providerPluginId: 'payments.cards', providerInstanceId: 'instance-card', enabled: false, displayOrder: 1 },
+    ] });
+  });
+
   it('includes the entered Marketplace query and country in the search action', () => {
     const fixture = TestBed.createComponent(ExtensionAdminComponent);
     const actions: any[] = [];

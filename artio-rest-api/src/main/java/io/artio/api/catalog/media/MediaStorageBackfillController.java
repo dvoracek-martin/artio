@@ -26,7 +26,7 @@ public class MediaStorageBackfillController {
     public MediaStorageBackfillService.BackfillResult backfill(
             @RequestParam(required = false) String afterStorageKey,
             @RequestParam(defaultValue = "50") int limit, JwtAuthenticationToken auth) {
-        if (auth == null || !"SUPERADMIN".equals(auth.getToken().getClaimAsString("role")))
+        if (auth == null || auth.getAuthorities().stream().noneMatch(authority -> "ROLE_SUPERADMIN".equals(authority.getAuthority())))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a superadmin can migrate plugin media storage");
         return service.backfill(afterStorageKey, limit);
     }

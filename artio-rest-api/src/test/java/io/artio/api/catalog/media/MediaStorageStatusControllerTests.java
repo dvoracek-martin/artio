@@ -13,6 +13,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import java.util.List;
 
 class MediaStorageStatusControllerTests {
     @Test
@@ -30,7 +32,8 @@ class MediaStorageStatusControllerTests {
         when(media.isUploadAvailable()).thenReturn(true);
 
         var token = Jwt.withTokenValue("test-token").header("alg", "none").claim("role", "SUPERADMIN").build();
-        var status = new MediaStorageStatusController(media, jdbc, "plugins", "s3").getStatus(new JwtAuthenticationToken(token));
+        var auth = new JwtAuthenticationToken(token, List.of(new SimpleGrantedAuthority("ROLE_SUPERADMIN")));
+        var status = new MediaStorageStatusController(media, jdbc, "plugins", "s3").getStatus(auth);
 
         assertThat(status.uploadAvailable()).isTrue();
         assertThat(status.storageMode()).isEqualTo("plugins");

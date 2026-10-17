@@ -11,6 +11,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.server.ResponseStatusException;
 
 class MediaStorageBackfillControllerTests {
@@ -37,6 +38,6 @@ class MediaStorageBackfillControllerTests {
 
     private static JwtAuthenticationToken auth(String role) {
         Jwt jwt = Jwt.withTokenValue("test-token").header("alg", "none").claim("role", role).build();
-        return new JwtAuthenticationToken(jwt);
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
     }
 }
