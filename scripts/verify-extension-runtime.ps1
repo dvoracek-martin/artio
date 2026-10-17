@@ -1,6 +1,7 @@
 param(
     [string[]]$Tests = @(
     'io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests',
+    'io.artio.api.extensions.ExtensionInstallationJobIntegrationTests',
     'io.artio.api.extensions.PackagedExtensionControllerIntegrationTests',
     'io.artio.api.extensions.PluginEventDeliveryDockerIntegrationTests'
 ),
@@ -17,11 +18,23 @@ $portReservation.Start()
 $registryPort = $portReservation.LocalEndpoint.Port
 $portReservation.Stop()
 $createdImageReferences = [System.Collections.Generic.List[string]]::new()
+$temporaryBaseImages = [System.Collections.Generic.List[string]]::new()
 $registryStarted = $false
 $registryImagePreexisting = $false
 
 docker image inspect registry:2 *> $null
 if ($LASTEXITCODE -eq 0) { $registryImagePreexisting = $true }
+
+# Build/test base images are removed only when this run had to add their exact immutable reference.
+foreach ($baseImage in @(
+        'python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4',
+        'eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64',
+        'alpine:3.20',
+        'postgres:16-alpine'
+    )) {
+    docker image inspect $baseImage *> $null
+    if ($LASTEXITCODE -ne 0) { $temporaryBaseImages.Add($baseImage) }
+}
 
 try {
     docker run --detach --name $registryName --publish "127.0.0.1:${registryPort}:5000" registry:2 | Out-Null
@@ -175,6 +188,13 @@ try {
     foreach ($imageReference in @(docker image ls --format '{{.Repository}}:{{.Tag}}' |
             Where-Object { $_ -like "artio/controller-it:$runSuffix*" })) {
         docker image rm $imageReference 2>$null | Out-Null
+    }
+
+    foreach ($imageReference in $temporaryBaseImages) {
+        $imageId = docker image inspect $imageReference --format '{{.Id}}' 2>$null
+        if ($LASTEXITCODE -eq 0 -and $imageId) {
+            docker image rm --force $imageId.Trim() 2>$null | Out-Null
+        }
     }
 
     if (-not $registryImagePreexisting -and @(docker ps -aq --filter ancestor=registry:2).Count -eq 0) {
