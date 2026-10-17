@@ -1200,8 +1200,17 @@ class CatalogApiIntegrationTests {
         assertThat(deniedApproval.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class, subscriptionId))
                 .isEqualTo("PENDING_APPROVAL");
+        var deniedPaymentRoute = adminExchange("/api/v1/admin/extensions/{id}/bindings", HttpMethod.POST,
+                Map.of("capabilityId", "payment.provider.v1", "operationName", "createCheckout",
+                        "scope", Map.of("country", "CH"), "priority", 10), Map.class, pluginId);
+        assertThat(deniedPaymentRoute.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         // The persisted-permission filter must observe an owner role promotion on the next request.
         jdbc.update("UPDATE users SET role='SUPERADMIN',permissions='*' WHERE id=?", adminUserId);
+        var deniedMfaApproval = exchangeWithToken(tokenForAdmin(false), "/api/v1/admin/extensions/{id}/subscriptions/{subscriptionId}/state",
+                HttpMethod.PUT, Map.of("state", "ACTIVE"), Map.class, pluginId, subscriptionId);
+        assertThat(deniedMfaApproval.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(jdbc.queryForObject("SELECT subscription_state FROM extension_event_subscriptions WHERE subscription_id=?", String.class, subscriptionId))
+                .isEqualTo("PENDING_APPROVAL");
         var approved = adminExchange("/api/v1/admin/extensions/{id}/subscriptions/{subscriptionId}/state", HttpMethod.PUT,
                 Map.of("state", "ACTIVE"), Map.class, pluginId, subscriptionId);
         assertThat(approved.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -3952,8 +3961,29 @@ class CatalogApiIntegrationTests {
 
     private <T> ResponseEntity<T> adminExchange(String url, HttpMethod method, Object body, Class<T> responseType,
             Object... uriVariables) {
+        return exchangeWithToken(adminToken, url, method, body, responseType, uriVariables);
+    }
+
+    private String tokenForAdmin(boolean mfaVerified) {
+        long tokenVersion = jdbc.queryForObject("SELECT token_version FROM users WHERE id=?", Long.class, adminUserId);
+        String email = jdbc.queryForObject("SELECT email FROM users WHERE id=?", String.class, adminUserId);
+        var now = java.time.Instant.now();
+        var claims = org.springframework.security.oauth2.jwt.JwtClaimsSet.builder().issuer("artio").issuedAt(now)
+                .expiresAt(now.plusSeconds(300)).subject(adminUserId.toString()).claim("email", email)
+                .claim("role", "SUPERADMIN").claim("tokenVersion", tokenVersion)
+                .claim("mfaSetupOnly", false).claim("mfaVerified", mfaVerified).build();
+        var header = org.springframework.security.oauth2.jwt.JwsHeader.with(
+                org.springframework.security.oauth2.jose.jws.MacAlgorithm.HS256).build();
+        return jwtEncoder.encode(org.springframework.security.oauth2.jwt.JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    @Autowired
+    private org.springframework.security.oauth2.jwt.JwtEncoder jwtEncoder;
+
+    private <T> ResponseEntity<T> exchangeWithToken(String token, String url, HttpMethod method, Object body,
+            Class<T> responseType, Object... uriVariables) {
         HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(adminToken);
+        headers.setBearerAuth(token);
         ResponseEntity<String> response = http.exchange(url, method, new HttpEntity<>(body, headers), String.class, uriVariables);
         if (response.getBody() == null || response.getBody().isBlank()) {
             return ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders()).build();

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import io.artio.api.security.PrivilegedStepUpMfa;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -16,7 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 class MediaStorageBackfillControllerTests {
     private final MediaStorageBackfillService service = mock(MediaStorageBackfillService.class);
-    private final MediaStorageBackfillController controller = new MediaStorageBackfillController(service);
+    private final MediaStorageBackfillController controller = new MediaStorageBackfillController(service, new PrivilegedStepUpMfa(true));
 
     @Test
     void onlySuperadminCanStartStorageMigration() {
@@ -36,8 +37,23 @@ class MediaStorageBackfillControllerTests {
         verify(service).backfill(null, 50);
     }
 
+    @Test
+    void backfillRequiresRecentMfaBeforeCallingStorage() {
+        Jwt jwt = Jwt.withTokenValue("test-token").header("alg", "none").claim("role", "SUPERADMIN")
+                .issuedAt(java.time.Instant.now()).expiresAt(java.time.Instant.now().plusSeconds(300))
+                .claim("mfaVerified", false).build();
+        var unverified = new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_SUPERADMIN")));
+
+        assertThatThrownBy(() -> controller.backfill(null, 50, unverified))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        failure -> assertThat(failure.getStatusCode().value()).isEqualTo(403));
+        verifyNoInteractions(service);
+    }
+
     private static JwtAuthenticationToken auth(String role) {
-        Jwt jwt = Jwt.withTokenValue("test-token").header("alg", "none").claim("role", role).build();
+        var now = java.time.Instant.now();
+        Jwt jwt = Jwt.withTokenValue("test-token").header("alg", "none").issuedAt(now).expiresAt(now.plusSeconds(300))
+                .claim("mfaVerified", true).claim("role", role).build();
         return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
     }
 }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.api.security.EncryptionService;
+import io.artio.api.security.PrivilegedStepUpMfa;
 import io.artio.api.distributions.DistributionPluginProvisioningService;
 import io.artio.extensions.PluginConfigurationValidator;
 import io.artio.extensions.PluginManifest;
@@ -62,6 +63,7 @@ public class ExtensionManagementController {
     private final PluginEventBackfillOperations eventBackfillOperations;
     private final ExtensionInstallationJobOperations installationJobs;
     private final OfficialMarketplaceReleaseRegistration officialMarketplaceReleaseRegistration;
+    private final PrivilegedStepUpMfa stepUpMfa;
 
     public ExtensionManagementController(PluginManifestValidator manifestValidator,
             PluginConfigurationValidator configurationValidator, EncryptionService encryption,
@@ -71,7 +73,8 @@ public class ExtensionManagementController {
             MarketplaceCatalogClient marketplace,
             PluginEventDeliveryOperations eventDeliveryOperations, PluginEventBackfillOperations eventBackfillOperations,
             ExtensionInstallationJobOperations installationJobs,
-            OfficialMarketplaceReleaseRegistration officialMarketplaceReleaseRegistration) {
+            OfficialMarketplaceReleaseRegistration officialMarketplaceReleaseRegistration,
+            PrivilegedStepUpMfa stepUpMfa) {
         this.manifestValidator = manifestValidator;
         this.configurationValidator = configurationValidator;
         this.encryption = encryption;
@@ -85,6 +88,7 @@ public class ExtensionManagementController {
         this.eventBackfillOperations = eventBackfillOperations;
         this.installationJobs = installationJobs;
         this.officialMarketplaceReleaseRegistration = officialMarketplaceReleaseRegistration;
+        this.stepUpMfa = stepUpMfa;
     }
 
     @PostMapping("/validate")
@@ -308,6 +312,15 @@ public class ExtensionManagementController {
         findPlugin(pluginId);
         if (request == null || !Set.of("ACTIVE", "DRAINING", "DISABLED").contains(request.state()))
             return ResponseEntity.badRequest().body(Map.of("message", "state must be ACTIVE, DRAINING or DISABLED"));
+        String capabilityId = jdbc.query("SELECT b.capability_id FROM extension_capability_bindings b "
+                        + "JOIN extension_plugin_instances i ON i.instance_id=b.instance_id WHERE i.plugin_id=? AND b.binding_id=? FOR UPDATE OF b",
+                rs -> rs.next() ? rs.getString(1) : null, pluginId, bindingId);
+        if (capabilityId == null) return ResponseEntity.notFound().build();
+        if (Set.of("payment.provider.v1", "storage.object.v1").contains(capabilityId)) {
+            if (actor == null || actor.getAuthorities().stream().noneMatch(a -> "ROLE_SUPERADMIN".equals(a.getAuthority())))
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "SUPERADMIN authority is required for payment or storage routing changes"));
+            stepUpMfa.require(actor);
+        }
         int updated = jdbc.update("UPDATE extension_capability_bindings b SET eligibility_state=?,updated_at=now() "
                         + "FROM extension_plugin_instances i WHERE b.instance_id=i.instance_id AND i.plugin_id=? AND b.binding_id=?",
                 request.state(), pluginId, bindingId);
@@ -321,6 +334,7 @@ public class ExtensionManagementController {
             @RequestBody BindingPriorityRequest request, JwtAuthenticationToken actor) {
         if (actor == null || actor.getAuthorities().stream().noneMatch(a -> "ROLE_SUPERADMIN".equals(a.getAuthority())))
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "SUPERADMIN authority is required"));
+        stepUpMfa.require(actor);
         if (request == null || request.priority() < -10000 || request.priority() > 10000)
             return ResponseEntity.badRequest().body(Map.of("message", "priority must be between -10000 and 10000"));
         String pluginId = jdbc.query("SELECT i.plugin_id FROM extension_capability_bindings b JOIN extension_plugin_instances i "
@@ -369,6 +383,7 @@ public class ExtensionManagementController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "SUPERADMIN authority is required to approve event subscriptions"));
         if (rejection == EventSubscriptionStatePolicy.Rejection.APPROVE_OR_DISABLE_REQUIRED)
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "A pending subscription must be approved or disabled"));
+        if ("PENDING_APPROVAL".equals(current) && "ACTIVE".equals(request.state())) stepUpMfa.require(actor);
         int updated = jdbc.update("UPDATE extension_event_subscriptions s SET subscription_state=?,updated_at=now() "
                         + "FROM extension_plugin_instances i WHERE s.instance_id=i.instance_id AND i.plugin_id=? AND s.subscription_id=?",
                 request.state(), pluginId, subscriptionId);
@@ -920,6 +935,11 @@ public class ExtensionManagementController {
             CapabilityRouter.validateBinding(request.capabilityId(), request.operationName(), request.scope());
         } catch (CapabilityRouter.RoutingException invalid) {
             return ResponseEntity.badRequest().body(Map.of("message", invalid.getMessage()));
+        }
+        if (Set.of("payment.provider.v1", "storage.object.v1").contains(request.capabilityId())) {
+            if (actor == null || actor.getAuthorities().stream().noneMatch(a -> "ROLE_SUPERADMIN".equals(a.getAuthority())))
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "SUPERADMIN authority is required for payment or storage routing changes"));
+            stepUpMfa.require(actor);
         }
         UUID instanceId = request.instanceId() == null
                 ? jdbc.query("SELECT instance_id FROM extension_plugin_instances WHERE plugin_id=? AND compatibility_mode='CAPABILITY_V2' AND instance_key='default'",

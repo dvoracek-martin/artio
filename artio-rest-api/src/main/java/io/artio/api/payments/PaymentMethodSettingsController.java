@@ -1,6 +1,7 @@
 package io.artio.api.payments;
 
 import io.artio.extensions.commerce.PaymentProvider;
+import io.artio.api.security.PrivilegedStepUpMfa;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -23,10 +24,13 @@ import org.springframework.web.server.ResponseStatusException;
 public class PaymentMethodSettingsController {
     private final ObjectProvider<PaymentProvider> providers;
     private final PaymentMethodPreferences preferences;
+    private final PrivilegedStepUpMfa stepUpMfa;
 
-    public PaymentMethodSettingsController(ObjectProvider<PaymentProvider> providers, PaymentMethodPreferences preferences) {
+    public PaymentMethodSettingsController(ObjectProvider<PaymentProvider> providers, PaymentMethodPreferences preferences,
+            PrivilegedStepUpMfa stepUpMfa) {
         this.providers = providers;
         this.preferences = preferences;
+        this.stepUpMfa = stepUpMfa;
     }
 
     @GetMapping
@@ -45,6 +49,7 @@ public class PaymentMethodSettingsController {
             @RequestBody MethodSettingsRequest request, JwtAuthenticationToken auth) {
         if (!isSuperadmin(auth))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a superadmin can change payment-method settings");
+        stepUpMfa.require(auth);
         Market market = market(country, currency);
         PaymentProvider provider = providers.getIfAvailable();
         if (provider == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "No payment provider is configured");

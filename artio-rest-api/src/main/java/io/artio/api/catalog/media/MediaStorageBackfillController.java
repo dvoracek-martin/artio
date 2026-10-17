@@ -1,5 +1,6 @@
 package io.artio.api.catalog.media;
 
+import io.artio.api.security.PrivilegedStepUpMfa;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,9 +18,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/v1/admin/catalog/media/storage-backfill")
 public class MediaStorageBackfillController {
     private final MediaStorageBackfillService service;
+    private final PrivilegedStepUpMfa stepUpMfa;
 
-    public MediaStorageBackfillController(MediaStorageBackfillService service) {
+    public MediaStorageBackfillController(MediaStorageBackfillService service, PrivilegedStepUpMfa stepUpMfa) {
         this.service = service;
+        this.stepUpMfa = stepUpMfa;
     }
 
     @PostMapping
@@ -28,6 +31,7 @@ public class MediaStorageBackfillController {
             @RequestParam(defaultValue = "50") int limit, JwtAuthenticationToken auth) {
         if (auth == null || auth.getAuthorities().stream().noneMatch(authority -> "ROLE_SUPERADMIN".equals(authority.getAuthority())))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a superadmin can migrate plugin media storage");
+        stepUpMfa.require(auth);
         return service.backfill(afterStorageKey, limit);
     }
 }

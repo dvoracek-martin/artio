@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.artio.extensions.commerce.PaymentProvider;
+import io.artio.api.security.PrivilegedStepUpMfa;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class PaymentMethodSettingsControllerTests {
     void requiresSuperadminBeforeDiscoveringOrSavingPaymentSettings() {
         @SuppressWarnings("unchecked") ObjectProvider<PaymentProvider> providers = mock(ObjectProvider.class);
         PaymentMethodPreferences preferences = mock(PaymentMethodPreferences.class);
-        var controller = new PaymentMethodSettingsController(providers, preferences);
+        var controller = new PaymentMethodSettingsController(providers, preferences, new PrivilegedStepUpMfa(true));
 
         assertThatThrownBy(() -> controller.update("CH", "CHF", new PaymentMethodSettingsController.MethodSettingsRequest(List.of()), auth("ADMIN")))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
@@ -36,7 +37,7 @@ class PaymentMethodSettingsControllerTests {
     @Test
     void rejectsStaleSuperadminTokenWhenCurrentAuthorityIsOnlyAdmin() {
         @SuppressWarnings("unchecked") ObjectProvider<PaymentProvider> providers = mock(ObjectProvider.class);
-        var controller = new PaymentMethodSettingsController(providers, mock(PaymentMethodPreferences.class));
+        var controller = new PaymentMethodSettingsController(providers, mock(PaymentMethodPreferences.class), new PrivilegedStepUpMfa(true));
 
         assertThatThrownBy(() -> controller.update("CH", "CHF", new PaymentMethodSettingsController.MethodSettingsRequest(List.of()),
                 auth("SUPERADMIN", "ADMIN", UUID.randomUUID())))
@@ -53,7 +54,7 @@ class PaymentMethodSettingsControllerTests {
         when(providers.getIfAvailable()).thenReturn(provider);
         when(provider.discoverMethods(any())).thenReturn(new PaymentProvider.PaymentMethodDiscovery(List.of(
                 method("cards", "card"), method("wallet", "twint")), List.of()));
-        var controller = new PaymentMethodSettingsController(providers, preferences);
+        var controller = new PaymentMethodSettingsController(providers, preferences, new PrivilegedStepUpMfa(true));
         var incomplete = new PaymentMethodSettingsController.MethodSettingsRequest(List.of(
                 new PaymentMethodPreferences.MethodPreferenceInput("card", "payments", UUID.randomUUID(), true, 0)));
 
@@ -78,7 +79,7 @@ class PaymentMethodSettingsControllerTests {
             return new PaymentProvider.PaymentMethodDiscovery(List.of(card, wallet), List.of());
         });
         when(preferences.withPreferences(List.of(card, wallet))).thenReturn(List.of());
-        var controller = new PaymentMethodSettingsController(providers, preferences);
+        var controller = new PaymentMethodSettingsController(providers, preferences, new PrivilegedStepUpMfa(true));
         UUID actor = UUID.randomUUID();
         var input = new PaymentMethodSettingsController.MethodSettingsRequest(List.of(
                 new PaymentMethodPreferences.MethodPreferenceInput("twint", "payments.wallet", wallet.providerInstanceId(), false, 0),
@@ -101,7 +102,9 @@ class PaymentMethodSettingsControllerTests {
     private static JwtAuthenticationToken auth(String role) { return auth(role, role, UUID.randomUUID()); }
     private static JwtAuthenticationToken auth(String role, UUID actor) { return auth(role, role, actor); }
     private static JwtAuthenticationToken auth(String claimRole, String authorityRole, UUID actor) {
-        Jwt jwt = Jwt.withTokenValue("test-token").header("alg", "none").subject(actor.toString()).claim("role", claimRole).build();
+        var now = java.time.Instant.now();
+        Jwt jwt = Jwt.withTokenValue("test-token").header("alg", "none").subject(actor.toString())
+                .issuedAt(now).expiresAt(now.plusSeconds(300)).claim("mfaVerified", true).claim("role", claimRole).build();
         return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_" + authorityRole)));
     }
 }

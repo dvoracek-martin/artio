@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 import org.springframework.web.server.ResponseStatusException;
+import io.artio.api.security.PrivilegedStepUpMfa;
 
 /** Explicit, resumable repair of plugin-backed media placements. */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -18,9 +19,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/v1/admin/catalog/media/storage-repair")
 public class MediaStorageRepairController {
     private final MediaStorageRepairService service;
+    private final PrivilegedStepUpMfa stepUpMfa;
 
-    public MediaStorageRepairController(MediaStorageRepairService service) {
+    public MediaStorageRepairController(MediaStorageRepairService service, PrivilegedStepUpMfa stepUpMfa) {
         this.service = service;
+        this.stepUpMfa = stepUpMfa;
     }
 
     @PostMapping
@@ -29,6 +32,7 @@ public class MediaStorageRepairController {
             @RequestParam(defaultValue = "50") int limit, @RequestParam UUID repairRunId, JwtAuthenticationToken auth) {
         if (auth == null || auth.getAuthorities().stream().noneMatch(authority -> "ROLE_SUPERADMIN".equals(authority.getAuthority())))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a superadmin can repair plugin media storage");
+        stepUpMfa.require(auth);
         return service.repair(afterStorageKey, limit, repairRunId);
     }
 }
