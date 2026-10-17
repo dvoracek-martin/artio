@@ -15,7 +15,7 @@ $images = @(
     @{ Name = 'observability-grafana'; Path = 'grafana' }
 )
 foreach ($image in $images) {
-    docker build --pull -t "ghcr.io/artio-plugins/$($image.Name):$version" -f (Join-Path $root "$($image.Path)/Dockerfile") (Join-Path $root $image.Path)
+    docker build --pull -t "artio-observability/$($image.Name):$version" -f (Join-Path $root "$($image.Path)/Dockerfile") (Join-Path $root $image.Path)
     if ($LASTEXITCODE -ne 0) { throw "Docker build failed for $($image.Name)" }
 }
-Write-Host 'Images are built locally. Publish them through the approved release process, then replace every manifest digest placeholder with the registry-reported sha256 digest.'
+Write-Host 'Images are built locally as artio-observability/* tags. This does not publish them. Publish through the approved release process, then use the registry-reported sha256 digests in the manifest.'

@@ -7,7 +7,7 @@
   "description": "Optional OTLP collector, Prometheus metrics, Grafana dashboards and Jaeger traces, managed as one service bundle.",
   "minimumCoreVersion": "0.1.0",
   "maximumCoreVersion": "0.9.0",
-  "image": "ghcr.io/artio-plugins/observability-control@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "image": "registry.example/public/plugins/observability-control@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
   "dependencies": [],
   "permissions": [],
   "configuration": {
@@ -31,7 +31,7 @@
   "services": [
     {
       "id": "collector",
-      "image": "ghcr.io/artio-plugins/observability-collector@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "image": "registry.example/public/plugins/observability-collector@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
       "port": 13133,
       "healthPath": "/",
       "dependsOn": ["jaeger"],
@@ -39,7 +39,7 @@
     },
     {
       "id": "prometheus",
-      "image": "ghcr.io/artio-plugins/observability-prometheus@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "image": "registry.example/public/plugins/observability-prometheus@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
       "port": 9090,
       "healthPath": "/-/healthy",
       "dependsOn": ["collector"],
@@ -47,14 +47,14 @@
     },
     {
       "id": "jaeger",
-      "image": "ghcr.io/artio-plugins/observability-jaeger@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "image": "registry.example/public/plugins/observability-jaeger@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
       "port": 16686,
       "healthPath": "/",
       "dependsOn": ["main"]
     },
     {
       "id": "grafana",
-      "image": "ghcr.io/artio-plugins/observability-grafana@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "image": "registry.example/public/plugins/observability-grafana@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
       "port": 3000,
       "healthPath": "/api/health",
       "configurationBindings": {

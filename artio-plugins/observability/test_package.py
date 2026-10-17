@@ -29,6 +29,11 @@ class ObservabilityPackageTests(unittest.TestCase):
         manifest = json.loads((ROOT / "manifest.template.json").read_text(encoding="utf-8"))
         images = [manifest["image"], *(service["image"] for service in manifest["services"])]
         self.assertTrue(all("REPLACE_WITH_PUBLISHED_IMAGE_DIGEST" in image for image in images))
+        self.assertTrue(all(image.startswith("registry.example/public/plugins/") for image in images))
+
+        build_script = (ROOT / "build-images.ps1").read_text(encoding="utf-8")
+        self.assertIn('"artio-observability/$($image.Name):$version"', build_script)
+        self.assertNotIn("ghcr.io/artio-plugins", build_script)
 
     def test_release_manifest_uses_only_supplied_registry_digests(self):
         template = json.loads((ROOT / "manifest.template.json").read_text(encoding="utf-8"))
