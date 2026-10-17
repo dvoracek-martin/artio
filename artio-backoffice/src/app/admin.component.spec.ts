@@ -47,7 +47,7 @@ describe('AdminComponent setup detection', () => {
     http.expectNone('/api/v1/admin/orders?page=0&size=1&sort=createdAt&direction=desc');
   });
 
-  it('keeps regional settings unavailable until loaded, offers recovery after failure, and saves only once', () => {
+  it('keeps regional settings unavailable until loaded, offers recovery after failure, and saves only once', async () => {
     const fixture = TestBed.createComponent(AdminComponent);
     fixture.detectChanges();
     http.expectOne('/api/v1/setup/status').flush({ required: false, developerMode: false });
@@ -75,6 +75,13 @@ describe('AdminComponent setup detection', () => {
 
     component.saveSystemSettings();
     expect(component.systemSettingsSaving).toBe(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.system-settings-form').getAttribute('aria-busy')).toBe('true');
+    expect(fixture.nativeElement.querySelector('.system-settings-form fieldset').disabled).toBe(true);
+    expect(fixture.nativeElement.querySelector('.system-settings-form input[name="storeName"]').matches(':disabled')).toBe(true);
+    expect(Array.from(fixture.nativeElement.querySelectorAll('.system-settings-form artio-search-select')).every((select: any) => select.querySelector('.search-select-trigger')?.matches(':disabled'))).toBe(true);
     component.saveSystemSettings();
     const saves = http.match('/api/v1/admin/system/settings');
     expect(saves).toHaveLength(1);
@@ -84,6 +91,7 @@ describe('AdminComponent setup detection', () => {
     http.expectOne('/api/v1/admin/system/distribution/plugins').flush([]);
     http.expectOne('/api/v1/admin/system/settings/audit').flush([]);
     http.expectOne('/api/v1/admin/system/settings').flush({ storeName: 'Saved Store', countryCode: 'CH', currencyCode: 'CHF', locale: 'de-CH', timezone: 'Europe/Zurich', externalBaseUrl: '', distributionId: 'switzerland-v1', availableLanguages: ['de', 'fr'] });
+    http.expectOne('/api/v1/admin/system/license').flush({});
   });
 
   it('clears a stale saved session and still shows setup when the installation is clean', () => {

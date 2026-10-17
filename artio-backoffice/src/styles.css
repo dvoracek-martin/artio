@@ -37,3 +37,5 @@ layer(base);
 @media(max-width:480px){.refund-dialog-content{padding:20px}.refund-payment-summary{align-items:flex-start;flex-direction:column}}
 
 .login-card .remember-choice{display:flex;grid-template-columns:auto 1fr;align-items:center;gap:9px;margin:0;color:#b7c5da}.login-card .remember-choice input{width:15px;height:15px;min-width:15px;margin:0;accent-color:#7771ff}.login-card .text-button{display:block;border:0;background:transparent;color:#7bdced;padding:4px 0;margin-top:13px;font-size:11px;text-align:left}.login-card .text-button:hover{color:#c7b6ff}.login-card .auth-recovery{margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}.login-card .auth-recovery h2{font-size:21px;font-weight:500;margin:0 0 8px}.login-card .auth-recovery form{margin-top:15px}
+
+.sys-fields{display:contents}
