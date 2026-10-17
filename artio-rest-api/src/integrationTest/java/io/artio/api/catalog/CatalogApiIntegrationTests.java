@@ -2809,19 +2809,57 @@ class CatalogApiIntegrationTests {
                         + "VALUES (?,'ORDER_CREATED','ORDER',?,jsonb_build_object('payload','private-test-value'),'DEAD',12,now(),'TimeoutException')",
                 eventId, aggregateId);
 
-        var headers = new HttpHeaders();
-        headers.setBearerAuth(adminToken);
-        var listed = http.exchange("/api/v1/admin/operations/outbox/events/dead", HttpMethod.GET,
-                new HttpEntity<>(headers), String.class);
+        jdbc.update("UPDATE users SET permissions='NONE' WHERE id=?", adminUserId);
+        var deniedWithoutPermission = adminExchange("/api/v1/admin/operations/outbox/events/dead", HttpMethod.GET, null, String.class);
+        assertThat(deniedWithoutPermission.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_VIEW' WHERE id=?", adminUserId);
+        var listed = adminExchange("/api/v1/admin/operations/outbox/events/dead", HttpMethod.GET, null, String.class);
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listed.getBody()).contains(eventId.toString(), "ORDER_CREATED", "TimeoutException")
                 .doesNotContain("private-test-value");
 
-        var replay = http.exchange("/api/v1/admin/operations/outbox/events/" + eventId + "/replay", HttpMethod.POST,
-                new HttpEntity<>(headers), io.artio.api.notifications.OutboxOperationsController.ReplayResult.class);
+        var replayDenied = adminExchange("/api/v1/admin/operations/outbox/events/" + eventId + "/replay", HttpMethod.POST,
+                Map.of(), String.class);
+        assertThat(replayDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_MANAGE' WHERE id=?", adminUserId);
+        var replay = adminExchange("/api/v1/admin/operations/outbox/events/" + eventId + "/replay", HttpMethod.POST,
+                Map.of(), io.artio.api.notifications.OutboxOperationsController.ReplayResult.class);
         assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject("SELECT status FROM event_outbox WHERE id=?", String.class, eventId)).isEqualTo("PENDING");
         assertThat(jdbc.queryForObject("SELECT attempts FROM event_outbox WHERE id=?", Integer.class, eventId)).isZero();
+    }
+
+    @Test
+    void deadEmailDeliveriesCanBeReviewedWithoutPiiAndRedrivenWithManagePermission() {
+        UUID deliveryId = UUID.randomUUID();
+        jdbc.update("INSERT INTO notification_delivery_outbox(id,event_key,user_id,order_id,subject,body,status,attempts,last_error_class) "
+                        + "VALUES (?,?,?,?,? ,?,'DEAD',12,'TimeoutException')",
+                deliveryId, "p10-email-dead-" + deliveryId, adminUserId, UUID.randomUUID(),
+                "Private customer subject", "private email body for customer@example.test");
+
+        jdbc.update("UPDATE users SET permissions='NONE' WHERE id=?", adminUserId);
+        var denied = adminExchange("/api/v1/admin/operations/outbox/email/dead", HttpMethod.GET, null, String.class);
+        assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_VIEW' WHERE id=?", adminUserId);
+        var listed = adminExchange("/api/v1/admin/operations/outbox/email/dead", HttpMethod.GET, null, String.class);
+        assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(listed.getBody()).contains(deliveryId.toString(), "TimeoutException")
+                .doesNotContain("Private customer subject", "private email body", "customer@example.test");
+
+        var replayDenied = adminExchange("/api/v1/admin/operations/outbox/email/" + deliveryId + "/replay",
+                HttpMethod.POST, Map.of(), String.class);
+        assertThat(replayDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_MANAGE' WHERE id=?", adminUserId);
+        var replay = adminExchange("/api/v1/admin/operations/outbox/email/" + deliveryId + "/replay",
+                HttpMethod.POST, Map.of(), io.artio.api.notifications.OutboxOperationsController.ReplayResult.class);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT attempts FROM notification_delivery_outbox WHERE id=?", Integer.class, deliveryId)).isZero();
+        assertThat(jdbc.queryForObject("SELECT last_error_class FROM notification_delivery_outbox WHERE id=?", String.class, deliveryId)).isNull();
+        var replayAgain = adminExchange("/api/v1/admin/operations/outbox/email/" + deliveryId + "/replay",
+                HttpMethod.POST, Map.of(), String.class);
+        assertThat(replayAgain.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
     }
 
     private ResponseEntity<String> providerWebhook(String type, String sessionId, String paymentStatus) throws Exception {
@@ -3420,10 +3458,12 @@ class CatalogApiIntegrationTests {
         jdbc.update("INSERT INTO payment_webhook_receipts(provider,event_id,event_type,received_at,processed_at) VALUES ('EXTENSION',?,'completed',now()-interval '1 day',now()-interval '120 days')", eventPrefix + "-old-processed");
         var anonymous = http.getForEntity("/api/v1/admin/operations/outbox", String.class);
         assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        var headers = new HttpHeaders();
-        headers.setBearerAuth(adminToken);
-        var response = http.exchange("/api/v1/admin/operations/outbox", HttpMethod.GET,
-                new HttpEntity<>(headers), io.artio.api.notifications.OutboxOperationsController.OutboxSummary.class);
+        jdbc.update("UPDATE users SET permissions='NONE' WHERE id=?", adminUserId);
+        var deniedWithoutPermission = adminExchange("/api/v1/admin/operations/outbox", HttpMethod.GET, null, String.class);
+        assertThat(deniedWithoutPermission.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_VIEW' WHERE id=?", adminUserId);
+        var response = adminExchange("/api/v1/admin/operations/outbox", HttpMethod.GET, null,
+                io.artio.api.notifications.OutboxOperationsController.OutboxSummary.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().eventPending()).isGreaterThanOrEqualTo(0);
@@ -3447,9 +3487,17 @@ class CatalogApiIntegrationTests {
         var anonymous = http.getForEntity("/api/v1/admin/operations/kafka/dead-letters/items", String.class);
         assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 
+        jdbc.update("UPDATE users SET permissions='NONE' WHERE id=?", adminUserId);
+        var deniedWithoutPermission = adminExchange("/api/v1/admin/operations/kafka/dead-letters/items", HttpMethod.GET, null, String.class);
+        assertThat(deniedWithoutPermission.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_VIEW' WHERE id=?", adminUserId);
         String items = adminExchange("/api/v1/admin/operations/kafka/dead-letters/items", HttpMethod.GET, null, String.class).getBody();
         assertThat(items).contains(eventId).doesNotContain(sensitivePayload).doesNotContain("encryptedPayload");
 
+        var replayDenied = adminExchange("/api/v1/admin/operations/kafka/dead-letters/{id}/replay", HttpMethod.POST, null,
+                String.class, deadLetterId);
+        assertThat(replayDenied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        jdbc.update("UPDATE users SET permissions='EXTENSION_OPERATIONS_MANAGE' WHERE id=?", adminUserId);
         var replay = adminExchange("/api/v1/admin/operations/kafka/dead-letters/{id}/replay", HttpMethod.POST, null,
                 io.artio.api.notifications.KafkaDeadLetterOperationsController.ReplayAccepted.class, deadLetterId);
         assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);

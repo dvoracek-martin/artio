@@ -101,7 +101,7 @@ The settlement ledger also records disputes and provider reversals. Provider tra
 ## Verification required before claiming a boundary
 
 - Architecture dependency checker passes and fails when a domain takes an adapter/framework dependency.
-- Clean and upgrade PostgreSQL migration tests pass.
+- Clean installation against the sole development V1 snapshot and current-state PostgreSQL integration tests pass. Development database upgrade compatibility is intentionally unsupported; production upgrade acceptance begins with a released production baseline.
 - Extension contract tests validate manifests, compatibility, config schema, authentication, deadlines, health, secret redaction and lifecycle transitions.
 - Real container test demonstrates install/configure/enable/invoke/disable/update-or-rollback and plugin crash/timeout isolation without rebuilding Core.
 - API and Backoffice authorization tests include cross-user/unauthenticated access and saved-secret non-disclosure.

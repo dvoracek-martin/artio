@@ -56,6 +56,26 @@ public class OutboxOperationsController {
                 size, (long) page * size);
     }
 
+    @GetMapping("/email/dead")
+    public List<DeadEmailDelivery> deadEmailDeliveries(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        if (page < 0 || size < 1 || size > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination");
+        return jdbc.query("SELECT id,attempts,created_at,last_error_class FROM notification_delivery_outbox "
+                        + "WHERE status='DEAD' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (rs, row) -> new DeadEmailDelivery(rs.getObject("id", UUID.class), rs.getInt("attempts"),
+                        rs.getTimestamp("created_at").toInstant(), rs.getString("last_error_class")),
+                size, (long) page * size);
+    }
+
+    @PostMapping("/email/{deliveryId}/replay")
+    public ReplayResult replayEmailDelivery(@PathVariable UUID deliveryId) {
+        int updated = jdbc.update("UPDATE notification_delivery_outbox SET status='PENDING',attempts=0,"
+                        + "next_attempt_at=now(),locked_at=NULL,last_error_class=NULL WHERE id=? AND status='DEAD'",
+                deliveryId);
+        if (updated != 1) throw new ResponseStatusException(HttpStatus.CONFLICT, "Email delivery is not in the dead-letter state");
+        return new ReplayResult(deliveryId, "PENDING");
+    }
+
     @PostMapping("/events/{eventId}/replay")
     public ReplayResult replay(@PathVariable UUID eventId) {
         int updated = jdbc.update("UPDATE event_outbox SET status='PENDING',attempts=0,available_at=now(),locked_at=NULL,dead_at=NULL,last_error=NULL WHERE id=? AND status='DEAD'",
@@ -68,5 +88,6 @@ public class OutboxOperationsController {
             long emailStaleClaims, long emailDead, long webhookUnprocessed, long webhookOlderThanRetention) { }
     public record DeadEvent(UUID id, String eventType, String aggregateType, String aggregateId,
             int attempts, Instant deadAt, String errorClass) { }
+    public record DeadEmailDelivery(UUID id, int attempts, Instant queuedAt, String errorClass) { }
     public record ReplayResult(UUID eventId, String status) { }
 }

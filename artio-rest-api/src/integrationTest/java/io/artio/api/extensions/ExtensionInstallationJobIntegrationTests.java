@@ -216,6 +216,47 @@ class ExtensionInstallationJobIntegrationTests {
     }
 
     @Test
+    void failedControllerCallCanBeRetriedAfterTheRuntimeRecovers() throws Exception {
+        String pluginId = "installation.controller-recovery";
+        PluginManifest manifest = manifest(pluginId);
+        jdbc.update("INSERT INTO extension_plugins(plugin_id,manifest,image_reference,lifecycle_state) VALUES (?,?::jsonb,?,'CONFIGURED')",
+                pluginId, mapper.writeValueAsString(manifest), manifest.image());
+        var job = jobs.request(pluginId, null, "legacy:" + pluginId, 0, manifest,
+                UUID.randomUUID(), "controller-recovery-0001");
+        var runtime = org.mockito.Mockito.mock(ExtensionRuntimePort.class);
+        org.mockito.Mockito.doThrow(new ExtensionRuntimePort.ExtensionUnavailableException("controller unavailable"))
+                .doNothing().when(runtime).install(manifest, Map.of());
+        var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
+        var registryCredentials = org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class);
+        org.mockito.Mockito.when(registryCredentials.credentialsFor(manifest)).thenReturn(Map.of());
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), registryCredentials,
+                new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30),
+                new DataSourceTransactionManager(jdbc.getDataSource()), 1_800_000, 300_000);
+
+        try {
+            worker.runPending();
+
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("FAILED");
+            assertThat(jobs.get(job.jobId()).errorCode()).isEqualTo("ExtensionUnavailableException");
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
+                    .isEqualTo("FAILED");
+
+            assertThat(jobs.retry(job.jobId()).state()).isEqualTo("REQUESTED");
+            worker.runPending();
+
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("INSTALLED");
+            assertThat(jobs.get(job.jobId()).attemptCount()).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugins WHERE plugin_id=?", String.class, pluginId))
+                    .isEqualTo("INSTALLED");
+            org.mockito.Mockito.verify(runtime, org.mockito.Mockito.times(2)).install(manifest, Map.of());
+        } finally {
+            worker.stopLeaseRenewals();
+        }
+    }
+
+    @Test
     void workerAppliesAQueuedV2ReleaseChangeToOnlyTheSelectedInstance() throws Exception {
         String pluginId = "installation.release-change";
         V2ReleaseFixture fixture = registerV2Plugin(pluginId, "DRAINING");
@@ -254,6 +295,85 @@ class ExtensionInstallationJobIntegrationTests {
                     Integer.class, pluginId);
             org.mockito.Mockito.verify(runtime).enableInstance(fixture.runtimeIdentity(), fixture.target(), credentialGeneration,
                     Map.of("endpoint", "https://v2.example.test", "apiKey", "target-release-secret"));
+        } finally {
+            worker.stopLeaseRenewals();
+        }
+    }
+
+    @Test
+    void failedReleaseReplacementRestoresThePreviousRuntimeAndLifecycle() throws Exception {
+        String pluginId = "installation.release-recovery";
+        V2ReleaseFixture fixture = registerV2Plugin(pluginId, "DRAINING");
+        var job = jobs.requestReleaseChange(pluginId, fixture.instanceId(), fixture.runtimeIdentity(),
+                fixture.previousReleaseId(), fixture.targetReleaseId(), fixture.previous(), fixture.target(),
+                "DRAINING", Map.of(), Map.of(), 1, "UPDATE", UUID.randomUUID(),
+                "release-recovery-0001", "REGISTERED", null);
+        var runtime = org.mockito.Mockito.mock(ExtensionRuntimePort.class);
+        org.mockito.Mockito.doThrow(new ExtensionRuntimePort.ExtensionUnavailableException("controller unavailable"))
+                .when(runtime).updateInstance(fixture.runtimeIdentity(), fixture.previous(), fixture.target(), Map.of());
+        var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
+        var credentials = org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class);
+        org.mockito.Mockito.when(credentials.credentialsFor(fixture.target())).thenReturn(Map.of());
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), credentials, encryption,
+                new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30),
+                new DataSourceTransactionManager(jdbc.getDataSource()), 1_800_000, 300_000);
+
+        try {
+            worker.runPending();
+
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("FAILED");
+            assertThat(jobs.get(job.jobId()).errorCode()).isEqualTo("ExtensionUnavailableException");
+            assertThat(jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances WHERE instance_id=?",
+                    Long.class, fixture.instanceId())).isEqualTo(fixture.previousReleaseId());
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugin_instances WHERE instance_id=?",
+                    String.class, fixture.instanceId())).isEqualTo("DRAINING");
+            org.mockito.Mockito.verify(runtime).updateInstance(fixture.runtimeIdentity(), fixture.previous(), fixture.target(), Map.of());
+            org.mockito.Mockito.verify(runtime).enableInstance(fixture.runtimeIdentity(), fixture.previous(), 1, Map.of());
+            org.mockito.Mockito.verify(runtime, org.mockito.Mockito.times(3)).disableInstance(fixture.runtimeIdentity(), pluginId);
+        } finally {
+            worker.stopLeaseRenewals();
+        }
+    }
+
+    @Test
+    void marksInstanceFailedWhenControllerCannotRestoreThePreviousRelease() throws Exception {
+        String pluginId = "installation.release-recovery-failed";
+        V2ReleaseFixture fixture = registerV2Plugin(pluginId, "DRAINING");
+        var job = jobs.requestReleaseChange(pluginId, fixture.instanceId(), fixture.runtimeIdentity(),
+                fixture.previousReleaseId(), fixture.targetReleaseId(), fixture.previous(), fixture.target(),
+                "DRAINING", Map.of(), Map.of(), 1, "UPDATE", UUID.randomUUID(),
+                "release-recovery-failed-0001", "REGISTERED", null);
+        var runtime = org.mockito.Mockito.mock(ExtensionRuntimePort.class);
+        org.mockito.Mockito.doNothing()
+                .doThrow(new ExtensionRuntimePort.ExtensionUnavailableException("controller unavailable during recovery"))
+                .when(runtime).disableInstance(fixture.runtimeIdentity(), pluginId);
+        org.mockito.Mockito.doThrow(new ExtensionRuntimePort.ExtensionUnavailableException("controller unavailable"))
+                .when(runtime).updateInstance(fixture.runtimeIdentity(), fixture.previous(), fixture.target(), Map.of());
+        var runtimeBeans = new StaticListableBeanFactory(Map.of(ExtensionRuntimePort.class.getName(), runtime));
+        var credentials = org.mockito.Mockito.mock(ExtensionRegistryCredentialService.class);
+        org.mockito.Mockito.when(credentials.credentialsFor(fixture.target())).thenReturn(Map.of());
+        var worker = new ExtensionInstallationJobWorker(jdbc, mapper,
+                runtimeBeans.getBeanProvider(ExtensionRuntimePort.class), credentials, encryption,
+                new OciArchiveInspector(OciArchiveInspector.Limits.developmentDefaults()),
+                new OciArchiveQuarantineStore(System.getProperty("java.io.tmpdir"), 2L << 30),
+                new DataSourceTransactionManager(jdbc.getDataSource()), 1_800_000, 300_000);
+
+        try {
+            worker.runPending();
+
+            assertThat(jobs.get(job.jobId()).state()).isEqualTo("FAILED");
+            assertThat(jobs.get(job.jobId()).errorCode()).isEqualTo("ExtensionUnavailableException");
+            assertThat(jdbc.queryForObject("SELECT release_id FROM extension_plugin_instances WHERE instance_id=?",
+                    Long.class, fixture.instanceId())).isEqualTo(fixture.previousReleaseId());
+            assertThat(jdbc.queryForObject("SELECT lifecycle_state FROM extension_plugin_instances WHERE instance_id=?",
+                    String.class, fixture.instanceId())).isEqualTo("FAILED");
+            org.mockito.Mockito.verify(runtime).updateInstance(fixture.runtimeIdentity(), fixture.previous(), fixture.target(), Map.of());
+            org.mockito.Mockito.verify(runtime, org.mockito.Mockito.times(2)).disableInstance(fixture.runtimeIdentity(), pluginId);
+            org.mockito.Mockito.verify(runtime, org.mockito.Mockito.never()).enableInstance(
+                    org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyMap());
         } finally {
             worker.stopLeaseRenewals();
         }
