@@ -397,6 +397,9 @@ class CatalogApiIntegrationTests {
             assertThat(((Number)line.get("shippedQuantity")).intValue()).isEqualTo(1);
             assertThat(((Number)line.get("returnableQuantity")).intValue()).isEqualTo(1);
         });
+        var otherCustomerToken=registerCustomerToken("foreign-return-items");
+        var hiddenFromOtherCustomer=exchangeWithToken(otherCustomerToken,"/api/v1/orders/{orderId}/items",HttpMethod.GET,null,Map.class,orderId);
+        assertThat(hiddenFromOtherCustomer.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(inventory.stockByWarehouse(warehouse.id())).singleElement().satisfies(stock->{assertThat(stock.onHand()).isEqualByComparingTo("1");assertThat(stock.reserved()).isEqualByComparingTo("1");});
 
         var duplicate=adminExchange("/api/v1/admin/orders/"+orderId+"/shipments",HttpMethod.POST,
