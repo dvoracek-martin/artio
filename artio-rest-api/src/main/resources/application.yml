@@ -108,6 +108,7 @@ artio:
   rate-limit:
     enabled: ${ARTIO_RATE_LIMIT_ENABLED:true}
     requests-per-minute: ${ARTIO_RATE_LIMIT_PER_MINUTE:100}
+    redis-required: ${ARTIO_RATE_LIMIT_REDIS_REQUIRED:false}
   payments:
     provider: ${ARTIO_PAYMENT_PROVIDER:none}
     extension-plugin-id: ${ARTIO_PAYMENTS_EXTENSION_PLUGIN_ID:}

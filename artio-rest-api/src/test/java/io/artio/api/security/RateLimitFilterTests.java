@@ -51,10 +51,50 @@ class RateLimitFilterTests {
     }
 
     @Test
+    void separateApiLimitersShareTheRedisIpBudget() throws Exception {
+        var redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        var counters = new java.util.concurrent.ConcurrentHashMap<String, AtomicLong>();
+        when(values.increment(anyString())).thenAnswer(call -> counters.computeIfAbsent(call.getArgument(0), ignored -> new AtomicLong()).incrementAndGet());
+        var firstApi = new RateLimitFilter(redis, 2, true, mapper, time::get, true, true);
+        var secondApi = new RateLimitFilter(redis, 2, true, mapper, time::get, true, true);
+
+        assertThat(request(firstApi, "192.0.2.1", null).getStatus()).isEqualTo(200);
+        assertThat(request(secondApi, "192.0.2.1", null).getStatus()).isEqualTo(200);
+        assertThat(request(firstApi, "192.0.2.1", null).getStatus()).isEqualTo(429);
+    }
+
+    @Test
     void explicitDisabledPolicyAvoidsRedisAndThrottling() throws Exception {
         var redis = mock(StringRedisTemplate.class);
         var filter = new RateLimitFilter(redis, 1, false, mapper, time::get);
         for (int index = 0; index < 3; index++) assertThat(request(filter, "192.0.2.1", null).getStatus()).isEqualTo(200);
+        verifyNoInteractions(redis);
+    }
+
+    @Test
+    void requiredSharedLimiterFailsClosedWhenRedisIsUnavailable() throws Exception {
+        var redis = mock(StringRedisTemplate.class);
+        when(redis.opsForValue()).thenThrow(new IllegalStateException("Fixture Redis unavailable"));
+        var filter = new RateLimitFilter(redis, 2, true, mapper, time::get, true, true);
+
+        var unavailable = request(filter, "192.0.2.1", null);
+        assertThat(unavailable.getStatus()).isEqualTo(503);
+        assertThat(unavailable.getHeader("Retry-After")).isEqualTo("30");
+        var error = mapper.readTree(unavailable.getContentAsByteArray());
+        assertThat(error.path("code").asText()).isEqualTo("SERVICE_UNAVAILABLE");
+        assertThat(error.path("path").asText()).isEqualTo("/api/v1/products");
+        assertThat(request(filter, "192.0.2.1", null).getStatus()).isEqualTo(503);
+    }
+
+    @Test
+    void sharedLimiterCannotBeRequiredWhenRedisStorageIsDisabled() {
+        var redis = mock(StringRedisTemplate.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new RateLimitFilter(redis, 2, true, mapper, time::get, false, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires Redis-backed");
         verifyNoInteractions(redis);
     }
 
