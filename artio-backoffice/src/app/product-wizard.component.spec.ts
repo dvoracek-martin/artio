@@ -93,6 +93,29 @@ describe('ProductWizardComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Reload catalog options');
   });
 
+  it('shows an actionable error instead of silently keeping a broken image preview', () => {
+    const fixture = TestBed.createComponent(ProductWizardComponent);
+    const component = fixture.componentInstance;
+    component.step = 2;
+    component.uploadAvailable = true;
+    component.images = [{
+      file: new File(['not an image'], 'broken.png', { type: 'image/png' }),
+      url: 'blob:broken-image', alt: 'Broken image', uploaded: false
+    }];
+    fixture.detectChanges();
+
+    fixture.nativeElement.querySelector('.image-preview img').dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    component.next();
+    fixture.detectChanges();
+
+    expect(component.step).toBe(2);
+    expect(fixture.nativeElement.querySelector('.image-preview img')).toBeNull();
+    expect(fixture.nativeElement.querySelector('[role="alert"]').textContent)
+      .toContain('This file could not be previewed as an image.');
+    expect(fixture.nativeElement.textContent).toContain('Choose a valid JPEG or PNG.');
+  });
+
   it('creates a draft with the selected category and normalized fields', async () => {
     const fixture = TestBed.createComponent(ProductWizardComponent);
     loadOptions(fixture);

@@ -15,6 +15,7 @@ $provisionerImage = "artio-minio-provisioner:$RunId"
 $rotationCleanupImage = "artio-minio-provisioner-cleanup:$RunId"
 $network = "artio-minio-test-net-$RunId"
 $dataVolume = "artio-minio-test-data-$RunId"
+$adapterDataVolume = "artio-minio-test-adapter-data-$RunId"
 $secretVolume = "artio-minio-test-secrets-$RunId"
 $serverSecretVolume = "artio-minio-test-server-secrets-$RunId"
 $runtimeSecretVolume = "artio-minio-test-runtime-secrets-$RunId"
@@ -26,6 +27,7 @@ $temporaryRoot = [IO.Path]::GetFullPath($env:TEMP)
 $secretDirectory = [IO.Path]::GetFullPath((Join-Path $temporaryRoot "artio-minio-secrets-$RunId"))
 $createdNetwork = $false
 $createdDataVolume = $false
+$createdAdapterDataVolume = $false
 $createdSecretVolume = $false
 $createdServerSecretVolume = $false
 $createdRuntimeSecretVolume = $false
@@ -74,6 +76,15 @@ try {
   $createdNetwork = $true
   Invoke-DockerChecked @('volume', 'create', '--label', "io.artio.test.run=$RunId", $dataVolume)
   $createdDataVolume = $true
+  Invoke-DockerChecked @('volume', 'create', '--label', "io.artio.test.run=$RunId", $adapterDataVolume)
+  $createdAdapterDataVolume = $true
+  Invoke-DockerChecked @(
+    'run', '--rm', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--user', '10001:10001',
+    '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m',
+    '--mount', "type=volume,source=$adapterDataVolume,target=/data/minio",
+    '--entrypoint', 'python', $adapterImage, '-c', "import server; root=server.root_path(); assert str(root) == '/data/minio'; assert all((root/name).is_dir() for name in ('staging','records','operations','tombstones'))"
+  )
+  Add-Content -LiteralPath $logPath -Value 'Fresh named adapter volume is initialized writable by the unprivileged plugin UID.'
   Invoke-DockerChecked @(
     'volume', 'create', '--driver', 'local', '--opt', 'type=tmpfs', '--opt', 'device=tmpfs',
     '--opt', 'o=size=1m,uid=10001,gid=10001,mode=0700', '--label', "io.artio.test.run=$RunId", $secretVolume
@@ -169,7 +180,7 @@ else:
   Invoke-DockerChecked @(
     'run', '--detach', '--name', $serverContainer, '--label', "io.artio.test.run=$RunId",
     '--network', $network, '--network-alias', 'minio',
-    '--mount', "type=volume,source=$dataVolume,target=/data",
+    '--mount', "type=volume,source=$dataVolume,target=/data/minio",
     '--mount', "type=volume,source=$serverSecretVolume,target=/run/secrets,readonly",
     '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700',
     '--read-only', '--memory', '1g', '--cpus', '1.0', '--pids-limit', '128',
@@ -333,6 +344,7 @@ finally {
   if ($createdServerSecretVolume) { & docker.exe volume rm $serverSecretVolume 2>&1 | Add-Content -LiteralPath $logPath }
   if ($createdSecretVolume) { & docker.exe volume rm $secretVolume 2>&1 | Add-Content -LiteralPath $logPath }
   if ($createdDataVolume) { & docker.exe volume rm $dataVolume 2>&1 | Add-Content -LiteralPath $logPath }
+  if ($createdAdapterDataVolume) { & docker.exe volume rm $adapterDataVolume 2>&1 | Add-Content -LiteralPath $logPath }
   if ($createdNetwork) { & docker.exe network rm $network 2>&1 | Add-Content -LiteralPath $logPath }
   & docker.exe image rm $adapterImage $serverImage $provisionerImage $rotationCleanupImage 2>&1 | Add-Content -LiteralPath $logPath
   if (Test-Path -LiteralPath $secretDirectory) {

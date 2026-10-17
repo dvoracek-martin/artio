@@ -13,6 +13,7 @@ echo Starting a clean Artio developer instance and Backoffice...
 set "ARTIO_API_SPRING_PROFILES_ACTIVE=dev"
 set "ARTIO_SETUP_SKIP=false"
 set "ARTIO_SETUP_TOKEN=ArtioLocalDevSetupTokenOnly2026!"
+set "ARTIO_CATALOG_MEDIA_STORAGE=plugins"
 set "MARKETPLACE_ROOT=%~dp0..\Artio-Marketplace"
 if not exist "%MARKETPLACE_ROOT%\scripts\start-local-marketplace.ps1" (
     echo The sibling Artio-Marketplace worktree is required for the development extension catalog.
