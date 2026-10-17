@@ -1,9 +1,9 @@
 <div class="storefront-shell">
-  <div class="announcement"><span>ARTIO</span><span>Thoughtful commerce, made personal</span><a href="/shop">{{ t('explore') }} <span aria-hidden="true">↗</span></a></div>
+  <div class="announcement"><span>ARTIO</span><span>{{ t('announcement') }}</span><a href="/shop">{{ t('explore') }} <span aria-hidden="true">↗</span></a></div>
 
   <header class="site-header">
-    <a class="wordmark" href="/" aria-label="Artio home">artio<span>®</span></a>
-    <nav class="desktop-nav" aria-label="Main navigation">
+    <a class="wordmark" href="/" [attr.aria-label]="t('homeWordmark')">artio<span>®</span></a>
+    <nav class="desktop-nav" [attr.aria-label]="t('mainNavigation')">
       <a [class.active]="page === 'shop' || page === 'home'" href="/shop">{{ t('shop') }}</a>
       <a [class.active]="page === 'bundles'" href="/bundles">{{ t('bundles') }}</a>
       <a href="/shop#collection">{{ t('collection') }}</a>
@@ -19,25 +19,25 @@
   <main>
     @if (page === 'home') {
       <section class="hero">
-        <div class="hero-copy"><p class="eyebrow">THE ARTIO EDIT</p><h1>Make room<br>for <em>meaningful.</em></h1><p>Everyday pieces, chosen with care. Find the things that feel like they belong.</p><a class="button button-dark" href="/shop">{{ t('explore') }} <span aria-hidden="true">↗</span></a><div class="hero-index"><span>01</span><span class="index-line"></span><span>THE COLLECTION</span></div></div>
+        <div class="hero-copy"><p class="eyebrow">{{ t('homeEyebrow') }}</p><h1>{{ t('homeHeadingStart') }}<br><em>{{ t('homeHeadingEmphasis') }}</em></h1><p>{{ t('homeDescription') }}</p><a class="button button-dark" href="/shop">{{ t('explore') }} <span aria-hidden="true">↗</span></a><div class="hero-index"><span>01</span><span class="index-line"></span><span>{{ t('homeCollectionIndex') }}</span></div></div>
         <div class="hero-visual" aria-label="Artio collection">
           @if (products[0]?.media?.[0]; as image) { <img class="hero-photo" [src]="image.contentUrl" [alt]="image.altText || products[0].name"> }
-          @if (!products[0]?.media?.[0]) { <div class="still-life" aria-hidden="true"><div class="still-disc"></div><span class="still-mark">A</span><span class="still-caption">ARTIO · THOUGHTFUL COMMERCE</span></div> }
-          @if (products[0]; as featured) { <a class="feature-note" [href]="productHref(featured)"><span>IN THE EDIT</span><strong>{{ featured.name }}</strong><span aria-hidden="true">↗</span></a> }
-          @if (!products.length) { <div class="feature-note feature-note-static"><span>ARTIO</span><strong>A store shaped by your edit.</strong></div> }
+          @if (!products[0]?.media?.[0]) { <div class="still-life" aria-hidden="true"><div class="still-disc"></div><span class="still-mark">A</span><span class="still-caption">{{ t('homeStillCaption') }}</span></div> }
+          @if (products[0]; as featured) { <a class="feature-note" [href]="productHref(featured)"><span>{{ t('homeFeatureLabel') }}</span><strong>{{ featured.name }}</strong><span aria-hidden="true">↗</span></a> }
+          @if (!products.length) { <div class="feature-note feature-note-static"><span>ARTIO</span><strong>{{ t('homeEmptyFeature') }}</strong></div> }
           <span class="visual-number">A—01</span>
         </div>
       </section>
-      <section class="promise-row"><span>CONSIDERED IN EVERY DETAIL</span><span class="promise-mark">✳</span><span>MADE FOR REAL LIFE</span><span class="promise-mark">✳</span><span>YOUR NEXT EVERYDAY FAVOURITE</span></section>
+      <section class="promise-row"><span>{{ t('homePromiseDetail') }}</span><span class="promise-mark">✳</span><span>{{ t('homePromiseMade') }}</span><span class="promise-mark">✳</span><span>{{ t('homePromiseFavorite') }}</span></section>
     }
 
     @if (page === 'shop' || page === 'home') {
       <section class="collection-section" id="collection">
-        <div class="collection-heading"><div><p class="eyebrow">{{ page === 'home' ? 'A FEW GOOD THINGS' : 'THE ARTIO EDIT' }}</p><h2>{{ page === 'home' ? 'Find your everyday.' : t('shopHeading') }}</h2><p class="collection-intro">{{ page === 'home' ? 'A considered collection, selected by you.' : t('collection') }}</p></div>
+        <div class="collection-heading"><div><p class="eyebrow">{{ page === 'home' ? t('homeCatalogEyebrow') : t('homeEyebrow') }}</p><h2>{{ page === 'home' ? t('homeCatalogHeading') : t('shopHeading') }}</h2><p class="collection-intro">{{ page === 'home' ? t('homeCatalogIntro') : t('collection') }}</p></div>
           <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"/><path d="m16 16 4.2 4.2"/></svg><input [(ngModel)]="query" (ngModelChange)="setQuery($event)" placeholder="{{ t('search') }}" [attr.aria-label]="t('search')"></label></div>
         @if (error) { <p class="notice" role="status">{{ error }}</p> }
         <div class="catalog-controls">
-          <div class="category-pills" role="group" aria-label="Categories">
+          <div class="category-pills" role="group" [attr.aria-label]="t('categoryGroup')">
             <button [class.selected]="categoryFilter==='all'" [attr.aria-pressed]="categoryFilter==='all'" (click)="setCategory('all')">{{ t('allCategories') }} <span>{{ catalogProducts.length }}</span></button>
             @for (category of categories; track category.id) { <button [class.selected]="categoryFilter===category.id" [attr.aria-pressed]="categoryFilter===category.id" (click)="setCategory(category.id)">{{ category.name }} <span>{{ categoryCount(category.id) }}</span></button> }
           </div>
@@ -56,7 +56,7 @@
                 @if (product.media?.[0]; as image) { <img [src]="image.contentUrl" [alt]="image.altText || product.name" loading="lazy"> }
                 @if (!product.media?.length) { <div class="image-placeholder"><span>{{ initials(product.name) }}</span><i aria-hidden="true"></i></div> }
 
-                <span class="quick-view">VIEW PIECE <b aria-hidden="true">↗</b></span>
+                <span class="quick-view">{{ t('homeQuickView') }} <b aria-hidden="true">↗</b></span>
               </a>
               <div class="product-info"><div><a class="product-name" [href]="productHref(product)">{{ product.name }}</a><p class="product-description">{{ product.description }}</p></div>
                 @if (product.price; as price) { <span class="product-price">{{ price.total.amount }} {{ moneyCurrency(price.total.currency) }}</span> }
@@ -67,9 +67,9 @@
           }
           @if (!visibleProducts.length && !error) { <div class="empty-collection"><span class="empty-spark">✳</span><h3>{{ catalogProducts.length ? t('noProductsMatch') : t('collectionEmpty') }}</h3><p>{{ catalogProducts.length ? t('adjustFilters') : t('catalogEmptyHint') }}</p>@if (catalogProducts.length) { <button class="text-link" (click)="query='';setCategory('all');setBrand('all')">{{ t('clearFilters') }}</button> }</div> }
         </div>
-        @if (pageCount > 1) { <nav class="pagination" aria-label="Catalog pages"><button class="page-arrow" [disabled]="catalogPage===1" (click)="setPage(catalogPage-1)">← <span>{{ t('previous') }}</span></button><div class="page-numbers">@for (pageNumber of pageNumbers; track pageNumber) { <button [class.current]="pageNumber===catalogPage" [attr.aria-current]="pageNumber===catalogPage?'page':null" (click)="setPage(pageNumber)">{{ pageNumber }}</button> }</div><button class="page-arrow" [disabled]="catalogPage===pageCount" (click)="setPage(catalogPage+1)"><span>{{ t('next') }}</span> →</button></nav> }
+        @if (pageCount > 1) { <nav class="pagination" [attr.aria-label]="t('catalogPages')"><button class="page-arrow" [disabled]="catalogPage===1" (click)="setPage(catalogPage-1)">← <span>{{ t('previous') }}</span></button><div class="page-numbers">@for (pageNumber of pageNumbers; track pageNumber) { <button [class.current]="pageNumber===catalogPage" [attr.aria-current]="pageNumber===catalogPage?'page':null" (click)="setPage(pageNumber)">{{ pageNumber }}</button> }</div><button class="page-arrow" [disabled]="catalogPage===pageCount" (click)="setPage(catalogPage+1)"><span>{{ t('next') }}</span> →</button></nav> }
       </section>
-      <section class="closing-note"><span class="eyebrow">A NOTE FROM ARTIO</span><p>Good design makes the ordinary<br><em>feel a little extraordinary.</em></p><a href="/bundles">{{ t('bundles') }} <span aria-hidden="true">↗</span></a></section>
+      <section class="closing-note"><span class="eyebrow">{{ t('homeClosingEyebrow') }}</span><p>{{ t('homeClosingLine1') }}<br><em>{{ t('homeClosingLine2') }}</em></p><a href="/bundles">{{ t('bundles') }} <span aria-hidden="true">↗</span></a></section>
     }
 
     @if (page === 'products') {
@@ -91,7 +91,7 @@
     }
 
     @if (page === 'bundles') {
-      <section class="subpage"><div class="subpage-heading"><p class="eyebrow">THE ARTIO EDIT · {{ t('madePersonal') }}</p><h1>{{ focusedBundle?.name ?? t('bundles') }}</h1>@if (!focusedBundle) { <p>{{ t('bundleIntro') }}</p> }</div>
+      <section class="subpage"><div class="subpage-heading"><p class="eyebrow">{{ t('homeEyebrow') }} · {{ t('madePersonal') }}</p><h1>{{ focusedBundle?.name ?? t('bundles') }}</h1>@if (!focusedBundle) { <p>{{ t('bundleIntro') }}</p> }</div>
         @if (focusedBundle) { <div class="bundle-builder">@for (group of focusedBundle.optionGroups; track group.code) { <div class="bundle-choice-group"><h3>{{ group.name }}</h3><p>{{ t('chooseRange') }} {{ group.minimumSelections }}–{{ group.maximumSelections }} {{ t('options') }}</p>@for (choice of group.choices; track choice.sellableId) { <label><input type="checkbox" [checked]="isSelected(group.code, choice.sellableId)" (change)="toggleChoice(group.code, choice.sellableId)"><span class="bundle-choice-copy">@if (sellableImage(choice.sellableId)) { <img [src]="sellableImage(choice.sellableId)" [alt]=""> }<span>{{ sellableName(choice.sellableId) }}</span><small>{{ choice.quantity }}×</small></span></label> }</div> }<button class="button button-dark" (click)="quoteBundle()">{{ t('getPrice') }} ↗</button>@if (bundleQuote) { <p class="detail-price">{{ bundleQuote.totalPrice.amount }} {{ bundleQuote.totalPrice.currency }}</p><button class="button button-outline" (click)="addBundleToCart()">{{ t('addConfigured') }} ＋</button> }@if (error) { <p class="notice">{{ error }}</p> }</div> }
         @if (!focusedBundle) { <div class="bundle-grid">@for (bundle of bundles; track bundle.id) { <article class="bundle-card"><span class="bundle-symbol">✳</span><p class="eyebrow">{{ bundle.type }}</p><h2>{{ bundle.name }}</h2><p>{{ t('bundleCardCopy') }}</p>@if (bundle.components?.length) { <div class="bundle-includes">@for (component of bundle.components; track component.sellableId) { <span>{{ sellableName(component.sellableId) }}</span> }</div> }<button class="text-link" (click)="configure(bundle)">{{ t('chooseOptions') }} ↗</button></article> }@if (!bundles.length) { <div class="empty-collection"><h2>{{ t('bundlesEmpty') }}</h2></div> }</div> }
       </section>
@@ -124,5 +124,5 @@
   </main>
 
   <artio-cookie-consent></artio-cookie-consent>
-  <footer class="site-footer"><a class="wordmark" href="/">artio<span>®</span></a><div><span>Thoughtfully yours.</span><span>© 2026 Artio Commerce</span></div><a href="/shop">{{ t('shop') }} ↗</a></footer>
+  <footer class="site-footer"><a class="wordmark" href="/">artio<span>®</span></a><div><span>{{ t('footerTagline') }}</span><span>© 2026 Artio Commerce</span></div><a href="/shop">{{ t('shop') }} ↗</a></footer>
 </div>

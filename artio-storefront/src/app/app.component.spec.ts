@@ -202,6 +202,20 @@ describe('Storefront payment return', () => {
     expect(schema).toMatchObject({ '@type': 'Product', name: 'Keramiktasse', sku: 'SKU-1', offers: { '@type': 'Offer', price: 25.5, priceCurrency: 'CHF' } });
   });
 
+  it.each([
+    ['en', 'Make room for', 'THE ARTIO EDIT', 'Main navigation', 'Categories'],
+    ['de', 'Mehr Raum für', 'DIE ARTIO AUSWAHL', 'Hauptnavigation', 'Kategorien'],
+    ['fr', 'Faites place à', 'LA SÉLECTION ARTIO', 'Navigation principale', 'Catégories'],
+    ['it', 'Fai spazio a', 'LA SELEZIONE ARTIO', 'Navigazione principale', 'Categorie']
+  ] as const)('renders the storefront home copy and navigation accessibly in %s', (locale, heading, eyebrow, navigationLabel, categoriesLabel) => {
+    const { fixture } = createComponent(undefined, false, `/?locale=${locale}`);
+
+    expect(fixture.nativeElement.querySelector('h1')?.textContent).toContain(heading);
+    expect(fixture.nativeElement.querySelector('.hero .eyebrow')?.textContent).toContain(eyebrow);
+    expect(fixture.nativeElement.querySelector('nav.desktop-nav')?.getAttribute('aria-label')).toBe(navigationLabel);
+    expect(fixture.nativeElement.querySelector('.category-pills')?.getAttribute('aria-label')).toBe(categoriesLabel);
+  });
+
   it('gives checkout address and payment controls visible accessible labels', () => {
     const { fixture } = createComponent(undefined, true, '/checkout');
     const labels = Array.from(fixture.nativeElement.querySelectorAll('label')) as HTMLLabelElement[];
