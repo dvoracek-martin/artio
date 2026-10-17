@@ -44,4 +44,15 @@ describe('ExtensionRegistryCredentialsComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('registry.example:5000');
     expect(fixture.nativeElement.textContent).not.toContain('secret-registry-password');
   });
+
+  it('clears the loading state after an asynchronous response without manual change detection', async () => {
+    const fixture = TestBed.createComponent(ExtensionRegistryCredentialsComponent);
+    fixture.autoDetectChanges();
+    http.expectOne('/api/v1/admin/extensions/registries').flush([]);
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.loading).toBe(false);
+    expect(fixture.nativeElement.textContent).toContain('No private registry credentials are configured.');
+    expect(fixture.nativeElement.textContent).not.toContain('Loading registry credentials…');
+  });
 });

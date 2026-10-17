@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { currentBackofficeLocale, type BackofficeLocale } from './backoffice-locale';
 
@@ -54,7 +54,7 @@ export class ExtensionRegistryCredentialsComponent implements OnInit {
   error = '';
   removalHost='';
 
-  constructor(private readonly http: HttpClient) {}
+  constructor(private readonly http: HttpClient, private readonly changeDetector: ChangeDetectorRef) {}
 
   ngOnInit(): void { this.load(); }
 
@@ -105,11 +105,12 @@ export class ExtensionRegistryCredentialsComponent implements OnInit {
   private load(): void {
     this.loading = true;
     this.http.get<RegistryCredential[]>('/api/v1/admin/extensions/registries').subscribe({
-      next: registries => { this.registries = registries; this.loading = false; },
+      next: registries => { this.registries = registries; this.loading = false; this.changeDetector.markForCheck(); },
       error: response => {
         this.registries = [];
         this.loading = false;
         this.error = this.responseMessage(response);
+        this.changeDetector.markForCheck();
       },
     });
   }

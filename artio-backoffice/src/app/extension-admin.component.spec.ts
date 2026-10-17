@@ -98,6 +98,31 @@ describe('ExtensionAdminComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('All legacy media has been copied and verified. Source data is retained.');
   });
 
+  it('renders media storage status after its API response without manual change detection', async () => {
+    setBackofficeLocale('en');
+    const fixture = TestBed.createComponent(ExtensionAdminComponent);
+    fixture.autoDetectChanges();
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne('/api/v1/admin/extensions/security/advisories').flush({ releases: [] });
+    http.expectOne('/api/v1/admin/catalog/media/storage-status').flush({
+      uploadAvailable: true,
+      storageMode: 'plugins',
+      migrationSource: 's3',
+      mediaCount: 0,
+      activePluginObjects: 0,
+      pendingMigration: 0,
+      deletePending: 0,
+      tombstoned: 0,
+      migrationAvailable: true,
+      canManageStorage: true,
+    });
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.storageStatusLoading).toBe(false);
+    expect(fixture.nativeElement.textContent).toContain('Storage placement and migration');
+    expect(fixture.nativeElement.textContent).not.toContain('Loading media storage status…');
+  });
+
   it('repairs storage placements in resumable batches using one repair run identity', async () => {
     setBackofficeLocale('en');
     const fixture = TestBed.createComponent(ExtensionAdminComponent);

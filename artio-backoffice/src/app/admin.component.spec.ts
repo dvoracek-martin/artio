@@ -30,6 +30,8 @@ describe('AdminComponent setup detection', () => {
     http.verify();
     localStorage.removeItem('artio-admin-token');
     localStorage.removeItem('artio-admin-email');
+    sessionStorage.removeItem('artio-admin-token');
+    sessionStorage.removeItem('artio-admin-email');
   });
 
   it('shows setup when a clean installation is reported without a saved session', () => {
@@ -133,6 +135,23 @@ describe('AdminComponent setup detection', () => {
     fixture.detectChanges();
     expect(component.users).toHaveLength(1);
     expect(fixture.nativeElement.textContent).toContain('admin@example.test');
+  });
+
+  it('loads the active extension route after sign-in when setup kept the same URL',()=>{
+    router.url='/extensions';
+    const fixture=TestBed.createComponent(AdminComponent);
+    fixture.detectChanges();
+    http.expectOne('/api/v1/setup/status').flush({required:false,developerMode:false});
+    const component=fixture.componentInstance;
+    for(const method of ['loadFeatureAvailability','loadCatalogFilters','loadDashboard','loadProducts','loadBundles','loadOrders','loadPrices'])vi.spyOn(component as any,method).mockImplementation(()=>{});
+    const loadExtensions=vi.spyOn(component as any,'loadExtensions').mockImplementation(()=>{});
+    const searchMarketplace=vi.spyOn(component as any,'searchMarketplace').mockImplementation(()=>{});
+    component.email='admin@example.test';
+    component.password='local-only-password';
+    component.login();
+    http.expectOne('/api/v1/auth/login').flush({role:'SUPERADMIN',accessToken:'signed-token',mfaEnrollmentRequired:false});
+    expect(loadExtensions).toHaveBeenCalledOnce();
+    expect(searchMarketplace).toHaveBeenCalledWith(0,'','');
   });
 
   it('asks Core to verify and queue a Marketplace v1 release without relaying its manifest', () => {
