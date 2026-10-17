@@ -630,8 +630,11 @@ class CatalogApiIntegrationTests {
                 .connectionTimeout(Duration.ofSeconds(5)).responseTimeout(Duration.ofSeconds(120)).build();
         com.github.dockerjava.api.DockerClient docker = null;
         io.artio.api.extensions.DockerExtensionRuntime liveRuntime = null;
+        String runtimeNetwork = "artio-marketplace-it-" + UUID.randomUUID().toString().substring(0, 8);
         try {
             docker = com.github.dockerjava.core.DockerClientImpl.getInstance(dockerConfig, dockerTransport);
+            docker.createNetworkCmd().withName(runtimeNetwork).withDriver("bridge")
+                    .withLabels(Map.of("io.artio.test.run", "marketplace-acceptance")).exec();
             var preexistingPluginContainers = docker.listContainersCmd().withShowAll(true).exec().stream()
                     .filter(container -> container.getLabels() != null
                             && marketplacePluginId.equals(container.getLabels().get("io.artio.extension")))
@@ -646,9 +649,13 @@ class CatalogApiIntegrationTests {
                     .isEmpty();
             assertThat(preexistingPluginVolumes).as("Marketplace acceptance plugin volumes are test-owned")
                     .isEmpty();
-            liveRuntime = new io.artio.api.extensions.DockerExtensionRuntime(docker, "artio-extensions", 8080,
+            var runtimeConstructor = io.artio.api.extensions.DockerExtensionRuntime.class.getDeclaredConstructor(
+                    com.github.dockerjava.api.DockerClient.class, String.class, int.class,
+                    io.artio.api.security.ExtensionCredentialService.class, boolean.class, String.class);
+            runtimeConstructor.setAccessible(true);
+            liveRuntime = runtimeConstructor.newInstance(docker, runtimeNetwork, 8080,
                     new io.artio.api.security.ExtensionCredentialService(ACTIVE_TEST_ENCRYPTION_KEY),
-                    "http://extension-egress:3128");
+                    true, "http://extension-egress:3128");
             @SuppressWarnings("unchecked") org.springframework.beans.factory.ObjectProvider<io.artio.extensions.ExtensionRuntimePort>
                     runtimeProvider = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
             org.mockito.Mockito.when(runtimeProvider.getIfAvailable()).thenReturn(liveRuntime);
@@ -737,6 +744,8 @@ class CatalogApiIntegrationTests {
                             try { docker.removeImageCmd(image).exec(); }
                             catch (com.github.dockerjava.api.exception.NotFoundException alreadyMissing) { }
                         }
+                        try { docker.removeNetworkCmd(runtimeNetwork).exec(); }
+                        catch (com.github.dockerjava.api.exception.NotFoundException alreadyMissing) { }
                     } finally {
                         docker.close();
                     }
