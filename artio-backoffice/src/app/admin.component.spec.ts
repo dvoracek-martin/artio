@@ -123,4 +123,31 @@ describe('AdminComponent setup detection', () => {
     http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
     expect(fixture.componentInstance.extensionHealth).toContain('Installation failed · IMAGE_PULL_DENIED');
   });
+
+  it('registers a Marketplace v2 release through Core before installing it from the official source', () => {
+    const fixture = TestBed.createComponent(AdminComponent);
+    fixture.detectChanges();
+    http.expectOne('/api/v1/setup/status').flush({ required: false, developerMode: false });
+    fixture.detectChanges();
+
+    const release = { pluginId: 'capability.plugin', version: '2.1.0' };
+    fixture.componentInstance.registerMarketplaceRelease(release);
+    const registration = http.expectOne('/api/v1/admin/extensions/marketplace/plugins/capability.plugin/releases/2.1.0/register');
+    expect(registration.request.method).toBe('POST');
+    expect(registration.request.body).toEqual({});
+    registration.flush({ alreadyRegistered: false });
+    expect(fixture.componentInstance.extensionHealth).toContain('Registered Marketplace release capability.plugin v2.1.0');
+
+    fixture.componentInstance.installMarketplaceRelease(release);
+    const installation = http.expectOne('/api/v1/admin/extensions/marketplace/plugins/capability.plugin/releases/2.1.0/installations');
+    expect(installation.request.method).toBe('POST');
+    expect(installation.request.body.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    installation.flush({ job: { jobId: 'job-v2', state: 'REQUESTED' } });
+    http.expectOne('/api/v1/admin/extensions').flush([]);
+    http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
+    http.expectOne('/api/v1/admin/extensions/installations/job-v2').flush({ jobId: 'job-v2', state: 'INSTALLED' });
+    http.expectOne('/api/v1/admin/extensions').flush([]);
+    http.expectOne('/api/v1/admin/extensions/catalog').flush([]);
+    expect(fixture.componentInstance.extensionHealth).toContain('capability.plugin@2.1.0 · Plugin installed · job-v2');
+  });
 });
